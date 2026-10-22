@@ -1,0 +1,33 @@
+schema_version: 1
+lifecycle: active
+campaign_id: fixture-crawl
+campaign_name: Fixture Crawl (fictional test data)
+current_floor: 3
+current_area: Test District
+current_location: Test Saferoom
+safe_room_status: true
+active_objective: Pass the test suite.
+active_squad: test-squad
+open_objectives:
+- id: find-stairs
+  summary: Find the fixture stairwell.
+  status: open
+- id: build-widget
+  summary: Build the test widget after dark.
+  status: open
+floor_clock:
+  remaining_minutes: 1000
+  previous_remaining_minutes: 1200
+  last_change_reason: fixture
+  can_increase_only_with_explicit_reason: true
+dungeon_time_inventory:
+  elapsed_floor_minutes: 200
+current_state:
+  advancement_cycles: 9/12
+world_state_notes:
+- The fixture saferoom has a vending machine.
+campaign_rulings:
+  mending:
+  - Every full hour outside combat restores 1 Health Bar slot.
+  rng_fallback:
+  - Use the OS CSPRNG.

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "crawler-console",
+      "runtimeExecutable": "E:/dccrpg/.venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--app-dir", "E:/dccrpg/backend", "--host", "127.0.0.1", "--port", "8777"],
+      "port": 8777
+    }
+  ]
+}

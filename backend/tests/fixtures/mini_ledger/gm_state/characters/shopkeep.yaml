@@ -1,0 +1,5 @@
+schema_version: 1
+character_id: shopkeep
+confidentiality: GM-only
+active_beats:
+- FIXTURE-GM-SECRET-7731 Moss secretly owes the Syndicate a debt.

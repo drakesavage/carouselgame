@@ -1,0 +1,305 @@
+"""GM tools: the only way the model affects the game. Each tool validates its arguments and runs real code
+(dice, rules engine, retrieval). Results go back to the model; player-visible effects are collected for the UI."""
+from __future__ import annotations
+
+import json
+import sqlite3
+from dataclasses import dataclass, field
+from typing import Any
+
+from pydantic import BaseModel, Field, ValidationError
+
+from ..db import now_iso, one, rows
+from ..memory.views import fts_query
+from ..reference import rulebooks
+from ..rules.checks import ADVANCEMENT_CLOCK, CheckRequest, perform_check, resolve_advancement_checkpoint
+from ..rules.dice import DiceError, DiceRoller, record_roll
+from ..rules.engine import ChangeError, apply_change, ops_reference, resolve_character
+
+# Tools whose results the model does not need before narrating (see OUTPUT_PROTOCOL).
+BOOKKEEPING_TOOLS = {"apply_changes", "count_cycle", "record_ruling", "gm_note", "system_notice", "reveal_secret"}
+
+TOOL_SPECS: list[dict] = [
+    {"name": "skill_check",
+     "description": "Roll a Core Check: 1d20 + Skill Rank + Stat Mod + modifiers vs Difficulty. Omit `skill` for a Stat Check. "
+                    "Omit `dc` to use the default for dc_kind (stat: 10+Floor; unopposed: 10+2×Floor; opposed: 10+antagonist_mod+Floor). "
+                    "Untrained skills automatically roll with Disadvantage and no Rank. Trained non-Passive skills get their "
+                    "advancement mark automatically. help: one entry per helper, dice '1d6' if they have Ranks in the Skill else '1d2' (they spend an Action). The result `summary` is the roll line to show.",
+     "parameters": {"character": "str", "skill": "str?", "stat": "str", "dc": "int?", "dc_kind": "stat|unopposed|opposed?",
+                    "antagonist_mod": "int?", "advantage": "int? (count)", "disadvantage": "int? (count)",
+                    "modifiers": "[{source, value}]?", "help": "[{helper, dice}]?", "passive": "bool?", "reason": "str", "hidden": "bool? (secret GM check)"}},
+    {"name": "roll_dice",
+     "description": "Roll any other dice (damage, random tables, NPC outcomes, loot). Expression like '2d8+3', '4d6kh3', '2d20kl1'. "
+                    "Set target to compare total >= target. hidden=true for secret GM rolls.",
+     "parameters": {"expression": "str", "reason": "str", "target": "int?", "character": "str?", "hidden": "bool?"}},
+    {"name": "apply_changes",
+     "description": "Validate and apply durable state changes. Each change is an object with an `op`. Characters may be referenced by "
+                    "name, slug or 'player'. character null/'shared' = shared stash. Ops:\n" + ops_reference(),
+     "parameters": {"changes": "[change objects]"}},
+    {"name": "search_rules",
+     "description": "Search campaign house rules, established rulings, and the indexed official rulebooks (with page refs). Give 2-4 "
+                    "phrasings: the rule's name, synonyms, and the situation in plain words. Campaign results outrank official ones.",
+     "parameters": {"queries": "[str]", "limit": "int? (default 5)"}},
+    {"name": "read_rule_page",
+     "description": "Read the full text of an official rulebook page found by search_rules (use the document_id and page).",
+     "parameters": {"document_id": "int", "page": "int"}},
+    {"name": "lookup_records",
+     "description": "Search imported campaign records (ledger YAML/Markdown, including GM-only companion sheets), lore facts, and the "
+                    "event log. Returns section ids and snippets; use read_record for full text.",
+     "parameters": {"query": "str", "limit": "int? (default 6)"}},
+    {"name": "read_record", "description": "Read one imported record section in full.", "parameters": {"section_id": "int"}},
+    {"name": "record_ruling",
+     "description": "Record an adjudication so it stays consistent. label: BOOK | CAMPAIGN | INTERPRETATION | ONE-SCENE | OPEN.",
+     "parameters": {"topic": "str", "ruling": "str", "label": "str", "certainty": "canonical|provisional|uncertain?", "sources": "[str]?"}},
+    {"name": "gm_note", "description": "Store GM-only continuity (hidden consequence, NPC private reaction/plan, secret clock). Never shown to the player.",
+     "parameters": {"subject": "str", "content": "str", "kind": "plot|motivation|surprise|note?"}},
+    {"name": "reveal_secret",
+     "description": "Mark a GM secret revealed after the player legitimately learned it, recording only the part they learned as a player-visible fact.",
+     "parameters": {"secret_id": "int", "player_visible_fact": "str", "subject": "str"}},
+    {"name": "system_notice",
+     "description": "Emit a System AI message to the player (style: notice | achievement | warning | tooltip). For achievements also "
+                    "record them with apply_changes op 'achievement'.",
+     "parameters": {"text": "str (Markdown)", "style": "str?"}},
+    {"name": "count_cycle",
+     "description": "Count one substantive decision-and-resolution cycle toward the advancement checkpoint (12 = one Level interval).",
+     "parameters": {"decision": "str", "resolution": "str"}},
+    {"name": "resolve_advancement_checkpoint",
+     "description": "Resolve a due advancement checkpoint: +1 Level for the active HUD party, d20-vs-Rank checks for marked Rank 0-4 Skills, "
+                    "clear resolved marks, carry excess cycles. Only at a saferoom, debrief, save point or floor transition.",
+     "parameters": {"occasion": "str"}},
+]
+TOOL_NAMES = [t["name"] for t in TOOL_SPECS]
+
+
+class _Roll(BaseModel):
+    expression: str
+    reason: str
+    target: int | None = None
+    character: str | None = None
+    hidden: bool = False
+
+
+class _Search(BaseModel):
+    queries: list[str] = Field(min_length=1, max_length=6)
+    limit: int = Field(default=5, ge=1, le=10)
+
+
+class _Ruling(BaseModel):
+    topic: str
+    ruling: str
+    label: str = "INTERPRETATION"
+    certainty: str = "provisional"
+    sources: list[str] = Field(default_factory=list)
+
+
+@dataclass
+class TurnEffects:
+    """Everything the player should see from this turn, plus audit data for re-recording rolls on failure."""
+    rolls: list[dict] = field(default_factory=list)          # player-visible roll cards
+    roll_records: list[tuple] = field(default_factory=list)  # (RollResult, character_id, hidden) for failure re-record
+    changes: list[str] = field(default_factory=list)
+    notices: list[dict] = field(default_factory=list)
+    rules_cited: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+
+class ToolRunner:
+    def __init__(self, conn: sqlite3.Connection, rule_conn: sqlite3.Connection | None, roller: DiceRoller,
+                 campaign_id: int, turn_id: int):
+        self.conn, self.rule_conn, self.roller = conn, rule_conn, roller
+        self.cid, self.turn_id = campaign_id, turn_id
+        self.effects = TurnEffects()
+
+    def run(self, name: str, args: dict[str, Any]) -> dict:
+        fn = getattr(self, f"t_{name}", None)
+        if fn is None:
+            return {"ok": False, "result": {"error": f"unknown tool {name!r}"}}
+        try:
+            return {"ok": True, "result": fn(args)}
+        except (ChangeError, DiceError, ValidationError, KeyError, ValueError, TypeError) as exc:
+            msg = str(exc) if not isinstance(exc, ValidationError) else json.dumps(exc.errors(include_url=False), default=str)[:800]
+            self.effects.errors.append(f"{name}: {msg}")
+            return {"ok": False, "result": {"error": msg}}
+
+    # -- dice
+    def _card(self, res, character_id) -> None:
+        self.effects.roll_records.append((res, character_id, res.hidden))
+        if not res.hidden:
+            self.effects.rolls.append({"roll_id": res.id, "expression": res.expression, "dice": [d.__dict__ for d in res.dice],
+                                       "total": res.total, "target": res.target, "outcome": res.outcome, "degree": res.degree,
+                                       "reason": res.reason, "detail": res.detail})
+
+    def t_skill_check(self, a: dict) -> dict:
+        req = CheckRequest.model_validate(a)
+        out = perform_check(self.conn, self.conn, self.roller, self.cid, self.turn_id, req)
+        r = one(self.conn, "SELECT * FROM dice_rolls WHERE id = ?", (out["roll_id"],))
+        from ..rules.dice import Die, RollResult
+        res = RollResult(r["expression"], [Die(**d) for d in r["dice"]], r["modifier"], r["total"], r["target"], r["outcome"],
+                         r["reason"], r["id"], bool(r["hidden"]), r["degree"], r["detail"])
+        res.detail["summary"] = out["summary"]
+        self._card(res, r["character_id"])
+        if out["skill_marked"]:
+            self.effects.changes.append(f"{req.skill} marked for advancement")
+        return out
+
+    def t_roll_dice(self, a: dict) -> dict:
+        req = _Roll.model_validate(a)
+        char = resolve_character(self.conn, self.cid, req.character) if req.character else None
+        res = self.roller.roll(req.expression, target=req.target, reason=req.reason)
+        res.detail = {"kind": "roll", "character": char["name"] if char else None}
+        record_roll(self.conn, self.cid, res, turn_id=self.turn_id, character_id=char["id"] if char else None, hidden=req.hidden)
+        self._card(res, char["id"] if char else None)
+        return {"roll_id": res.id, "total": res.total, "dice": [d.value for d in res.dice if d.kept], "outcome": res.outcome, "hidden": req.hidden}
+
+    # -- state
+    def t_apply_changes(self, a: dict) -> dict:
+        changes = a.get("changes")
+        if not isinstance(changes, list) or not changes:
+            raise ValueError("changes must be a non-empty list")
+        # One call = one atomic batch: if any change is invalid, none apply (drinking a potion must both
+        # remove it and heal, or do neither).
+        results, applied = [], []
+        self.conn.execute("SAVEPOINT batch")
+        for ch in changes:
+            try:
+                r = apply_change(self.conn, self.cid, self.turn_id, ch if isinstance(ch, dict) else {})
+                results.append({"ok": True, "summary": r["summary"]})
+                applied.append(r)
+            except ChangeError as exc:
+                results.append({"ok": False, "op": ch.get("op") if isinstance(ch, dict) else None, "error": str(exc)})
+        if not all(r["ok"] for r in results):
+            self.conn.execute("ROLLBACK TO batch")
+            self.conn.execute("RELEASE batch")
+            errors = "; ".join(r["error"] for r in results if not r["ok"])
+            raise ChangeError(f"no changes applied (batch is atomic): {errors}")
+        self.conn.execute("RELEASE batch")
+        self.effects.changes.extend(r["summary"] for r in applied if r.get("visibility", "player") == "player")
+        return {"results": results}
+
+    def t_count_cycle(self, a: dict) -> dict:
+        decision, resolution = str(a.get("decision", "")).strip(), str(a.get("resolution", "")).strip()
+        if not decision or not resolution:
+            raise ValueError("decision and resolution are required")
+        clock = one(self.conn, "SELECT * FROM clocks WHERE campaign_id = ? AND key = ?", (self.cid, ADVANCEMENT_CLOCK))
+        if not clock:
+            return {"skipped": "this campaign has no advancement cycle tracker"}
+        r = apply_change(self.conn, self.cid, self.turn_id, {"op": "clock", "key": ADVANCEMENT_CLOCK, "delta": 1,
+                                                             "reason": f"{decision} → {resolution}"})
+        self.effects.changes.append(r["summary"])
+        now = one(self.conn, "SELECT current, maximum FROM clocks WHERE id = ?", (clock["id"],))
+        return {"cycles": f"{now['current']}/{now['maximum']}", "checkpoint_due": now["current"] >= (now["maximum"] or 12)}
+
+    def t_resolve_advancement_checkpoint(self, a: dict) -> dict:
+        out = resolve_advancement_checkpoint(self.conn, self.conn, self.roller, self.cid, self.turn_id, str(a.get("occasion") or "checkpoint"))
+        for r in rows(self.conn, "SELECT * FROM dice_rolls WHERE turn_id = ? AND campaign_id = ? AND reason LIKE '%advancement%' ORDER BY id", (self.turn_id, self.cid)):
+            if r["id"] in {x[0].id for x in self.effects.roll_records}:
+                continue
+            from ..rules.dice import Die, RollResult
+            self._card(RollResult(r["expression"], [Die(**d) for d in r["dice"]], r["modifier"], r["total"], r["target"], r["outcome"],
+                                  r["reason"], r["id"], False, r["degree"], r["detail"]), r["character_id"])
+        self.effects.changes.extend(out["lines"])
+        return out
+
+    # -- knowledge
+    def t_search_rules(self, a: dict) -> dict:
+        req = _Search.model_validate(a)
+        q = fts_query(" ".join(req.queries))
+        campaign = rows(self.conn, """SELECT h.id, h.section, h.title, h.label, substr(h.text, 1, 1200) AS text FROM house_rules h
+                                      WHERE h.campaign_id = ? AND h.id IN (SELECT id FROM house_rules WHERE campaign_id = ?)
+                                      ORDER BY h.id""", (self.cid, self.cid))
+        terms = [t.strip('"') for t in q.split(" OR ")]
+        scored = sorted(((sum(t in (h["title"] + " " + h["text"]).lower() for t in terms), h) for h in campaign), key=lambda x: -x[0])
+        campaign_hits = [{"source": "CAMPAIGN HOUSE RULE", **h} for s, h in scored[:3] if s >= 2]
+        rulings = [{"source": "ESTABLISHED RULING", **r} for r in rows(self.conn, "SELECT topic, ruling, label, certainty FROM rulings WHERE campaign_id = ? ORDER BY id DESC LIMIT 200", (self.cid,))
+                   if sum(t in (r["topic"] + " " + r["ruling"]).lower() for t in terms) >= 2][:3]
+        official = []
+        if self.rule_conn is not None:
+            for p in rulebooks.search(self.rule_conn, req.queries, limit=req.limit):
+                doc_id = self.rule_conn.execute("SELECT document_id FROM chunks WHERE id = ?", (p.chunk_id,)).fetchone()[0]
+                official.append({"source": "OFFICIAL RULEBOOK", "ref": p.ref(), "document_id": doc_id, "page": p.page, "text": p.text[:1100]})
+                self.effects.rules_cited.append(p.ref())
+        return {"campaign": campaign_hits, "rulings": rulings, "official": official,
+                "note": "Campaign rulings/house rules outrank official text where they apply." if campaign_hits or rulings else None,
+                "index_status": "no rulebooks indexed" if self.rule_conn is None else None}
+
+    def t_read_rule_page(self, a: dict) -> dict:
+        if self.rule_conn is None:
+            raise ValueError("no rulebook index")
+        doc = self.rule_conn.execute("SELECT title FROM documents WHERE id = ?", (int(a["document_id"]),)).fetchone()
+        if not doc:
+            raise ValueError("unknown document_id")
+        text = rulebooks.page_text(self.rule_conn, int(a["document_id"]), int(a["page"]))
+        self.effects.rules_cited.append(f"{doc['title']}, p. {a['page']}")
+        return {"ref": f"{doc['title']}, p. {a['page']}", "text": text[:4000]}
+
+    def t_lookup_records(self, a: dict) -> dict:
+        query = str(a.get("query", ""))
+        limit = min(int(a.get("limit") or 6), 12)
+        q = fts_query(query)
+        sections = rows(self.conn, """SELECT s.id, s.document_path, s.section, s.visibility,
+                                             snippet(source_sections_fts, 1, '«', '»', ' … ', 48) AS snippet
+                                      FROM source_sections_fts JOIN source_sections s ON s.id = source_sections_fts.rowid
+                                      WHERE source_sections_fts MATCH ? AND s.campaign_id = ? ORDER BY rank LIMIT ?""", (q, self.cid, limit))
+        for s in sections:
+            if s["visibility"] == "gm":
+                s["visibility"] = "GM-ONLY"
+        terms = [t.strip('"') for t in q.split(" OR ")][:8]
+        like = " OR ".join("lower(summary) LIKE ?" for _ in terms) or "0"
+        events = rows(self.conn, f"SELECT id, type, summary, visibility, game_time_minutes FROM events WHERE campaign_id = ? AND rolled_back = 0 AND ({like}) ORDER BY id DESC LIMIT 8",
+                      (self.cid, *[f"%{t}%" for t in terms]))
+        flike = " OR ".join("lower(subject || ' ' || fact) LIKE ?" for _ in terms) or "0"
+        facts = rows(self.conn, f"SELECT subject, fact, certainty, visibility FROM lore_facts WHERE campaign_id = ? AND ({flike}) ORDER BY id DESC LIMIT 8",
+                     (self.cid, *[f"%{t}%" for t in terms]))
+        return {"record_sections": sections, "events": events, "facts": facts}
+
+    def t_read_record(self, a: dict) -> dict:
+        s = one(self.conn, "SELECT id, document_path, section, content, visibility FROM source_sections WHERE campaign_id = ? AND id = ?", (self.cid, int(a["section_id"])))
+        if not s:
+            raise ValueError("unknown section_id")
+        if s["visibility"] == "gm":
+            s["visibility"] = "GM-ONLY — never reveal directly"
+        s["content"] = s["content"][:9000]
+        return s
+
+    def t_record_ruling(self, a: dict) -> dict:
+        r = _Ruling.model_validate(a)
+        label = r.label.upper()
+        if label not in {"BOOK", "CAMPAIGN", "INTERPRETATION", "ONE-SCENE", "OPEN"}:
+            raise ValueError("label must be BOOK, CAMPAIGN, INTERPRETATION, ONE-SCENE or OPEN")
+        if r.certainty not in {"canonical", "provisional", "uncertain"}:
+            raise ValueError("certainty must be canonical, provisional or uncertain")
+        self.conn.execute("INSERT INTO rulings (campaign_id, turn_id, topic, ruling, certainty, label, sources_json, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                          (self.cid, self.turn_id, r.topic, r.ruling, r.certainty, label, json.dumps(r.sources), now_iso()))
+        self.effects.changes.append(f"Ruling recorded ({label}): {r.topic}")
+        return {"recorded": True}
+
+    def t_gm_note(self, a: dict) -> dict:
+        subject, content = str(a.get("subject", "")).strip(), str(a.get("content", "")).strip()
+        if not subject or not content:
+            raise ValueError("subject and content are required")
+        sid = self.conn.execute("INSERT INTO gm_secrets (campaign_id, subject, kind, content, source, created_at) VALUES (?,?,?,?,?,?)",
+                                (self.cid, subject, str(a.get("kind") or "note"), content, f"turn {self.turn_id}", now_iso())).lastrowid
+        return {"secret_id": sid}
+
+    def t_reveal_secret(self, a: dict) -> dict:
+        s = one(self.conn, "SELECT * FROM gm_secrets WHERE campaign_id = ? AND id = ?", (self.cid, int(a["secret_id"])))
+        if not s:
+            raise ValueError("unknown secret_id")
+        fact = str(a.get("player_visible_fact", "")).strip()
+        if not fact:
+            raise ValueError("player_visible_fact is required (only what the player actually learned)")
+        self.conn.execute("UPDATE gm_secrets SET revealed = 1 WHERE id = ?", (s["id"],))
+        r = apply_change(self.conn, self.cid, self.turn_id, {"op": "fact", "subject": str(a.get("subject") or s["subject"]), "fact": fact,
+                                                             "certainty": "canonical", "visibility": "player"})
+        self.effects.changes.append(r["summary"])
+        return {"revealed": True}
+
+    def t_system_notice(self, a: dict) -> dict:
+        text = str(a.get("text", "")).strip()
+        if not text:
+            raise ValueError("text is required")
+        style = str(a.get("style") or "notice")
+        if style not in {"notice", "achievement", "warning", "tooltip"}:
+            style = "notice"
+        self.effects.notices.append({"text": text[:3000], "style": style})
+        return {"queued": True}

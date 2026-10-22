@@ -1,0 +1,45 @@
+schema_version: 1
+id: hero
+display_name: Test Hero
+kind: crawler
+species: Human
+roster_category: player_character
+status: active
+level: 7
+class: Fixture Engineer
+location: Test Saferoom
+mechanics:
+  health: {current: 30, max: 30}
+  mana: {current: 8, max: 10}
+  ai_favor: 1
+  evade: 4
+  stats: {strength: 10, intelligence: 16, constitution: 12, dexterity: 14, charisma: 12}
+  stat_modifiers: {strength: 2, intelligence: 4, constitution: 3, dexterity: 3, charisma: 3}
+  skills:
+    engineering: {name: Engineering, rank: 4, governing_stat: intelligence}
+    investigation: {name: Investigation, rank: 6}
+  spells:
+    heal: {name: Heal, rank: 1, mana_cost: 2}
+  advancement_marks: [engineering]
+  injuries: []
+  buffs: [{name: Caffeinated, note: fixture}]
+  attacks:
+    wrench: {name: Wrench, attack_bonus: 5, damage: 1d6+2}
+equipment:
+  equipped:
+  - id: hardhat
+    name: Hard Hat
+    effects: [+1 DR]
+  carried:
+  - name: Tool Roll
+    quantity_status: unquantified
+inventory:
+- id: healing-potion
+  name: Healing Potion
+  quantity: 2
+- id: used-box
+  name: Opened Box
+  quantity: 0
+narrative:
+  current_role: Fixture protagonist
+  personality_summary: Methodical.

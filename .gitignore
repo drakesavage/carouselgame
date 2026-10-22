@@ -1,0 +1,14 @@
+# local state, secrets and generated output
+.env
+data/
+reports/
+.venv/
+__pycache__/
+.pytest_cache/
+frontend/node_modules/
+frontend/dist/
+# campaign sources are separate repositories (include private gm_state/) and personal transcripts
+campaign_sources/
+story history/
+# never commit rulebooks
+*.pdf

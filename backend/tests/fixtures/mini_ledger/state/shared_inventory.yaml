@@ -1,0 +1,22 @@
+schema_version: 1
+lifecycle: active
+items:
+- id: gold
+  name: Gold
+  quantity: 500
+- id: bolt
+  name: Crossbow Bolt
+  quantity: 0
+  count_status: unresolved
+- id: rope
+  name: Rope
+  quantity: 2
+deployed_assets:
+- id: tripwire
+  name: Tripwire Trap
+  quantity: 1
+  status: armed
+unquantified_items:
+- id: scrap
+  name: Assorted Scrap
+  note: Amount never established.
