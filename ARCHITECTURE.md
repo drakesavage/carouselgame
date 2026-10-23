@@ -71,12 +71,36 @@ everything else keeps that GM honest, consistent and remembered.
   reads GM rows, and it requires `X-GM-Token` (from `GM_TOKEN` or `data/gm_token.txt`).
   `tests/test_visibility.py` plants secrets everywhere and crawls every player endpoint.
 
+## Ledger write-back (`backend/app/ledger/`)
+
+```
+ campaign.db ──changes.py──► field-level edits ──sync.py──► three-way check ──yamledit.py──► surgical text edits
+ (console state)   inverse of importer        base = last import/sync commit    re-parse must equal intent
+                                              theirs = ledger working tree      ──► validate_state.py ──► git commit
+```
+
+* **Baseline**: `git show <commit>:<path>` for the commit recorded at import (`import_reports`) or the last sync
+  (`ledger_syncs.new_commit`). Only fields whose console value differs from the baseline become edits, so the
+  write-back never rewrites history it didn't change. An untouched campaign proposes zero edits (tested on the real ledger).
+* **Three-way**: ledger value == baseline → clean; == console value → already applied (dropped); otherwise conflict
+  (shown, never written).
+* **Surgical YAML** (`yamledit.py`): ruamel position data locates each node; only that entry's lines are replaced
+  with a freshly rendered fragment (width 120, sequences not indented, `null`, matching the ledger's style). The
+  result is re-parsed with PyYAML and must equal the baseline data with the edits applied structurally, or nothing is
+  written. Flow collections (`{a: 1}`) are rewritten whole.
+* **Append-only logs** (`rolls/*.jsonl`, `gm_state/console_notes.yaml`, reconciliation entries) use high-water ids
+  stored per sync, so each roll, note or ruling is written once. Rows created in the console (quests, items, skills)
+  are linked to their new ledger ids after the commit.
+* **Apply guards**: the preview fingerprint (HEAD, file hashes, change ids) must still match; the working tree must
+  be clean and not behind upstream; author name and email are required. Validator failure → files restored, index
+  reset, no commit. Push and pull are explicit, separate endpoints.
+
 ## Extension points
 
 * **New mechanics** → a pydantic op + `_apply_*` in `rules/engine.py` (combat rounds, crafting, grinding, mending,
   AI-Favor rerolls); the GM sees new ops automatically through `ops_reference()`.
 * **New provider** → `gm/providers.py:make_provider`.
 * **Embeddings** → add a ranked list to `reference/rulebooks.search` and fuse it.
-* **Write-back to the Git ledger** → read `events` since the import save point and emit a reviewed YAML patch/commit.
+* **More write-back fields** → add a mapping in `ledger/changes.py` (and its inverse in `importer/ledger.py`).
 * **Images** → optional, never per turn: portraits are uploaded locally today. A Codex image job can be added
   behind a button (Codex supports image generation; it's disabled for GM jobs).

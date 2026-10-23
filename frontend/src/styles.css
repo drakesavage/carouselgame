@@ -328,3 +328,15 @@ mark { background: rgba(255, 181, 71, 0.25); color: var(--text); border-radius: 
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 .sheet-head > button { align-self: start; }
+
+/* ledger review */
+.diff { font-family: var(--mono); font-size: 12px; line-height: 1.5; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; max-height: 520px; }
+.diff div { padding: 0 10px; white-space: pre; }
+.diff .add { background: rgba(70, 227, 143, 0.10); color: #9ff0c4; }
+.diff .del { background: rgba(255, 82, 87, 0.10); color: #ffb0b3; }
+.diff .hunk { color: var(--cyan); background: rgba(62, 240, 200, 0.05); }
+.diff .meta { color: var(--muted); }
+.change-row { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: start; padding: 6px 4px; border-bottom: 1px dashed var(--line); font-size: 13.5px; }
+.change-row:last-child { border-bottom: 0; }
+.change-row.conflict { opacity: 0.85; }
+.change-row input { margin-top: 3px; accent-color: var(--cyan); }

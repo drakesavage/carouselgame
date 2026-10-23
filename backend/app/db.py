@@ -351,6 +351,19 @@ CREATE TABLE IF NOT EXISTS import_reports (
   created_at TEXT NOT NULL
 );
 
+-- Write-backs to the Git campaign ledger. base_commit -> new_commit; hw_json holds high-water ids
+-- (rolls, events, secrets, facts, rulings, achievements) already written, so the next sync appends only newer rows.
+CREATE TABLE IF NOT EXISTS ledger_syncs (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  ledger_path TEXT NOT NULL,
+  base_commit TEXT NOT NULL,
+  new_commit TEXT NOT NULL,
+  hw_json TEXT NOT NULL,
+  summary_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS ix_messages_campaign ON messages(campaign_id, id);
 CREATE INDEX IF NOT EXISTS ix_events_campaign ON events(campaign_id, id);
 CREATE INDEX IF NOT EXISTS ix_rolls_campaign ON dice_rolls(campaign_id, id);

@@ -42,6 +42,17 @@ export type SavePoint = { id: number; label: string; kind: string; turn_id: numb
 export type Prefs = { gm_provider: string; codex_model: string; codex_reasoning_effort: string; rulebook_dir: string; ledger_dir: string;
   active_campaign_id: number | null; codex_cli_path: string | null; providers: string[]; efforts: string[]; data_dir: string };
 
+export type LedgerChange = { id: string; file: string; summary: string; group: string; status: "clean" | "conflict"; visibility: string; kind: string;
+  detail: { from?: unknown; to?: unknown; conflict?: string; ledger_now?: unknown } };
+export type LedgerPreview = {
+  ledger_path: string; base_commit: string; fingerprint: string; suggested_message: string; warnings: string[]; blockers: string[];
+  status: { branch: string; head: string; dirty_files: string[]; ahead: number | null; behind: number | null; upstream: string | null; fetch_error: string | null;
+    author_default: { name: string; email: string } };
+  changes: LedgerChange[]; files: { path: string; visibility: string; new_file: boolean; diff: string }[];
+  last_sync: { new_commit: string; created_at: string } | null;
+  checkpoint_curated: boolean | null;
+};
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
@@ -87,6 +98,12 @@ export const api = {
   saveSettings: (p: Partial<Prefs>) => req<Prefs>("/api/settings", { method: "PUT", body: JSON.stringify(p) }),
   importLedger: (path?: string) => post<{ campaign_id: number | null; report: any }>("/api/import", { path }),
   importReports: () => req<{ id: number; campaign_id: number | null; source_path: string; created_at: string; report: any }[]>("/api/import/reports"),
+  ledgerPreview: (id: number, fetch = true) => req<LedgerPreview>(`/api/campaigns/${id}/ledger/preview?fetch=${fetch}`),
+  ledgerApply: (id: number, body: { fingerprint: string; selected: string[]; message: string; author_name: string; author_email: string; regenerate_checkpoint: boolean }) =>
+    post<{ commit: string; summary: { changes: number; files: string[]; skipped: number; conflicts: number }; checkpoint: string | null }>(`/api/campaigns/${id}/ledger/apply`, body),
+  ledgerPull: (id: number) => post<LedgerPreview["status"]>(`/api/campaigns/${id}/ledger/pull`),
+  ledgerPush: (id: number) => post<LedgerPreview["status"]>(`/api/campaigns/${id}/ledger/push`),
+  ledgerHistory: (id: number) => req<{ id: number; base_commit: string; new_commit: string; summary: { changes: number; files: string[] }; created_at: string }[]>(`/api/campaigns/${id}/ledger/history`),
   makeDemo: () => post<{ campaign_id: number }>("/api/campaigns/demo"),
   uploadPortrait: (id: number, cid: number, file: File) => {
     const fd = new FormData();

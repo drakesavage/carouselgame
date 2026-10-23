@@ -70,7 +70,8 @@ run-tests.cmd
 These cover dice integrity and the audit log, checks and degrees, the advancement checkpoint, validated state
 changes, turn persistence, idempotent retries, failed-turn rollback, atomic change batches, save/restore/undo,
 autosave pruning, GM/player data separation (including the built JS bundle), rulebook ingestion and page references,
-and campaign import (fixture ledger plus your real ledger when present).
+campaign import (fixture ledger plus your real ledger when present), and ledger write-back (minimal diffs,
+idempotence, conflicts, validator rollback, and a round trip through your real ledger's own validator, run on throwaway copies).
 
 ## Playing
 
@@ -85,3 +86,27 @@ and campaign import (fixture ledger plus your real ledger when present).
   section's mechanical-implementation status.
 * **Records**: the imported ledger, verbatim and searchable (player-visible files only).
 * **Saves & Settings**: manual saves, restore (always reversible), GM provider, re-import, latest migration report.
+* **Ledger**: writes play back to the Git campaign ledger (`dccrepository`) as one reviewed commit. See below.
+
+## Writing play back to the ledger
+
+The ledger stays the source of truth for your other sessions (e.g. ChatGPT). After a play session, open **Ledger**:
+
+1. **Review.** The console compares the campaign with the ledger commit it last imported or synced, and lists each
+   change: HP and Mana, items and counts, Skill ranks and advancement marks, statuses, Levels, Stat points, floor
+   clock and dungeon-day fields (plus the roster mirror), location, objectives, world notes, rulings, achievements,
+   the advancement-cycle reconciliation entry, and roll records (`rolls/public.jsonl`). GM-only notes and hidden
+   rolls go to `gm_state/` and are hidden in this screen.
+2. **Conflicts.** If the ledger changed the same field since the last sync (another session committed to it), that
+   change is marked as a conflict and is not written. Reconcile it by hand, then refresh.
+3. **Write & commit.** Only the checked changes are written. Edits are surgical: untouched lines stay byte-for-byte
+   identical. The ledger's own `tools/validate_state.py` must pass, or every file is restored and nothing is committed.
+4. **Push** is a separate button with a confirmation. Nothing leaves your machine until you press it.
+   If the remote has newer commits, **Pull (fast-forward)** first.
+
+`checkpoints/latest.md` is **not** regenerated unless you tick the box. Your current checkpoint has hand-written
+sections (e.g. the DCC-DENTON-015 advancement resolution) that `tools/build_checkpoint.py` would replace; the screen
+warns about this.
+
+Not written automatically yet (the screen lists any that apply): equipment-slot changes, NPC attitude, encounters,
+and characters created in the console.

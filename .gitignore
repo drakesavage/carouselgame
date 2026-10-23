@@ -12,3 +12,4 @@ campaign_sources/
 story history/
 # never commit rulebooks
 *.pdf
+frontend/*.tsbuildinfo

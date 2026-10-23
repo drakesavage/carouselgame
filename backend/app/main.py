@@ -24,6 +24,8 @@ from .db import connect, init_db, now_iso, one, rows
 from .gm.orchestrator import WRITE_LOCK, BusyError, TurnService
 from .gm.providers import make_provider
 from .importer.ledger import import_ledger, report_markdown
+from .ledger import sync as ledger_sync
+from .ledger.sync import LedgerError
 from .memory import snapshots, views
 from .reference import rulebooks
 from .seed.demo import seed_demo
@@ -58,6 +60,15 @@ class IndexIn(BaseModel):
 class ImportIn(BaseModel):
     path: str | None = None
 
+
+
+class LedgerApplyIn(BaseModel):
+    fingerprint: str
+    selected: list[str] | None = None
+    message: str = Field(min_length=3, max_length=4000)
+    author_name: str = Field(min_length=1, max_length=120)
+    author_email: str = Field(min_length=3, max_length=200)
+    regenerate_checkpoint: bool = False
 
 
 class AppState:
@@ -362,6 +373,47 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True) -> F
             out.append({"id": r["id"], "campaign_id": r["campaign_id"], "source_path": r["source_path"], "created_at": r["created_at"],
                         "report": player_safe_report(r["report"])})
         return out
+
+    # ------------------------------------------------------------------ ledger write-back
+    def ledger_call(fn):
+        try:
+            return fn()
+        except LedgerError as exc:
+            raise HTTPException(409, str(exc))
+
+    def public_preview(pv: dict) -> dict:
+        pv = dict(pv)
+        pv.pop("_changes", None)
+        return pv
+
+    @app.get("/api/campaigns/{cid}/ledger/preview")
+    def ledger_preview(cid: int, fetch: bool = True, c=Depends(db)):
+        campaign_or_404(c, cid)
+        return public_preview(ledger_call(lambda: ledger_sync.preview(c, cid, fetch=fetch, redact=True)))
+
+    @app.post("/api/campaigns/{cid}/ledger/apply")
+    def ledger_apply(cid: int, body: LedgerApplyIn, c=Depends(db), _=Depends(write_lock)):
+        campaign_or_404(c, cid)
+        return ledger_call(lambda: ledger_sync.apply(c, cid, fingerprint=body.fingerprint, selected=body.selected, message=body.message,
+                                                     author_name=body.author_name, author_email=body.author_email,
+                                                     regenerate_checkpoint=body.regenerate_checkpoint))
+
+    @app.post("/api/campaigns/{cid}/ledger/pull")
+    def ledger_pull(cid: int, c=Depends(db), _=Depends(write_lock)):
+        return ledger_call(lambda: ledger_sync.pull(c, cid))
+
+    @app.post("/api/campaigns/{cid}/ledger/push")
+    def ledger_push(cid: int, c=Depends(db), _=Depends(write_lock)):
+        return ledger_call(lambda: ledger_sync.push(c, cid))
+
+    @app.get("/api/campaigns/{cid}/ledger/history")
+    def ledger_history(cid: int, c=Depends(db)):
+        campaign_or_404(c, cid)
+        return ledger_sync.history(c, cid)
+
+    @app.get("/api/gm/campaigns/{cid}/ledger/preview")
+    def gm_ledger_preview(cid: int, c=Depends(db), _=Depends(gm_auth)):
+        return public_preview(ledger_call(lambda: ledger_sync.preview(c, cid, fetch=False, redact=False)))
 
     # ------------------------------------------------------------------ GM only
     gm = {"secrets": views.gm_secrets, "messages": views.gm_messages, "events": views.gm_events, "rolls": views.gm_rolls,

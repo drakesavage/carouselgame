@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Backpack, BookOpen, Clock3, FileText, Flag, MessageSquareText, Settings2, UserRound, Users } from "lucide-react";
+import { Backpack, BookOpen, Clock3, FileText, Flag, GitCommitHorizontal, MessageSquareText, Settings2, UserRound, Users } from "lucide-react";
 import { api, Campaign, CampaignListItem, fmtMinutes } from "./api";
 import { Chip } from "./ui";
 import { StoryView, SystemNotice } from "./views/Story";
@@ -7,6 +7,7 @@ import { CharacterSheetDialog } from "./views/Sheet";
 import { CharactersView, InventoryView, NpcView, QuestsView, TimelineView } from "./views/Journals";
 import { RecordsView, RulesView } from "./views/Reference";
 import { SettingsView } from "./views/Settings";
+import { LedgerView } from "./views/Ledger";
 
 const TABS = [
   { id: "story", label: "Story", icon: MessageSquareText },
@@ -17,6 +18,7 @@ const TABS = [
   { id: "timeline", label: "Timeline", icon: Clock3 },
   { id: "rules", label: "Rules", icon: BookOpen },
   { id: "records", label: "Records", icon: FileText },
+  { id: "ledger", label: "Ledger", icon: GitCommitHorizontal },
   { id: "settings", label: "Saves & Settings", icon: Settings2 },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
@@ -103,6 +105,7 @@ export default function App() {
             {tab === "timeline" && <TimelineView cid={cid} version={version} />}
             {tab === "rules" && <RulesView cid={cid} />}
             {tab === "records" && <RecordsView cid={cid} />}
+            {tab === "ledger" && <LedgerView cid={cid} version={version} onChanged={refresh} />}
             {tab === "settings" && <SettingsView cid={cid} version={version} onChanged={refresh} onCampaign={chooseCampaign} />}
           </div>
         )}
