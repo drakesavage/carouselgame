@@ -24,9 +24,12 @@ export type Campaign = {
   id: number; name: string; is_demo: number; data_source: string; current_floor: number | null; current_location: string | null; safe_room: number;
   game_time_minutes: number; floor_deadline_minutes: number | null; active_character_id: number | null; active_objective: string | null;
   floor_clock: FloorClock; party: CharacterCard[]; quests: Quest[]; clocks: Clock[];
-  encounter: { id: number; name: string; round: number; summary?: string; combatants: unknown[] } | null;
+  encounter: Encounter | null;
   last_save: { id: number; label: string; kind: string; created_at: string } | null;
 };
+export type Combatant = { id: string; name: string; side: "party" | "foe"; defeated?: boolean; hb_percent?: number; actions_left?: number;
+  evading?: boolean; hp_current?: number | null; hp_max?: number | null; dead?: boolean; dying?: string | null };
+export type Encounter = { id: number; name: string; round: number; phase?: string; summary?: string | null; combatants: Combatant[] };
 export type CampaignListItem = { id: number; name: string; is_demo: number; data_source: string; current_floor: number | null; current_location: string | null };
 export type RollCard = { roll_id: number; expression: string; dice: { sides: number; value: number; kept: boolean }[]; total: number; target: number | null;
   outcome: string | null; degree: string | null; reason: string | null; detail: Record<string, any> };

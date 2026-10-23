@@ -71,6 +71,16 @@ everything else keeps that GM honest, consistent and remembered.
   reads GM rows, and it requires `X-GM-Token` (from `GM_TOKEN` or `data/gm_token.txt`).
   `tests/test_visibility.py` plants secrets everywhere and crawls every player endpoint.
 
+## Combat (`backend/app/rules/combat.py`)
+
+The encounter row's `combatants_json` holds `{round, phase, floor, declared, combatants}`. Party combatants
+reference character rows (Health lives only there); foes carry their stat block (slot values, Evade, DR,
+resistances, Actions, attacks). Phases: `surprise | mob_declaration → crawler_reaction → crawler_action → (end_round)`.
+Each GM tool (`combat_start`, `combat_declare_mob_attacks`, `combat_evade`, `combat_resolve_mob_attacks`,
+`combat_attack`, `combat_action`, `combat_damage`, `combat_end_round`, `combat_end`, `heal_slots`) validates the
+phase and the Action economy, rolls with the CSPRNG, and records every roll. `public_encounter()` is the
+player-safe projection (names, foe HB %, own Actions/HP); the GM context gets the full state.
+
 ## Ledger write-back (`backend/app/ledger/`)
 
 ```

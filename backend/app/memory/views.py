@@ -51,8 +51,9 @@ def campaign_summary(conn: sqlite3.Connection, cid: int) -> dict | None:
     camp["quests"] = rows(conn, """SELECT id, kind, title, description, status, priority, progress FROM quests
                                    WHERE campaign_id = ? AND visibility = 'player' AND status IN ('active','paused')
                                    ORDER BY priority, id""", (cid,))
-    camp["encounter"] = one(conn, """SELECT id, name, round, summary, combatants_json FROM encounters
-                                    WHERE campaign_id = ? AND status = 'active' AND visibility = 'player' ORDER BY id DESC LIMIT 1""", (cid,))
+    from ..rules.combat import public_encounter
+    camp["encounter"] = public_encounter(one(conn, """SELECT id, name, round, summary, combatants_json FROM encounters
+                                    WHERE campaign_id = ? AND status = 'active' AND visibility = 'player' ORDER BY id DESC LIMIT 1""", (cid,)), conn)
     camp["clocks"] = rows(conn, "SELECT key, label, kind, current, maximum, unit FROM clocks WHERE campaign_id = ? AND visibility = 'player'", (cid,))
     camp["last_save"] = one(conn, "SELECT id, label, kind, created_at FROM save_points WHERE campaign_id = ? ORDER BY id DESC LIMIT 1", (cid,))
     return camp

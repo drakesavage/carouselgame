@@ -28,11 +28,16 @@ from ..db import now_iso, transaction
 from ..memory.snapshots import create_save_point
 
 ALWAYS_INCLUDE_SECTIONS = {"2", "3.1", "3.2", "4.1", "4.2", "5.5", "5.6", "5.10", "6.2", "6.3", "6.4", "7", "7.9", "7.10", "17", "18"}
-IMPLEMENTED_SECTIONS = {"6", "6.1", "6.2", "6.3", "6.4", "7.1", "7.2", "7.3", "7.4", "7.5", "7.6", "7.7", "7.9", "14.3", "14.5", "16", "16.1", "16.2", "16.3"}
+IMPLEMENTED_SECTIONS = {"6", "6.1", "6.2", "6.3", "6.4", "7.1", "7.2", "7.3", "7.4", "7.5", "7.6", "7.7", "7.9", "14.3", "14.5", "16", "16.1", "16.2", "16.3",
+                        "10.2", "10.3", "10.4", "10.5", "10.8", "11.1", "11.2"}
 PARTIAL_SECTIONS = {"7.8": "Party Skill Checks are run as individual skill_check calls; the half-succeed aggregation is left to the GM.",
                     "8.1": "Game time is tracked via advance_time; dungeon-day boundaries are not yet computed.",
                     "14.2": "Only correspondence-cycle Levels are automated; Quest/Boss/grinding Level awards are manual.",
-                    "14.4": "Floor 3+ checkpoint banks 3 Stat points; allocation is manual."}
+                    "14.4": "Floor 3+ checkpoint banks 3 Stat points; allocation is manual.",
+                    "10.7": "Evade is mechanized; Intervene, Catcher, Taunt and Healing Interrupts are spent as Actions and resolved with general tools.",
+                    "10.9": "Call a Play spends an Action; its 2d6-keep-high bonus is applied by the GM as a modifier.",
+                    "10.11": "Mob-vs-Mob uses combat_damage or the d12 table via roll_dice.",
+                    "11.3": "Minor Injury from Evade Major/Critical Fail is automatic; other injuries are applied by the GM."}
 NARRATIVE_SECTIONS_PREFIX = ("1", "2", "3", "4", "5", "9", "17", "18", "19", "20")
 IMPLEMENTED_RULINGS = {"rng_fallback", "correspondence_advancement", "transparency"}
 EQUIPPED_KEYS = {"equipped", "wielded", "worn", "natural_armor"}
@@ -584,3 +589,13 @@ def report_markdown(report: dict) -> str:
         lines.append(f"- {r['rule']} ({r.get('status', 'pending')}){' — ' + r['note'] if r.get('note') else ''}")
     lines += ["", "## Notes", ""] + [f"- {n}" for n in report["notes"]]
     return "\n".join(lines) + "\n"
+
+
+def refresh_mechanical_status(conn: sqlite3.Connection) -> None:
+    """Re-label imported constitution sections as the app gains mechanics (called at startup)."""
+    for r in conn.execute("SELECT id, section FROM house_rules WHERE source = 'CORE_MECHANICS.md'").fetchall():
+        num = r["section"] or ""
+        top = num.split(".")[0]
+        status = ("implemented" if num in IMPLEMENTED_SECTIONS else "partial" if num in PARTIAL_SECTIONS
+                  else "narrative_only" if (top in NARRATIVE_SECTIONS_PREFIX or num.startswith(("8.", "15"))) else "pending")
+        conn.execute("UPDATE house_rules SET mechanical_status = ? WHERE id = ?", (status, r["id"]))

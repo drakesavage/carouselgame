@@ -88,6 +88,25 @@ idempotence, conflicts, validator rollback, and a round trip through your real l
 * **Saves & Settings**: manual saves, restore (always reversible), GM provider, re-import, latest migration report.
 * **Ledger**: writes play back to the Git campaign ledger (`dccrepository`) as one reviewed commit. See below.
 
+## Combat
+
+Fights run on the book's round sequence (CORE_MECHANICS §10–11). The GM declares the Mob Attacks and then stops to
+ask what Cliff does: **Evade**, another Interrupt, or nothing. Then everything resolves in code:
+
+* **Evade** spends an Action: d20 + your Evade vs each Attack's to-hit. Success avoids it (Area Attacks: half
+  damage). A Natural 20 or Amazing Success gives Advantage on your next Attack against that Mob. A Major Fail adds
+  Floor damage plus a Minor Injury after combat; a Critical Fail doubles the damage.
+* **Attacks** use the attack lines on your sheet: d20 + Skill Rank + Stat Mod vs the Mob's Evade. A Natural 20
+  doubles the base damage dice; an Amazing Success adds the Floor number. The Skill gets its advancement mark.
+* **Damage** applies DR, then resistances, then whole Health Bar slots (damage smaller than one slot is lost,
+  Core p. 94). Mobs die at 0%; crawlers become Dying, and healing (always by slots) brings them back.
+* Two Actions per crawler per round are enforced. Low-quality Mobs get one Attack; Elites and Bosses get one Action
+  per participating crawler.
+* The combat panel shows the round, phase, your Action pips, and foes' Health Bar % only. Stat blocks stay GM-only.
+
+**Open rules question:** the Dying countdown is CON on Core p. 96 but CON Mod in Table 11 (p. 99). The app uses
+CON Mod for now (labelled INTERPRETATION); tell the GM if your table uses CON.
+
 ## Writing play back to the ledger
 
 The ledger stays the source of truth for your other sessions (e.g. ChatGPT). After a play session, open **Ledger**:

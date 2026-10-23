@@ -68,6 +68,40 @@ TOOL_SPECS: list[dict] = [
                     "clear resolved marks, carry excess cycles. Only at a saferoom, debrief, save point or floor transition.",
      "parameters": {"occasion": "str"}},
 ]
+COMBAT_SPECS: list[dict] = [
+    {"name": "combat_start",
+     "description": "Start a mechanical combat (CORE_MECHANICS §10). Record setup first (terrain, positions, cover, escape routes). "
+                    "foes are stat blocks: {name, kind: mob|elite|boss, quality: low|high, count, health_bar: [slot values] or slots+per_slot, "
+                    "evade (resolved number, e.g. 13+F -> 16), dr, dex_mod, resistances {type: resist|vulnerable|immune}, actions?, max_slots_per_hit? (e.g. Spunk), "
+                    "attacks: [{name, to_hit (resolved), damage e.g. '1d8+3', damage_type, range, area, fail_effect}]}. Take numbers from the "
+                    "rulebook stat block when one exists (search_rules), otherwise build a fair one and record_ruling it. "
+                    "party defaults to the active in-party crawlers present. surprise: none | crawlers | mobs.",
+     "parameters": {"name": "str", "foes": "[stat block]", "party": "[str]?", "surprise": "str?", "setup": "str"}},
+    {"name": "combat_declare_mob_attacks",
+     "description": "Step 1: declare every Mob Attack this round [{mob, attack, target}] (targets can't change after Evades). Then STOP and "
+                    "narrate the incoming Attacks; the player decides whether their crawler Evades or uses other Interrupts. Decide NPC allies yourself.",
+     "parameters": {"attacks": "[{mob, attack, target}]"}},
+    {"name": "combat_evade", "description": "Step 2 Interrupt: a crawler spends an Action to Evade all Attacks declared against them this round.",
+     "parameters": {"crawler": "str"}},
+    {"name": "combat_resolve_mob_attacks",
+     "description": "Step 3: resolve declared Mob Attacks: Evade Checks for evaders, damage rolls, DR, Health Bar slots, Dying. Moves to the Crawler Action Phase.",
+     "parameters": {}},
+    {"name": "combat_attack",
+     "description": "Step 4 crawler Attack: d20 + Skill Rank + Stat Mod vs the Mob's Evade, damage on a hit (Natural 20 doubles dice, Amazing adds Floor). "
+                    "attack = name of an attack on the crawler's sheet (or give skill + stat + damage). Spends one Action; marks the Skill.",
+     "parameters": {"attacker": "str", "target": "str", "attack": "str?", "advantage": "int?", "disadvantage": "int?",
+                    "modifiers": "[{source, value}]?", "skill": "str?", "stat": "str?", "damage": "str?"}},
+    {"name": "combat_action", "description": "Spend an Action on anything else (Move, Help, Retrieve, Use Hotlist Item, Call a Play, non-attack Spell, Taunt...). Resolve its check/effect with the normal tools.",
+     "parameters": {"combatant": "str", "action": "str"}},
+    {"name": "combat_damage", "description": "Apply other damage (traps, debuffs, environment, Mob-vs-Mob): amount or dice expression; bypass_dr for Debuff damage.",
+     "parameters": {"target": "str", "amount": "int?", "expression": "str?", "damage_type": "str?", "bypass_dr": "bool?", "cause": "str"}},
+    {"name": "combat_end_round", "description": "Step 5 Clean Up: Dying countdowns tick, Actions reset, next round begins at Mob Action Declaration.", "parameters": {}},
+    {"name": "combat_end", "description": "End the combat (victory, retreat, parley...). Pending Minor Injuries from bad Evades apply now.", "parameters": {"outcome": "str"}},
+    {"name": "heal_slots", "description": "Heal a crawler by Health Bar slots (healing is always by slots; e.g. Heal Spell 20% = 2 slots). Ends Dying. Works in or out of combat.",
+     "parameters": {"character": "str", "slots": "int", "cause": "str"}},
+]
+TOOL_SPECS.extend(COMBAT_SPECS)
+BOOKKEEPING_TOOLS.update({"combat_action"})
 TOOL_NAMES = [t["name"] for t in TOOL_SPECS]
 
 
@@ -150,6 +184,59 @@ class ToolRunner:
         record_roll(self.conn, self.cid, res, turn_id=self.turn_id, character_id=char["id"] if char else None, hidden=req.hidden)
         self._card(res, char["id"] if char else None)
         return {"roll_id": res.id, "total": res.total, "dice": [d.value for d in res.dice if d.kept], "outcome": res.outcome, "hidden": req.hidden}
+
+    # -- combat
+    def _combat(self, fn, *args, **kw) -> dict:
+        from ..rules.combat import Combat
+        cb = Combat(self.conn, self.cid, self.turn_id, self.roller)
+        try:
+            out = getattr(cb, fn)(*args, **kw)
+        finally:
+            for res, char_id, _hidden in cb.rolls:
+                self._card(res, char_id)
+        lines = out.get("lines") or [out["summary"]]
+        self.effects.changes.extend(line for line in lines if line)
+        return out
+
+    def t_combat_start(self, a: dict) -> dict:
+        from ..rules.combat import StartCombat
+        return self._combat("start", StartCombat.model_validate(a))
+
+    def t_combat_declare_mob_attacks(self, a: dict) -> dict:
+        return self._combat("declare", list(a.get("attacks") or []))
+
+    def t_combat_evade(self, a: dict) -> dict:
+        return self._combat("evade", str(a.get("crawler") or a.get("character") or ""))
+
+    def t_combat_resolve_mob_attacks(self, a: dict) -> dict:
+        return self._combat("resolve")
+
+    def t_combat_attack(self, a: dict) -> dict:
+        keys = ("attack", "advantage", "disadvantage", "modifiers", "skill", "stat", "damage")
+        return self._combat("attack", str(a["attacker"]), str(a["target"]), **{k: a[k] for k in keys if a.get(k) is not None})
+
+    def t_combat_action(self, a: dict) -> dict:
+        return self._combat("spend_action", str(a["combatant"]), str(a.get("action") or "Action"))
+
+    def t_combat_damage(self, a: dict) -> dict:
+        return self._combat("damage", str(a["target"]), amount=a.get("amount"), expression=a.get("expression"),
+                            damage_type=a.get("damage_type"), bypass_dr=bool(a.get("bypass_dr")), cause=str(a.get("cause") or ""))
+
+    def t_combat_end_round(self, a: dict) -> dict:
+        return self._combat("end_round")
+
+    def t_combat_end(self, a: dict) -> dict:
+        return self._combat("end", str(a.get("outcome") or "ended"))
+
+    def t_heal_slots(self, a: dict) -> dict:
+        from ..rules.combat import heal_character_slots
+        slots = int(a["slots"])
+        if not 1 <= slots <= 100:
+            raise ValueError("slots must be 1-100")
+        ch = resolve_character(self.conn, self.cid, str(a["character"]))
+        text = heal_character_slots(self.conn, self.cid, self.turn_id, ch, slots, str(a.get("cause") or ""))
+        self.effects.changes.append(text)
+        return {"summary": text}
 
     # -- state
     def t_apply_changes(self, a: dict) -> dict:

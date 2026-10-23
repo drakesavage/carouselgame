@@ -13,7 +13,7 @@ import json
 import sqlite3
 from typing import Any, Callable, Literal
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from ..db import now_iso, one, rows
 
@@ -71,12 +71,21 @@ class EquipItem(BaseModel):
     slot: str | None = None
 
 
+POLARITY_ALIASES = {"negative": "debuff", "bad": "debuff", "harmful": "debuff", "injury": "debuff", "condition": "neutral",
+                    "positive": "buff", "good": "buff", "beneficial": "buff"}
+
+
 class AddStatus(BaseModel):
     op: Literal["add_status"]
     character: str
     name: str = Field(min_length=1, max_length=80)
     description: str | None = None
     polarity: Literal["buff", "debuff", "neutral"] = "neutral"
+
+    @field_validator("polarity", mode="before")
+    @classmethod
+    def _alias(cls, v):
+        return POLARITY_ALIASES.get(str(v).lower(), str(v).lower()) if v is not None else "neutral"
     duration_minutes: int | None = Field(default=None, ge=1)
 
 
@@ -546,7 +555,7 @@ CHANGE_OPS: dict[str, tuple[type[BaseModel], Callable[[Ctx, Any], dict]]] = {
     "npc_attitude": (NpcAttitude, _apply_npc_attitude),
     "achievement": (Achievement, _apply_achievement),
     "fact": (RecordFact, _apply_fact),
-    "encounter": (Encounter, _apply_encounter),
+    # "encounter" (narrative-only) is superseded by rules/combat.py and the combat_* GM tools
     "set_quantity": (SetQuantity, _apply_set_quantity),
     "allocate_stats": (AllocateStats, _apply_allocate_stats),
     "clock": (ClockChange, _apply_clock),

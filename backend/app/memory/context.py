@@ -143,7 +143,7 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
         out.append("\n## ACTIVE QUESTS & PROJECTS\n" + "\n".join(f"- [{x['kind']}, P{x['priority']}] {x['title']}" + (f" — {x['progress']}" if x["progress"] else "") for x in q))
     enc = one(conn, "SELECT * FROM encounters WHERE campaign_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1", (cid,))
     if enc:
-        out.append(f"\n## ACTIVE ENCOUNTER: {enc['name']} (round {enc['round']})\n{enc['summary'] or ''}\nCombatants: {json.dumps(enc['combatants'], ensure_ascii=False)[:1500]}")
+        out.append(_combat_context(conn, enc))
     shared = rows(conn, "SELECT name, quantity, deployed, description, properties_json FROM items WHERE campaign_id = ? AND owner_character_id IS NULL ORDER BY deployed, name", (cid,))
     if shared:
         out.append("\n## SHARED STASH (qty ? = count not established; establish it with set_quantity before spending)\n"
@@ -171,3 +171,25 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     else:
         out.append("\n(No play has happened in this app yet. Use lookup_records for where the campaign left off.)")
     return {"kind": "context", "text": "\n".join(out), "player_character": pc["name"] if pc else "player"}
+
+
+def _combat_context(conn: sqlite3.Connection, enc: dict) -> str:
+    st = enc["combatants"]
+    if not (isinstance(st, dict) and "combatants" in st):
+        return (f"\n## ACTIVE ENCOUNTER: {enc['name']} (round {enc['round']})\n{enc['summary'] or ''}\n"
+                f"Combatants: {json.dumps(enc['combatants'], ensure_ascii=False)[:1500]}")
+    lines = [f"\n## ACTIVE COMBAT: {enc['name']} — round {st['round']}, phase {st['phase']} (stat blocks are GM-ONLY)", st.get("setup") or ""]
+    for c in st["combatants"]:
+        if c["side"] == "party":
+            ch = one(conn, "SELECT hp_current, hp_max, status FROM characters WHERE id = ?", (c["character_id"],))
+            lines.append(f"- [party {c['id']}] {c['name']}: HP {ch['hp_current']}/{ch['hp_max']} ({ch['status']}); Actions left {c['actions_left']}"
+                         + ("; EVADING" if c["evading"] else "") + ("; Advantage vs " + ",".join(c["advantage_vs"]) if c["advantage_vs"] else ""))
+        else:
+            atks = "; ".join(f"{x['name']} {x['to_hit']} to hit, {x['damage']}" + (" AREA" if x.get("area") else "") for x in c["attacks"])
+            lines.append(f"- [foe {c['id']}] {c['name']} ({c['kind']}): HB {sum(c['slots'])}/{c['max_hb']} {c['slots']}"
+                         + (" DEFEATED" if c["defeated"] else "") + f"; Evade {c['evade']}, DR {c['dr']}, Actions {c['actions_left']}/{c['actions']}; attacks: {atks}")
+    if st.get("declared"):
+        lines.append("Declared this round: " + "; ".join(f"{d['mob']} {d['attack']} -> {d['target']}" for d in st["declared"]))
+    lines.append("Procedure: declare Mob Attacks -> (player decides Interrupts) -> resolve -> crawler Actions -> end round. "
+                 "Never choose the player character's Actions; ask.")
+    return "\n".join(lines)

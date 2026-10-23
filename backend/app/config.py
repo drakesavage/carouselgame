@@ -62,7 +62,7 @@ class Settings:
     codex_model: str = field(default_factory=lambda: os.environ.get("CODEX_MODEL", ""))
     codex_reasoning_effort: str = field(default_factory=lambda: os.environ.get("CODEX_REASONING_EFFORT", "medium"))
     codex_timeout_s: int = field(default_factory=lambda: int(os.environ.get("CODEX_TIMEOUT_S", "240")))
-    max_tool_rounds: int = 5
+    max_tool_rounds: int = 8   # combat needs evade -> resolve -> attacks -> bookkeeping
     recent_message_window: int = 12
     summarize_every_messages: int = 24
     autosave_keep: int = 25

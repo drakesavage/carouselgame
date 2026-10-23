@@ -23,7 +23,7 @@ from .config import ROOT_DIR, Settings, resolve_codex_bin
 from .db import connect, init_db, now_iso, one, rows
 from .gm.orchestrator import WRITE_LOCK, BusyError, TurnService
 from .gm.providers import make_provider
-from .importer.ledger import import_ledger, report_markdown
+from .importer.ledger import import_ledger, refresh_mechanical_status, report_markdown
 from .ledger import sync as ledger_sync
 from .ledger.sync import LedgerError
 from .memory import snapshots, views
@@ -111,6 +111,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True) -> F
         settings.gm_token()  # make sure data/gm_token.txt exists for the GM-only API
         c = state.conn()
         init_db(c)
+        refresh_mechanical_status(c)
         if bootstrap:
             _bootstrap(state, c)
         c.close()

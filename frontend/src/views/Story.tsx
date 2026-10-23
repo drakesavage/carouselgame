@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AlertTriangle, BookOpen, Dices, Eye, Hourglass, MessageSquare, RotateCcw, Send, ShieldCheck, Sparkles, Tent, Users } from "lucide-react";
-import { api, ApiError, Campaign, fmtMinutes, Message, newKey, RollCard, TurnStatus } from "../api";
+import { AlertTriangle, BookOpen, Dices, Eye, Footprints, Hand, Hourglass, MessageSquare, RotateCcw, Send, Shield, ShieldCheck, Sparkles, Swords, Tent, Users } from "lucide-react";
+import { api, ApiError, Campaign, Encounter, fmtMinutes, Message, newKey, RollCard, TurnStatus } from "../api";
 import { Bar, Chip, Empty, Markdown, Panel, Portrait } from "../ui";
 
 const QUIPS = [
@@ -17,6 +17,13 @@ const QUICK = [
   { icon: MessageSquare, label: "Talk to…", text: "I talk to " },
   { icon: Users, label: "Party check-in", text: "I check in with the party — how is everyone doing? " },
   { icon: Tent, label: "Rest", text: "We rest here for " },
+  { icon: BookOpen, label: "Rules question", text: "Rules question (no in-world action): " },
+];
+const COMBAT_QUICK = [
+  { icon: Shield, label: "Evade", text: "I spend an Action to Evade. " },
+  { icon: Swords, label: "Attack…", text: "I attack " },
+  { icon: Hand, label: "Help / Intervene", text: "I spend an Action to help " },
+  { icon: Footprints, label: "Move", text: "I move " },
   { icon: BookOpen, label: "Rules question", text: "Rules question (no in-world action): " },
 ];
 
@@ -89,8 +96,12 @@ export function StoryView({ campaign, onState, onNotices, openCharacter }: {
   const busy = !!pending && pending.status !== "failed";
   return (
     <div className="story-layout">
-      <aside className="side left"><PartyPanel campaign={campaign} openCharacter={openCharacter} /></aside>
+      <aside className="side left">
+        <PartyPanel campaign={campaign} openCharacter={openCharacter} />
+        {campaign.encounter && <div className="combat-left"><CombatPanel enc={campaign.encounter} /></div>}
+      </aside>
       <div className="story-col">
+        <div className="combat-top">{campaign.encounter && <CombatPanel enc={campaign.encounter} />}</div>
         <div className="transcript" ref={scroller}>
           <div className="transcript-inner">
             {messages === null ? <div className="muted">Loading transcript…</div> : messages.length === 0 && !pending ? (
@@ -138,7 +149,7 @@ export function StoryView({ campaign, onState, onNotices, openCharacter }: {
           <div className="row wrap">
             <div className="quick">
               <button className="btn small" disabled={busy} onClick={() => send(RECAP_PROMPT)} title="Ask the GM for a recap and scene-setting"><Sparkles size={13} /> Previously on…</button>
-              {QUICK.map((q) => (
+              {(campaign.encounter ? COMBAT_QUICK : QUICK).map((q) => (
                 <button key={q.label} className="btn small ghost" disabled={busy} onClick={() => { setDraft((d) => (d ? d + " " : "") + q.text); textarea.current?.focus(); }}>
                   <q.icon size={13} /> {q.label}
                 </button>
@@ -241,6 +252,38 @@ function PartyPanel({ campaign, openCharacter }: { campaign: Campaign; openChara
   );
 }
 
+const PHASES: Record<string, string> = { surprise: "Surprise", mob_declaration: "Mobs declaring", crawler_reaction: "Your reaction — Interrupts?",
+  crawler_action: "Crawler actions", ended: "Ended" };
+
+function CombatPanel({ enc }: { enc: Encounter }) {
+  const party = enc.combatants.filter((c) => c.side === "party");
+  const foes = enc.combatants.filter((c) => c.side === "foe");
+  return (
+    <Panel title={<><Swords size={13} /> Combat</>} accent={`Round ${enc.round}`} className="combat">
+      <div style={{ fontWeight: 600 }}>{enc.name}</div>
+      {enc.phase && <div className="row" style={{ margin: "4px 0 8px" }}><Chip tone={enc.phase === "crawler_reaction" ? "magenta" : "cyan"}>{PHASES[enc.phase] ?? enc.phase}</Chip></div>}
+      {foes.map((f) => (
+        <div key={f.id} className="combatant">
+          <span className={f.defeated ? "muted" : ""} style={{ textDecoration: f.defeated ? "line-through" : undefined }}>{f.name}</span>
+          <div className="bar hp" style={{ width: 80 }}><i style={{ width: `${f.hb_percent ?? 0}%`, background: "linear-gradient(90deg,#b8323a,#ff5257)" }} /></div>
+          <span className="mono muted">{f.defeated ? "down" : `${f.hb_percent}%`}</span>
+        </div>
+      ))}
+      <div className="h2" style={{ margin: "10px 0 4px", fontSize: 11 }}>Party</div>
+      {party.map((p) => (
+        <div key={p.id} className="combatant">
+          <span>{p.name.split(" ")[0]}</span>
+          <span className="pips">{[0, 1].map((i) => <i key={i} className={i < (p.actions_left ?? 0) ? "on" : ""} />)}</span>
+          <span className="mono" style={{ fontSize: 11 }}>
+            {p.dead ? <span style={{ color: "var(--red)" }}>DEAD</span> : p.dying ? <span style={{ color: "var(--red)" }}>DYING {p.dying.split(" ")[0]}</span>
+              : p.evading ? <span style={{ color: "var(--cyan)" }}>evading</span> : `${p.hp_current ?? "?"}/${p.hp_max ?? "?"}`}
+          </span>
+        </div>
+      ))}
+    </Panel>
+  );
+}
+
 function CampaignPanel({ campaign }: { campaign: Campaign }) {
   const fc = campaign.floor_clock;
   const hours = fc.remaining_minutes != null ? fc.remaining_minutes / 60 : null;
@@ -265,12 +308,7 @@ function CampaignPanel({ campaign }: { campaign: Campaign }) {
           </div>
         )}
       </Panel>
-      {campaign.encounter && (
-        <Panel title="Combat" accent={`Round ${campaign.encounter.round}`} className="combat">
-          <div style={{ fontWeight: 600 }}>{campaign.encounter.name}</div>
-          {campaign.encounter.summary && <div className="sub">{campaign.encounter.summary}</div>}
-        </Panel>
-      )}
+      {campaign.encounter && <CombatPanel enc={campaign.encounter} />}
       {campaign.active_objective && <Panel title="Objective"><div style={{ fontSize: 13.5 }}>{campaign.active_objective}</div></Panel>}
       <Panel title="Quests" accent={quests.length || ""}>
         {quests.length ? quests.map((q) => <div key={q.id} className="quest"><div>{q.priority === 1 && <Chip tone="magenta">priority</Chip>} {q.title}</div>{q.progress && <div className="sub">{q.progress}</div>}</div>) : <div className="muted">None active.</div>}

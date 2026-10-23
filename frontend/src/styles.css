@@ -102,7 +102,8 @@ a { color: var(--cyan); }
 /* ---------- story layout ---------- */
 .story-layout { display: grid; grid-template-columns: 290px minmax(0, 1fr) 300px; gap: 14px; height: 100%; padding: 14px; }
 .side { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
-.story-col { min-height: 0; display: grid; grid-template-rows: 1fr auto; gap: 12px; }
+.story-col { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 12px; }
+.combat-top > * { display: none; }
 .transcript { overflow: auto; padding: 8px 4px 20px; scroll-behavior: smooth; }
 .transcript-inner { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
 
@@ -313,13 +314,17 @@ mark { background: rgba(255, 181, 71, 0.25); color: var(--text); border-radius: 
   .nav-label { display: none; }
   .nav button { padding: 7px 10px; }
 }
+.combat-left { display: none; }
 @media (max-width: 1180px) {
+  .combat-left { display: block; }
   .story-layout { grid-template-columns: 250px minmax(0, 1fr); }
   .story-layout .side.right { display: none; }
 }
 @media (max-width: 820px) {
   .story-layout { grid-template-columns: 1fr; padding: 8px; }
   .story-layout .side.left { display: none; }
+  .combat-top > * { display: block; }
+  .combat-top .panel-body { padding: 8px 10px; }
   .topbar { flex-wrap: wrap; padding: 8px; }
   .nav { order: 3; flex-basis: 100%; }
   .view { padding: 12px; }
@@ -340,3 +345,10 @@ mark { background: rgba(255, 181, 71, 0.25); color: var(--text); border-radius: 
 .change-row:last-child { border-bottom: 0; }
 .change-row.conflict { opacity: 0.85; }
 .change-row input { margin-top: 3px; accent-color: var(--cyan); }
+
+/* combat panel */
+.combat { border-color: rgba(255, 82, 87, 0.35); }
+.combatant { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; font-size: 13px; padding: 3px 0; }
+.pips { display: inline-flex; gap: 3px; }
+.pips i { width: 9px; height: 9px; border-radius: 2px; background: #1a232c; border: 1px solid var(--line-2); }
+.pips i.on { background: var(--cyan); box-shadow: 0 0 6px rgba(62, 240, 200, 0.5); border-color: transparent; }
