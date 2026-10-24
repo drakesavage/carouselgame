@@ -235,3 +235,93 @@ def resolve_advancement_checkpoint(state: sqlite3.Connection, audit: sqlite3.Con
     )
     lines.append("Race/Class level-up benefits (e.g. Human AI Favor) and Stat allocation still need GM/player handling.")
     return {"summary": summary, "lines": lines, "cycles_remaining": clock["current"] - required}
+
+
+# ------------------------------------------------------------------ grinding (BOOK 14.6-14.7) and floor end (14.5)
+SAFE_GRIND_HOURS = 5
+
+
+def grind(state: sqlite3.Connection, audit: sqlite3.Connection, roller: DiceRoller, campaign_id: int, turn_id: int | None,
+          character: str, skill: str, hours: int, map_bonus: bool = False) -> dict[str, Any]:
+    from .state_ops import day_info
+    if not 1 <= hours <= 30:
+        raise ChangeError("grind hours must be 1-30")
+    char = resolve_character(state, campaign_id, character)
+    srow = _find_skill(state, char["id"], skill)
+    if not srow or not srow["rank"]:
+        raise ChangeError(f"{char['name']} has no trained {skill!r} to grind")
+    if srow["passive"]:
+        raise ChangeError("Passive Skills advance only by their own rules, not by grinding")
+    today = day_info(state, campaign_id)["day"]
+    derived = dict(char.get("derived") or {})
+    gt = derived.get("grind_today") if isinstance(derived.get("grind_today"), dict) else {}
+    done_today = gt.get("hours", 0) if gt.get("day") == today else 0
+    credited = hours + (1 if map_bonus and hours >= 5 else 0)
+    derived["grind_today"] = {"day": today, "hours": done_today + hours}
+    lines = [f"{char['name']} grinds {srow['name']} for {hours}h" + (" (+1 mapped-grind hour)" if credited > hours else "")]
+    over = max(0, done_today + hours - SAFE_GRIND_HOURS) - max(0, done_today - SAFE_GRIND_HOURS)
+    if over:
+        lines.append(f"{over} hour(s) beyond the safe 5 today: make the published Endurance Check for each (Fatigued on failure)")
+    props = dict(srow.get("properties") or {})
+    progress = (props.get("grind_progress_hours") or 0) + credited
+    rank = int(srow["rank"])
+    excess = 0
+    if progress >= rank and props.get("last_grind_check_day") != today:
+        res = roller.roll("1d20", target=rank, reason=f"{srow['name']} grinding advancement (Rank {rank})")
+        res.detail = {"kind": "skill_advancement", "character": char["name"], "skill": srow["name"], "rank": rank}
+        res.degree = "Success" if res.outcome == "success" else "Fail"
+        record_roll(audit, campaign_id, res, turn_id=turn_id, character_id=char["id"])
+        excess = progress - rank
+        props.update({"grind_progress_hours": 0, "last_grind_check_day": today})
+        new_rank = rank + 1 if res.outcome == "success" else rank
+        state.execute("UPDATE skills SET rank = ? WHERE id = ?", (new_rank, srow["id"]))
+        lines.append(f"{srow['name']} advancement: d20 {res.total} vs Rank {rank} → " + (f"Rank {new_rank}" if new_rank != rank else "no change"))
+        if excess:
+            lines.append(f"{excess} excess hour(s) must be assigned to another Skill (call grind for it; no extra time passes)")
+    else:
+        props["grind_progress_hours"] = progress
+        if progress >= rank:
+            lines.append(f"{srow['name']} already had its grinding advancement check today; {progress} hour(s) carry to tomorrow")
+        else:
+            lines.append(f"{srow['name']} grind progress {progress}/{rank} hours")
+    state.execute("UPDATE skills SET properties_json = ? WHERE id = ?", (json.dumps(props), srow["id"]))
+    lp = derived.get("level_progress") if isinstance(derived.get("level_progress"), dict) else None
+    if lp is not None and char["level"] is not None:
+        lp["current"] = (lp.get("current") or 0) + credited
+        if lp["current"] >= char["level"]:
+            camp = one(state, "SELECT current_floor FROM campaigns WHERE id = ?", (campaign_id,))
+            state.execute("UPDATE characters SET level = level + 1 WHERE id = ?", (char["id"],))
+            if (camp["current_floor"] or 0) >= 3:
+                derived["unallocated_stat_points"] = (derived.get("unallocated_stat_points") or 0) + 3
+            lines.append(f"Level-grind {lp['current']}/{char['level']} → Level {char['level'] + 1} (progress resets)")
+            lp["current"], lp["target"] = 0, char["level"] + 1
+        else:
+            lines.append(f"Level-grind progress {lp['current']}/{char['level']}")
+    state.execute("UPDATE characters SET derived_json = ? WHERE id = ?", (json.dumps(derived), char["id"]))
+    state.execute("""INSERT INTO events (campaign_id, turn_id, type, summary, payload_json, visibility, game_time_minutes, created_at)
+                     VALUES (?,?,?,?,?,?,(SELECT game_time_minutes FROM campaigns WHERE id = ?),?)""",
+                  (campaign_id, turn_id, "grind", lines[0], json.dumps({"lines": lines}), "player", campaign_id, now_iso()))
+    lines.append(f"Grinding takes time: advance_time {hours * 60} minutes if not already done. A sole lowest-Level crawler's 1d2 catch-up rule is not automated.")
+    return {"summary": "; ".join(lines[:3]), "lines": lines, "excess_hours": excess}
+
+
+def resolve_floor_end(state: sqlite3.Connection, audit: sqlite3.Connection, roller: DiceRoller, campaign_id: int, turn_id: int | None,
+                      occasion: str, advantage: list[dict] | None = None) -> dict[str, Any]:
+    """BOOK 14.5: marked Rank 5+ Skills roll 1d20 vs Rank at floor end; resolved marks clear."""
+    adv = {(str(a.get("character", "")).lower(), str(a.get("skill", "")).lower()) for a in advantage or []}
+    lines = []
+    for c in rows(state, "SELECT * FROM characters WHERE campaign_id = ? AND kind = 'crawler' AND status = 'active'", (campaign_id,)):
+        for s in rows(state, "SELECT * FROM skills WHERE character_id = ? AND marked = 1 AND rank >= 5 AND kind = 'skill' ORDER BY name", (c["id"],)):
+            r = int(s["rank"])
+            use_adv = any(k[1] == s["name"].lower() and k[0] in (c["name"].lower(), c["slug"]) for k in adv) and r <= 9
+            res = roller.roll("2d20kh1" if use_adv else "1d20", target=r, reason=f"{s['name']} floor-end advancement (Rank {r})")
+            res.detail = {"kind": "skill_advancement", "character": c["name"], "skill": s["name"], "rank": r, "advantage": use_adv}
+            res.degree = "Success" if res.outcome == "success" else "Fail"
+            record_roll(audit, campaign_id, res, turn_id=turn_id, character_id=c["id"])
+            new = r + 1 if res.outcome == "success" else r
+            state.execute("UPDATE skills SET rank = ?, marked = 0 WHERE id = ?", (new, s["id"]))
+            lines.append(f"{c['name']} — {s['name']}: d20 {res.total}{' (Advantage)' if use_adv else ''} vs Rank {r} → " + (f"{r} → {new}" if new != r else "no change"))
+    state.execute("""INSERT INTO events (campaign_id, turn_id, type, summary, payload_json, visibility, game_time_minutes, created_at)
+                     VALUES (?,?,?,?,?,?,(SELECT game_time_minutes FROM campaigns WHERE id = ?),?)""",
+                  (campaign_id, turn_id, "floor_end_advancement", f"Floor-end advancement ({occasion})", json.dumps({"lines": lines}), "player", campaign_id, now_iso()))
+    return {"summary": f"Floor-end advancement resolved: {len(lines)} check(s)", "lines": lines or ["No marked Rank 5+ Skills."]}

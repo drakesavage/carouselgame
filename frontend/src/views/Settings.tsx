@@ -3,6 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { AlertTriangle, Bot, Database, Download, History, KeyRound, Save, Smartphone } from "lucide-react";
 import { api, Prefs, SavePoint } from "../api";
 import { Chip, Empty, Panel } from "../ui";
+import { Diagnostics } from "./Diagnostics";
 
 export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: number; version: number; onChanged: () => void; onCampaign: (id: number) => void }) {
   const [prefs, setPrefs] = useState<Prefs | null>(null);
@@ -124,6 +125,11 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
           )}
         </Panel>
       </div>
+
+      <details className="card" style={{ marginTop: 14 }}>
+        <summary style={{ cursor: "pointer" }}><b>GM diagnostics</b> <span className="sub">(development: context packets, tool rounds, dice, integrity checks; GM token required)</span></summary>
+        <div style={{ marginTop: 12 }}>{cid ? <Diagnostics cid={cid} /> : <div className="muted">Open a campaign first.</div>}</div>
+      </details>
 
       <Dialog.Root open={!!confirm} onOpenChange={(o) => !o && setConfirm(null)}>
         <Dialog.Portal>

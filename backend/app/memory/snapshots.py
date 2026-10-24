@@ -31,11 +31,15 @@ SNAPSHOT_TABLES: dict[str, str] = {
     "lore_facts": "SELECT * FROM lore_facts WHERE campaign_id = ?",
     "gm_secrets": "SELECT * FROM gm_secrets WHERE campaign_id = ?",
     "memory_summaries": "SELECT * FROM memory_summaries WHERE campaign_id = ?",
+    "party_groups": "SELECT * FROM party_groups WHERE campaign_id = ?",
+    "scenes": "SELECT * FROM scenes WHERE campaign_id = ?",
+    "memories": "SELECT * FROM memories WHERE campaign_id = ?",
+    "ability_uses": "SELECT * FROM ability_uses WHERE campaign_id = ?",
 }
 # Delete children before parents.
 _DELETE_ORDER = ["skills", "status_effects", "npc_profiles", "relationships", "achievements", "items", "locations",
                  "quests", "encounters", "clocks", "house_rules", "rulings", "lore_facts", "gm_secrets",
-                 "memory_summaries", "characters"]
+                 "memory_summaries", "party_groups", "scenes", "memories", "ability_uses", "characters"]
 _LOGS = {"messages": "max_message_id", "events": "max_event_id", "dice_rolls": "max_roll_id", "turns": "max_turn_id"}
 
 
@@ -83,7 +87,8 @@ def restore_save_point(conn: sqlite3.Connection, cid: int, save_point_id: int) -
         conn.execute("PRAGMA defer_foreign_keys = ON")
         char_ids = [r[0] for r in conn.execute("SELECT id FROM characters WHERE campaign_id = ?", (cid,))]
         marks = ",".join("?" * len(char_ids)) or "NULL"
-        for table in _DELETE_ORDER:
+        # Tables a save point predates (added in a later schema) are left as they are.
+        for table in [t for t in _DELETE_ORDER if t in snapshot]:
             if table in ("skills", "status_effects"):
                 conn.execute(f"DELETE FROM {table} WHERE character_id IN ({marks})", char_ids)
             elif table == "npc_profiles":
@@ -93,7 +98,7 @@ def restore_save_point(conn: sqlite3.Connection, cid: int, save_point_id: int) -
         camp = snapshot["campaigns"][0]
         conn.execute(f"UPDATE campaigns SET {', '.join(f'{k} = ?' for k in camp if k != 'id')} WHERE id = ?",
                      (*[v for k, v in camp.items() if k != "id"], cid))
-        for table in reversed(_DELETE_ORDER):
+        for table in [t for t in reversed(_DELETE_ORDER) if t in snapshot]:
             for r in snapshot.get(table, []):
                 cols = list(r)
                 conn.execute(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",

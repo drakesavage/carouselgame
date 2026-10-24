@@ -26,6 +26,7 @@ from ..memory.summaries import maybe_summarize
 from ..memory.views import floor_clock
 from ..reference import rulebooks
 from ..rules.dice import DiceRoller, record_roll
+from .integrity import check as check_integrity
 from .prompts import SYSTEM_PROMPT
 from .providers import GMProvider, ProviderError, prune_jobs
 from .tools import BOOKKEEPING_TOOLS, TOOL_SPECS, ToolRunner
@@ -48,6 +49,12 @@ class Progress:
     def set(self, stage: str, detail: str = "") -> None:
         self.stage, self.detail = stage, detail
         self.log.append(f"{round(time.time() - self.started, 1)}s {stage}{': ' + detail if detail else ''}")
+
+
+def recover_interrupted_turns(conn) -> int:
+    """At startup: a turn still 'processing' was cut off by a stop/crash; its transaction never committed."""
+    return conn.execute("UPDATE turns SET status = 'failed', error = 'Interrupted: the server stopped while this turn was being resolved. Nothing was applied; retry it.', "
+                        "completed_at = ? WHERE status = 'processing'", (now_iso(),)).rowcount
 
 
 class TurnService:
@@ -133,16 +140,20 @@ class TurnService:
         cid = turn["campaign_id"]
         provider = self.provider_factory()
         runner = ToolRunner(conn, rule_conn, self.roller, cid, turn_id)
+        steps: list[dict] = []
+        usage: list[dict] = []
+        t_before = one(conn, "SELECT game_time_minutes FROM campaigns WHERE id = ?", (cid,))["game_time_minutes"]
         try:
             with transaction(conn):
                 prog.set("loading", "campaign state")
-                steps: list[dict] = [build_context(conn, cid, turn["player_input"], self.settings.recent_message_window),
+                steps = [build_context(conn, cid, turn["player_input"], self.settings.recent_message_window, rule_conn),
                                      {"kind": "player", "text": turn["player_input"]}]
                 narration = None
                 for round_no in range(1, self.settings.max_tool_rounds + 1):
                     prog.rounds = round_no
                     prog.set("gm_thinking", f"{provider.name} round {round_no}")
                     resp = provider.complete(SYSTEM_PROMPT, steps, TOOL_SPECS, job_label=f"t{turn_id}r{round_no}")
+                    usage.append({"round": round_no, **{k: resp.meta.get(k) for k in ("usage", "duration_s", "model", "effort", "prompt_chars") if k in resp.meta}})
                     if not resp.tool_calls:
                         narration = resp.narration
                         if narration:
@@ -168,6 +179,11 @@ class TurnService:
                 conn.execute("UPDATE turns SET status = 'completed', provider = ?, response_json = ?, completed_at = ? WHERE id = ?",
                              (provider.name, json.dumps(response), now_iso(), turn_id))
                 create_save_point(conn, cid, f"After turn {turn_id}", kind="auto", turn_id=turn_id, keep_auto=self.settings.autosave_keep)
+                fx = runner.effects
+                flags = check_integrity(conn, cid, turn["player_input"], narration, fx.changes, fx.rolls, fx.errors, fx.notices)
+                t_after = one(conn, "SELECT game_time_minutes FROM campaigns WHERE id = ?", (cid,))["game_time_minutes"]
+                self._save_diagnostics(conn, turn_id, cid, steps, usage, flags, {"game_time_before": t_before, "game_time_after": t_after,
+                                                                                   "changes": fx.changes, "errors": fx.errors})
             prog.set("done")
             try:
                 maybe_summarize(conn, cid, provider, self.settings.summarize_every_messages)
@@ -183,6 +199,9 @@ class TurnService:
                 for res, char_id, hidden in runner.effects.roll_records:  # dice audit survives the rollback
                     res.reason = f"[failed turn] {res.reason or ''}"
                     record_roll(conn, cid, res, turn_id=turn_id, character_id=char_id, hidden=hidden)
+                self._save_diagnostics(conn, turn_id, cid, steps, usage, [{"level": "error", "message": err[:1000]}],
+                                       {"game_time_before": t_before, "game_time_after": t_before, "changes": [], "errors": runner.effects.errors,
+                                        "rolled_back": True})
             if not isinstance(exc, (ProviderError, ValueError, KeyError)):
                 traceback.print_exc()
         finally:
@@ -190,14 +209,37 @@ class TurnService:
             if rule_conn is not None:
                 rule_conn.close()
 
+    @staticmethod
+    def _save_diagnostics(conn, turn_id: int, cid: int, steps: list[dict], usage: list[dict], flags: list[dict], extra: dict) -> None:
+        """GM-only record of what the GM saw and did this turn (served only by /api/gm)."""
+        def trim(v, n=4000):
+            t = json.dumps(v, ensure_ascii=False, default=str)
+            return v if len(t) <= n else t[:n] + "…"
+        ctx = steps[0] if steps and steps[0].get("kind") == "context" else {}
+        trimmed = []
+        for st in steps[1:]:
+            st = dict(st)
+            if st.get("kind") == "tool_results":
+                st["results"] = [{**r, "result": trim(r.get("result"))} for r in st["results"]]
+            trimmed.append(st)
+        conn.execute("INSERT OR REPLACE INTO turn_diagnostics (turn_id, campaign_id, context_text, steps_json, usage_json, integrity_json, created_at) VALUES (?,?,?,?,?,?,?)",
+                     (turn_id, cid, ctx.get("text", ""), json.dumps(trimmed, default=str),
+                      json.dumps({"rounds": usage, "context_sizes": ctx.get("sizes"), "present": ctx.get("present"), **extra}, default=str),
+                      json.dumps(flags), now_iso()))
+
     def _commit_turn(self, conn, cid: int, turn: dict, narration: str, runner: ToolRunner, provider_name: str) -> dict:
         ts = now_iso()
         fx = runner.effects
         pmsg = conn.execute("INSERT INTO messages (campaign_id, turn_id, role, content, created_at) VALUES (?,?,?,?,?)",
                             (cid, turn["id"], "player", turn["player_input"], ts)).lastrowid
         camp = one(conn, "SELECT game_time_minutes, floor_deadline_minutes FROM campaigns WHERE id = ?", (cid,))
+        card_types = ("item_added", "achievement", "level_awarded", "skill_changed", "quest_added", "quest_completed", "quest_failed",
+                      "status_added", "character_down", "character_death", "mob_defeated", "advancement_checkpoint", "encounter_start",
+                      "encounter_end", "stats_allocated", "ai_favor_changed", "floor_collapse", "dungeon_day", "group_moved", "scene_started")
+        cards = [{"type": e["type"], "summary": e["summary"]} for e in rows(conn, f"""SELECT type, summary FROM events WHERE turn_id = ? AND visibility = 'player'
+                 AND type IN ({','.join('?' * len(card_types))}) ORDER BY id""", (turn["id"], *card_types))]
         meta = {"rolls": fx.rolls, "changes": fx.changes, "rules_cited": sorted(set(fx.rules_cited)), "provider": provider_name,
-                "floor_clock": floor_clock(camp)}
+                "floor_clock": floor_clock(camp), "cards": cards}
         gmsg = conn.execute("INSERT INTO messages (campaign_id, turn_id, role, content, meta_json, created_at) VALUES (?,?,?,?,?,?)",
                             (cid, turn["id"], "gm", narration, json.dumps(meta), ts)).lastrowid
         notice_ids = []

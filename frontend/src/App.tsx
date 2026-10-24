@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Backpack, BookOpen, Clock3, FileText, Flag, GitCommitHorizontal, MessageSquareText, Settings2, UserRound, Users } from "lucide-react";
-import { api, Campaign, CampaignListItem, fmtMinutes } from "./api";
+import { api, Campaign, CampaignListItem, fmtMinutes, Manifest } from "./api";
+import { ManifestContext } from "./views/Hud";
 import { Chip } from "./ui";
 import { StoryView, SystemNotice } from "./views/Story";
 import { CharacterSheetDialog } from "./views/Sheet";
@@ -35,6 +36,8 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [provider, setProvider] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [manifest, setManifest] = useState<Manifest>({ locations: {}, characters: {} });
+  useEffect(() => { api.manifest().then((m) => setManifest({ locations: m.locations ?? {}, characters: m.characters ?? {} })).catch(() => {}); }, []);
 
   useEffect(() => {
     Promise.all([api.campaigns(), api.settings()]).then(([list, prefs]) => {
@@ -64,9 +67,13 @@ export default function App() {
     setToasts((t) => [...t, ...add].slice(-4));
     add.forEach((t) => setTimeout(() => setToasts((all) => all.filter((x) => x.id !== t.id)), 9000));
   };
+  const dismiss = (id: number) => {
+    setToasts((all) => all.filter((x) => x.id !== id));
+  };
 
   if (error) return <div className="view"><div className="error-box">Could not reach the Crawler Console server: {error}</div></div>;
   return (
+    <ManifestContext.Provider value={manifest}>
     <div className="app">
       <header className="topbar">
         <div className="brand">
@@ -111,7 +118,10 @@ export default function App() {
         )}
       </main>
       {cid != null && <CharacterSheetDialog cid={cid} charId={sheet} onClose={() => setSheet(null)} onChanged={refresh} />}
-      <div className="toasts" aria-live="polite">{toasts.map((t) => <div key={t.id} className="toast"><SystemNotice text={t.text} style={t.style} /></div>)}</div>
+      <div className="toasts" aria-live="polite">
+        {toasts.map((t) => <div key={t.id} className="toast" onClick={() => dismiss(t.id)} title="Click to dismiss"><SystemNotice text={t.text} style={t.style} /></div>)}
+      </div>
     </div>
+    </ManifestContext.Provider>
   );
 }

@@ -49,6 +49,7 @@ class AddItem(BaseModel):
 
 class RemoveItem(BaseModel):
     op: Literal["remove_item"]
+    item_id: int | None = None   # stable id (preferred over name when known)
     character: str | None = None
     name: str
     quantity: int = Field(default=1, ge=1, le=100000)
@@ -57,6 +58,7 @@ class RemoveItem(BaseModel):
 
 class TransferItem(BaseModel):
     op: Literal["transfer_item"]
+    item_id: int | None = None   # stable id (preferred over name when known)
     from_character: str | None = None
     to_character: str | None = None
     name: str
@@ -65,6 +67,7 @@ class TransferItem(BaseModel):
 
 class EquipItem(BaseModel):
     op: Literal["equip_item"]
+    item_id: int | None = None   # stable id (preferred over name when known)
     character: str
     name: str
     equipped: bool = True
@@ -99,6 +102,8 @@ class AdvanceTime(BaseModel):
     op: Literal["advance_time"]
     minutes: int = Field(ge=1, le=60 * 24 * 10)
     reason: str
+    # CAMPAIGN mending: each full hour outside combat/stress restores 1 Health Bar slot + 5 Mana for these characters
+    mending: list[str] | Literal["all"] | None = None
 
 
 class SetLocation(BaseModel):
@@ -112,7 +117,11 @@ class SetLocation(BaseModel):
 class QuestUpsert(BaseModel):
     op: Literal["quest"]
     title: str = Field(min_length=1, max_length=160)
-    kind: Literal["quest", "project", "crafting"] | None = None
+    # commitment = a promise or NPC agreement; reservation = something held/reserved but NOT owned (never an item)
+    kind: Literal["quest", "project", "crafting", "commitment", "reservation"] | None = None
+    details: dict[str, Any] | None = None        # merged: design status, contributors, resources, build time, difficulty, terms...
+    due_in_minutes: int | None = Field(default=None, ge=0)   # game minutes from now
+    owner: str | None = None                     # character who holds the commitment
     description: str | None = None
     status: Literal["active", "completed", "failed", "paused"] | None = None
     priority: int | None = Field(default=None, ge=1, le=3)
@@ -161,6 +170,7 @@ class AllocateStats(BaseModel):
 
 class SetQuantity(BaseModel):
     op: Literal["set_quantity"]
+    item_id: int | None = None   # stable id (preferred over name when known)
     character: str | None = None
     name: str
     quantity: int = Field(ge=0, le=1000000)
@@ -285,9 +295,9 @@ def _apply_add_item(ctx: Ctx, op: AddItem) -> dict:
     return {"summary": summary, "item_id": item_id}
 
 
-def _take(ctx: Ctx, owner: dict | None, name: str, quantity: int) -> dict:
+def _take(ctx: Ctx, owner: dict | None, name: str, quantity: int, item_id: int | None = None) -> dict:
     owner_id = owner["id"] if owner else None
-    item = _find_item(ctx.conn, ctx.campaign_id, owner_id, name)
+    item = _item_by_id(ctx, item_id, owner) if item_id else _find_item(ctx.conn, ctx.campaign_id, owner_id, name)
     if not item:
         raise ChangeError(f"{_owner_label(owner)} has no item matching {name!r}")
     if item["quantity"] is None:
@@ -304,7 +314,7 @@ def _take(ctx: Ctx, owner: dict | None, name: str, quantity: int) -> dict:
 
 def _apply_remove_item(ctx: Ctx, op: RemoveItem) -> dict:
     owner = resolve_character(ctx.conn, ctx.campaign_id, op.character, allow_shared=True)
-    item = _take(ctx, owner, op.name, op.quantity)
+    item = _take(ctx, owner, op.name, op.quantity, op.item_id)
     summary = f"{_owner_label(owner)} loses {op.quantity}× {item['name']}" + (f" — {op.cause}" if op.cause else "")
     ctx.event("item_removed", summary, {"item_id": item["id"], "quantity": op.quantity})
     ctx.conn.execute("DELETE FROM items WHERE id = ? AND quantity = 0", (item["id"],))
@@ -316,7 +326,7 @@ def _apply_transfer_item(ctx: Ctx, op: TransferItem) -> dict:
     dst = resolve_character(ctx.conn, ctx.campaign_id, op.to_character, allow_shared=True)
     if (src or {}).get("id") == (dst or {}).get("id"):
         raise ChangeError("source and destination are the same")
-    item = _take(ctx, src, op.name, op.quantity)
+    item = _take(ctx, src, op.name, op.quantity, op.item_id)
     dst_id = dst["id"] if dst else None
     same = _find_item(ctx.conn, ctx.campaign_id, dst_id, item["name"])
     if same and same["name"] == item["name"] and same["properties"] == item["properties"]:
@@ -335,7 +345,7 @@ def _apply_transfer_item(ctx: Ctx, op: TransferItem) -> dict:
 
 def _apply_equip_item(ctx: Ctx, op: EquipItem) -> dict:
     c = resolve_character(ctx.conn, ctx.campaign_id, op.character)
-    item = _find_item(ctx.conn, ctx.campaign_id, c["id"], op.name)
+    item = _item_by_id(ctx, op.item_id, c) if op.item_id else _find_item(ctx.conn, ctx.campaign_id, c["id"], op.name)
     if not item:
         raise ChangeError(f"{c['name']} is not carrying {op.name!r}")
     ctx.conn.execute("UPDATE items SET equipped = ?, slot = COALESCE(?, slot) WHERE id = ?", (int(op.equipped), op.slot, item["id"]))
@@ -385,7 +395,15 @@ def _apply_advance_time(ctx: Ctx, op: AdvanceTime) -> dict:
     deadline = camp["floor_deadline_minutes"]
     if deadline is not None and before < deadline <= after:
         ctx.event("floor_collapse", "THE FLOOR TIMER HAS EXPIRED", {"deadline": deadline})
-    return {"summary": summary, "game_time_minutes": after,
+    from .state_ops import apply_mending, reset_uses
+    day_len = one(ctx.conn, "SELECT day_length_minutes FROM campaigns WHERE id = ?", (ctx.campaign_id,))["day_length_minutes"] or 1800
+    if before // day_len != after // day_len:
+        reset_uses(ctx, ("day",))
+        ctx.event("dungeon_day", f"Dungeon day {after // day_len + 1} begins (daily abilities and grinding limits reset)", {"day": after // day_len + 1})
+    mended = apply_mending(ctx, op.mending, op.minutes // 60) if op.mending else []
+    for line in mended:
+        ctx.event("mending", line, {})
+    return {"summary": summary + (f"; mending: {'; '.join(mended)}" if mended else ""), "game_time_minutes": after,
             "remaining_minutes": None if deadline is None else max(0, deadline - after)}
 
 
@@ -407,8 +425,16 @@ def _apply_set_location(ctx: Ctx, op: SetLocation) -> dict:
 
 def _apply_quest(ctx: Ctx, op: QuestUpsert) -> dict:
     q = one(ctx.conn, "SELECT * FROM quests WHERE campaign_id = ? AND lower(title) = lower(?)", (ctx.campaign_id, op.title.strip()))
+    extra: dict[str, Any] = {}
+    if op.details is not None:
+        extra["details_json"] = json.dumps({**((q or {}).get("details") or {}), **op.details})
+    if op.due_in_minutes is not None:
+        extra["due_at_minutes"] = ctx.game_time() + op.due_in_minutes
+    if op.owner:
+        extra["owner_character_id"] = resolve_character(ctx.conn, ctx.campaign_id, op.owner)["id"]
     if q:
-        fields = {k: v for k, v in op.model_dump(exclude={"op", "title"}).items() if v is not None}
+        fields = {k: v for k, v in op.model_dump(exclude={"op", "title", "details", "due_in_minutes", "owner"}).items() if v is not None}
+        fields.update(extra)
         if not fields:
             raise ChangeError("quest update has no changes")
         ctx.conn.execute(f"UPDATE quests SET {', '.join(f'{k} = ?' for k in fields)}, updated_at = ? WHERE id = ?",
@@ -423,10 +449,24 @@ def _apply_quest(ctx: Ctx, op: QuestUpsert) -> dict:
             (ctx.campaign_id, op.kind or "quest", op.title.strip(), op.description, op.status or "active",
              op.priority or 2, op.progress, op.giver, now_iso()),
         )
+        if extra:
+            qid = ctx.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            ctx.conn.execute(f"UPDATE quests SET {', '.join(f'{k} = ?' for k in extra)} WHERE id = ?", (*extra.values(), qid))
         summary = f"New {op.kind or 'quest'}: {op.title.strip()}"
         etype = "quest_added"
     ctx.event(etype, summary, op.model_dump(exclude={"op"}))
     return {"summary": summary}
+
+
+def _item_by_id(ctx: "Ctx", item_id: int, owner: dict | None) -> dict:
+    it = one(ctx.conn, "SELECT * FROM items WHERE id = ? AND campaign_id = ?", (item_id, ctx.campaign_id))
+    if not it:
+        raise ChangeError(f"no item #{item_id}")
+    if owner is not None and it["owner_character_id"] != owner["id"]:
+        raise ChangeError(f"item #{item_id} ({it['name']}) is not carried by {owner['name']}")
+    if owner is None and it["owner_character_id"] is not None:
+        raise ChangeError(f"item #{item_id} ({it['name']}) is not in the shared stash")
+    return it
 
 
 def _apply_npc_attitude(ctx: Ctx, op: NpcAttitude) -> dict:
@@ -512,7 +552,7 @@ def _apply_allocate_stats(ctx: Ctx, op: AllocateStats) -> dict:
 
 def _apply_set_quantity(ctx: Ctx, op: SetQuantity) -> dict:
     owner = resolve_character(ctx.conn, ctx.campaign_id, op.character, allow_shared=True)
-    item = _find_item(ctx.conn, ctx.campaign_id, owner["id"] if owner else None, op.name)
+    item = _item_by_id(ctx, op.item_id, owner) if op.item_id else _find_item(ctx.conn, ctx.campaign_id, owner["id"] if owner else None, op.name)
     if not item:
         raise ChangeError(f"{_owner_label(owner)} has no item matching {op.name!r}")
     ctx.conn.execute("UPDATE items SET quantity = ? WHERE id = ?", (op.quantity, item["id"]))
@@ -597,3 +637,4 @@ def ops_reference() -> str:
             fields.append(f"{fname}{'' if f.is_required() else '?'}: {ann}")
         lines.append(f"- {name}: {', '.join(fields)}")
     return "\n".join(lines)
+

@@ -192,6 +192,8 @@ class Builder:
                     self.set(f, ["open_objectives", {"id": oid}, "status"], want, f"Objective “{q['title'][:60]}” → {want}", "Quests")
                 if q["progress"] and q["progress"] != o.get("progress"):
                     self.set(f, ["open_objectives", {"id": oid}, "progress"], q["progress"], f"Objective progress: {q['title'][:60]}", "Quests")
+            elif (q.get("details") or {}).get("ledger_source"):
+                continue  # seeded from another ledger record (reservation note, checkpoint promise): already in the ledger
             else:
                 oid = slugify(q["title"])[:60]
                 while oid in existing_ids:

@@ -7,7 +7,11 @@ import "@fontsource/ibm-plex-sans/400-italic.css";
 import "@fontsource/ibm-plex-sans/600.css";
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/600.css";
+import "@fontsource/literata/400.css";
+import "@fontsource/literata/400-italic.css";
+import "@fontsource/literata/600.css";
 import "./styles.css";
+import "./hud-v2.css";
 import App from "./App";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

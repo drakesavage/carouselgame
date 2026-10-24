@@ -34,7 +34,12 @@ TOOL_SPECS: list[dict] = [
      "parameters": {"expression": "str", "reason": "str", "target": "int?", "character": "str?", "hidden": "bool?"}},
     {"name": "apply_changes",
      "description": "Validate and apply durable state changes. Each change is an object with an `op`. Characters may be referenced by "
-                    "name, slug or 'player'. character null/'shared' = shared stash. Ops:\n" + ops_reference(),
+                    "name, slug, numeric id or 'player'; items by name or item_id. character null/'shared' = shared stash. "
+                    "Use skill/level/ai_favor for training and awards, group/move_group/move_character for party splits (never teleport "
+                    "people: only move who actually goes), scene to keep the current scene current, remember for NPC memories and private "
+                    "beats, quest kind commitment/reservation for promises and held items (a reservation is never an owned item), "
+                    "use_ability for limited uses, rest in saferooms, advance_time mending for calm hours. Scene fields, quest details, groups "
+                    "and remember(visibility player) are SHOWN TO THE PLAYER: put hidden material only in gm_note or remember(visibility gm). Ops:\n" + ops_reference(),
      "parameters": {"changes": "[change objects]"}},
     {"name": "search_rules",
      "description": "Search campaign house rules, established rulings, and the indexed official rulebooks (with page refs). Give 2-4 "
@@ -101,6 +106,17 @@ COMBAT_SPECS: list[dict] = [
      "parameters": {"character": "str", "slots": "int", "cause": "str"}},
 ]
 TOOL_SPECS.extend(COMBAT_SPECS)
+TOOL_SPECS.extend([
+    {"name": "grind",
+     "description": "Grinding montage (BOOK 14.6-14.7): add hours to a Skill's grind progress; when hours reach its Rank (once per Skill per "
+                    "dungeon day) roll the advancement check; also adds Level-grind progress. map_bonus: +1 hour for 5+ hour sessions with a "
+                    "Neighborhood Map. Does not advance time: also call advance_time.",
+     "parameters": {"character": "str", "skill": "str", "hours": "int", "map_bonus": "bool?"}},
+    {"name": "resolve_floor_end",
+     "description": "At floor end: roll advancement for every marked Rank 5+ Skill (1d20 vs Rank). advantage: [{character, skill}] for "
+                    "benefits such as the Human race's one eligible Rank 9-or-lower check with Advantage.",
+     "parameters": {"occasion": "str", "advantage": "[{character, skill}]?"}},
+])
 BOOKKEEPING_TOOLS.update({"combat_action"})
 TOOL_NAMES = [t["name"] for t in TOOL_SPECS]
 
@@ -184,6 +200,31 @@ class ToolRunner:
         record_roll(self.conn, self.cid, res, turn_id=self.turn_id, character_id=char["id"] if char else None, hidden=req.hidden)
         self._card(res, char["id"] if char else None)
         return {"roll_id": res.id, "total": res.total, "dice": [d.value for d in res.dice if d.kept], "outcome": res.outcome, "hidden": req.hidden}
+
+    def _card_new_rolls(self) -> None:
+        """Show every roll recorded during this turn that has no card yet (tools that roll internally)."""
+        from ..rules.dice import Die, RollResult
+        seen = {x[0].id for x in self.effects.roll_records}
+        for r in rows(self.conn, "SELECT * FROM dice_rolls WHERE turn_id = ? AND campaign_id = ? ORDER BY id", (self.turn_id, self.cid)):
+            if r["id"] in seen:
+                continue
+            self._card(RollResult(r["expression"], [Die(**d) for d in r["dice"]], r["modifier"], r["total"], r["target"], r["outcome"],
+                                  r["reason"], r["id"], bool(r["hidden"]), r["degree"], r["detail"]), r["character_id"])
+
+    def t_grind(self, a: dict) -> dict:
+        from ..rules.checks import grind
+        out = grind(self.conn, self.conn, self.roller, self.cid, self.turn_id, str(a["character"]), str(a["skill"]), int(a["hours"]),
+                    bool(a.get("map_bonus")))
+        self._card_new_rolls()
+        self.effects.changes.extend(out["lines"][:-1])
+        return out
+
+    def t_resolve_floor_end(self, a: dict) -> dict:
+        from ..rules.checks import resolve_floor_end
+        out = resolve_floor_end(self.conn, self.conn, self.roller, self.cid, self.turn_id, str(a.get("occasion") or "floor end"), a.get("advantage"))
+        self._card_new_rolls()
+        self.effects.changes.extend(out["lines"])
+        return out
 
     # -- combat
     def _combat(self, fn, *args, **kw) -> dict:

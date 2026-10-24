@@ -557,6 +557,10 @@ def import_ledger(conn: sqlite3.Connection, root: Path, *, name_suffix: str = ""
         for rel in src.glob("*.md") + src.glob("state/*.yaml") + files + src.glob("checkpoints/*.md") + src.glob("gm_state/*.md") + gm_files + src.glob("gm_state/characters/*.md"):
             vis = "gm" if rel.startswith("gm_state/") else "player"
             rep.count("record_sections_gm" if vis == "gm" else "record_sections", _store_sections(conn, cid, rel, src.text(rel), vis))
+        from .organization import seed_play_state
+        state_docs = {rel: src.yaml(rel) for rel in src.glob("state/*.yaml")}
+        latest_md = src.text("checkpoints/latest.md") if src.exists("checkpoints/latest.md") else None
+        rep.notes.extend(seed_play_state(conn, cid, state_docs, latest_md))
         create_save_point(conn, cid, "Imported from campaign ledger", kind="import")
     changed = src.verify_unchanged()
     rep.source["files_read"] = len(src.hashes)

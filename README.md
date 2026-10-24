@@ -85,6 +85,8 @@ changes, turn persistence, idempotent retries, failed-turn rollback, atomic chan
 autosave pruning, GM/player data separation (including the built JS bundle), rulebook ingestion and page references,
 campaign import (fixture ledger plus your real ledger when present), and ledger write-back (minimal diffs,
 idempotence, conflicts, validator rollback, and a round trip through your real ledger's own validator, run on throwaway copies).
+`test_state_v2.py` covers the v2 ops; `test_campaign_regression.py` replays the Denton campaign rules (skills, splits,
+reservations, the siphon project, NPC privacy, restart continuity) on a copy of your real ledger, never the live database.
 
 ## Playing
 
@@ -100,6 +102,23 @@ idempotence, conflicts, validator rollback, and a round trip through your real l
 * **Records**: the imported ledger, verbatim and searchable (player-visible files only).
 * **Saves & Settings**: manual saves, restore (always reversible), GM provider, re-import, latest migration report.
 * **Ledger**: writes play back to the Git campaign ledger (`dccrepository`) as one reviewed commit. See below.
+
+The Story view is a HUD: a scene banner (title, location, conditions, threats, who is present), dialogue with
+portraits, system announcements, discovery cards for loot, quests and level-ups, and a separate *Mechanics* block for
+rolls and ledger updates. The sidebar groups the party by where each group is and what it's doing, with role badges.
+Animations respect the OS "reduce motion" setting. Optional art goes in `data/assets/` and is listed in
+`data/assets/manifest.json` (created on first start); nothing is generated per turn.
+
+**Party splits, scenes and memory.** The GM tracks groups (`group`, `move_group`, `move_character`), the current scene
+(`scene`; closing one writes a summary into memory), NPC memories (`remember`), limited-use abilities (`use_ability`),
+rest (`rest`, saferooms only), skill training (`skill`) and level awards (`level`). Projects, promises and reservations
+are quests with details and due times, so a reserved item is never counted as owned. On first start after upgrading,
+the importer seeds groups, the scene, the siphon project, the Personal Stabber reservation and Scout's promise from
+the ledger text. See [docs/AUDIT.md](docs/AUDIT.md) for what is verified and what is still open.
+
+**GM diagnostics** (*Saves & Settings → GM diagnostics*, needs the GM token from `data/gm_token.txt`): each turn's
+full context packet, tool rounds, Codex usage, game time elapsed, and an integrity report that flags rejected changes,
+gold/HP/item/time mentions that don't match the ledger updates, counted cycles on a recap, and leaked GM-only text.
 
 ## Combat
 

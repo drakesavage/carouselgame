@@ -110,7 +110,27 @@ you will be called again to fix it. A response with no tool calls and non-null n
 
 # ------------------------------------------------------------------ Codex CLI
 CAPACITY = re.compile(r"at capacity|rate.?limit(?:ed)?|too many requests|\b429\b|overloaded|server (?:is )?busy|temporarily unavailable", re.I)
-DISABLED_FEATURES = ["memories", "apps", "plugins", "browser_use", "browser_use_external", "computer_use", "in_app_browser", "image_generation"]
+# GM jobs get no shell, no hooks, no sub-agents, no MCP servers, no browser/computer use and no image generation: the
+# model can only return JSON; the server runs every tool. (Verified: with shell_tool disabled a "run dir" request
+# answers that it cannot run commands, and the event stream shows no command executions.)
+DISABLED_FEATURES = ["shell_tool", "shell_snapshot", "multi_agent", "hooks", "memories", "apps", "plugins", "browser_use",
+                     "browser_use_external", "computer_use", "in_app_browser", "image_generation"]
+
+
+def _usage(stdout: str) -> dict[str, Any]:
+    """Token usage and safety signals from `codex exec --json` events."""
+    out: dict[str, Any] = {}
+    for line in stdout.splitlines():
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if ev.get("type") == "turn.completed" and isinstance(ev.get("usage"), dict):
+            out["usage"] = ev["usage"]
+        item = ev.get("item") or {}
+        if isinstance(item, dict) and item.get("type") in ("command_execution", "local_shell_call", "file_change"):
+            out["commands_run"] = out.get("commands_run", 0) + 1
+    return out
 
 
 class CodexCliProvider:
@@ -140,7 +160,8 @@ class CodexCliProvider:
         args = [binary, "exec", "--skip-git-repo-check", "--ephemeral"]
         for f in DISABLED_FEATURES:
             args += ["--disable", f]
-        args += ["--sandbox", "read-only", "--cd", str(job), "--output-schema", str(job / "schema.json"), "-o", str(final)]
+        args += ["-c", "mcp_servers={}", "--json",
+                 "--sandbox", "read-only", "--cd", str(job), "--output-schema", str(job / "schema.json"), "-o", str(final)]
         if self.model:
             args += ["-m", self.model]
         if self.effort:
@@ -159,7 +180,11 @@ class CodexCliProvider:
             meta["duration_s"] = round(time.monotonic() - started, 1)
             stderr = proc.stderr.decode("utf-8", "replace")
             (job / "stderr.txt").write_text(stderr, encoding="utf-8")
-            (job / "stdout.txt").write_text(proc.stdout.decode("utf-8", "replace"), encoding="utf-8")
+            stdout = proc.stdout.decode("utf-8", "replace")
+            (job / "stdout.txt").write_text(stdout, encoding="utf-8")
+            meta.update(_usage(stdout))
+            if meta.get("commands_run"):
+                raise ProviderError("Codex attempted to run commands although the shell is disabled; refusing the result")
             if proc.returncode == 0 and final.exists():
                 return final.read_text(encoding="utf-8"), meta
             if CAPACITY.search(stderr) and attempt < len(self.retry_delays):
@@ -170,12 +195,16 @@ class CodexCliProvider:
 
     def complete(self, system: str, steps: list[dict], tools: list[dict], *, job_label: str) -> ProviderResponse:
         prompt = "\n\n".join([system, "# TOOLS\n" + tool_catalogue(tools), render_steps(steps), OUTPUT_PROTOCOL])
-        raw, meta = self._run(prompt, output_schema([t["name"] for t in tools]), job_label)
-        try:
-            data = json.loads(raw)
-            calls = [ToolCall(c["name"], json.loads(c["arguments_json"] or "{}")) for c in data.get("tool_calls") or []]
-        except (json.JSONDecodeError, KeyError, TypeError) as exc:
-            raise ProviderError(f"Codex returned malformed output: {exc}") from None
+        for attempt in range(2):  # one retry for malformed structured output
+            raw, meta = self._run(prompt, output_schema([t["name"] for t in tools]), f"{job_label}{'-retry' if attempt else ''}")
+            try:
+                data = json.loads(raw)
+                calls = [ToolCall(c["name"], json.loads(c["arguments_json"] or "{}")) for c in data.get("tool_calls") or []]
+                break
+            except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
+                if attempt:
+                    raise ProviderError(f"Codex returned malformed output twice: {exc}") from None
+        meta["prompt_chars"] = len(prompt)
         narration = data.get("narration")
         return ProviderResponse(calls, narration.strip() if isinstance(narration, str) and narration.strip() else None, meta)
 

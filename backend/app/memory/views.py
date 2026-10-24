@@ -12,7 +12,7 @@ from ..db import one, rows
 
 PUBLIC_CHAR_COLUMNS = """id, campaign_id, slug, name, kind, roster_category, crawler_number, species, race, class_name, level,
     status, location, in_party, party_order, hp_current, hp_max, mana_current, mana_max, ai_favor, stats_json,
-    derived_json, portrait_path, provenance"""
+    derived_json, portrait_path, provenance, assignment"""
 
 
 def floor_clock(camp: dict) -> dict:
@@ -56,6 +56,23 @@ def campaign_summary(conn: sqlite3.Connection, cid: int) -> dict | None:
                                     WHERE campaign_id = ? AND status = 'active' AND visibility = 'player' ORDER BY id DESC LIMIT 1""", (cid,)), conn)
     camp["clocks"] = rows(conn, "SELECT key, label, kind, current, maximum, unit FROM clocks WHERE campaign_id = ? AND visibility = 'player'", (cid,))
     camp["last_save"] = one(conn, "SELECT id, label, kind, created_at FROM save_points WHERE campaign_id = ? ORDER BY id DESC LIMIT 1", (cid,))
+    from ..rules.state_ops import day_info
+    camp["day"] = day_info(conn, cid)
+    camp["scene"] = one(conn, """SELECT id, title, location, group_key, situation, conditions, threats, participants_json, started_game_minutes
+                                 FROM scenes WHERE campaign_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1""", (cid,))
+    groups = rows(conn, "SELECT key, label, location, activity FROM party_groups WHERE campaign_id = ? AND status = 'active' ORDER BY id", (cid,))
+    cards = {c["id"]: c for c in (character_card(conn, x) for x in rows(conn, f"SELECT {PUBLIC_CHAR_COLUMNS} FROM characters WHERE campaign_id = ? AND status NOT IN ('deceased','dead') ORDER BY party_order, name", (cid,)))}
+    for g in groups:
+        g["members"] = [c for c in cards.values() if c.get("assignment") == g["key"]]
+    camp["groups"] = groups
+    camp["roster"] = list(cards.values())
+    camp["recent_events"] = rows(conn, """SELECT id, type, summary, game_time_minutes FROM events WHERE campaign_id = ? AND visibility = 'player' AND rolled_back = 0
+                                          AND type IN ('achievement','level_awarded','skill_changed','quest_completed','quest_added','item_added','character_down',
+                                                       'character_death','mob_defeated','advancement_checkpoint','encounter_start','encounter_end','group_moved',
+                                                       'scene_started','location_changed','floor_collapse','dungeon_day')
+                                          ORDER BY id DESC LIMIT 6""", (cid,))
+    camp["quests"] = rows(conn, """SELECT id, kind, title, description, status, priority, progress, details_json, due_at_minutes FROM quests
+                                   WHERE campaign_id = ? AND visibility = 'player' AND status IN ('active','paused') ORDER BY priority, id""", (cid,))
     return camp
 
 
@@ -72,6 +89,7 @@ def character_sheet(conn: sqlite3.Connection, cid: int, char_id: int) -> dict | 
     c["items"] = rows(conn, "SELECT id, name, quantity, equipped, slot, rarity, description, properties_json FROM items WHERE owner_character_id = ? ORDER BY equipped DESC, name", (char_id,))
     c["achievements"] = rows(conn, "SELECT title, description, game_time_minutes FROM achievements WHERE character_id = ? ORDER BY id DESC", (char_id,))
     c["npc_profile"] = one(conn, "SELECT personality, voice, known_motivation, attitude, last_seen FROM npc_profiles WHERE character_id = ?", (char_id,))
+    c["limited_uses"] = rows(conn, "SELECT ability, per, uses, uses_allowed, cooldown_minutes FROM ability_uses WHERE character_id = ? ORDER BY ability", (char_id,))
     c["relationships"] = rows(conn, """SELECT r.kind, r.description, a.name AS a_name, b.name AS b_name FROM relationships r
                                        JOIN characters a ON a.id = r.a_character_id JOIN characters b ON b.id = r.b_character_id
                                        WHERE r.visibility = 'player' AND (r.a_character_id = ? OR r.b_character_id = ?)""", (char_id, char_id))

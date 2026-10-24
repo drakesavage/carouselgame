@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -364,6 +364,79 @@ CREATE TABLE IF NOT EXISTS ledger_syncs (
   created_at TEXT NOT NULL
 );
 
+-- ---------- party organization, scenes, memory layers (schema v2) ----------
+-- Where each subgroup of the roster is and what it is doing; characters.assignment points at key.
+CREATE TABLE IF NOT EXISTS party_groups (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  key TEXT NOT NULL,
+  label TEXT NOT NULL,
+  location TEXT,
+  activity TEXT,
+  status TEXT NOT NULL DEFAULT 'active',     -- active | disbanded
+  source TEXT,
+  UNIQUE (campaign_id, key)
+);
+
+-- The current scene the GM is running (one active per campaign) and closed scenes with their summaries.
+CREATE TABLE IF NOT EXISTS scenes (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  title TEXT NOT NULL,
+  location TEXT,
+  group_key TEXT,
+  situation TEXT,
+  conditions TEXT,
+  threats TEXT,
+  participants_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'active',     -- active | closed
+  summary TEXT,
+  started_game_minutes INTEGER,
+  ended_game_minutes INTEGER,
+  source TEXT,
+  created_at TEXT NOT NULL
+);
+
+-- Episodic and per-character memories (canonical world facts stay in lore_facts; GM secrets in gm_secrets).
+CREATE TABLE IF NOT EXISTS memories (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  layer TEXT NOT NULL,                       -- episodic | npc
+  subject TEXT NOT NULL,                     -- character slug or free text
+  character_id INTEGER REFERENCES characters(id),
+  content TEXT NOT NULL,
+  visibility TEXT NOT NULL DEFAULT 'player', -- player = what the party saw/learned; gm = private beat
+  importance INTEGER NOT NULL DEFAULT 2,     -- 1 high .. 3 low
+  turn_id INTEGER,
+  game_time_minutes INTEGER,
+  created_at TEXT NOT NULL
+);
+
+-- Limited-use abilities and cooldowns (once per scene/day/floor/rest, or N minutes).
+CREATE TABLE IF NOT EXISTS ability_uses (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  character_id INTEGER NOT NULL REFERENCES characters(id),
+  ability TEXT NOT NULL,
+  per TEXT NOT NULL,                         -- scene | day | floor | short_rest | long_rest | minutes
+  uses_allowed INTEGER NOT NULL DEFAULT 1,
+  uses INTEGER NOT NULL DEFAULT 0,
+  cooldown_minutes INTEGER,
+  last_used_minutes INTEGER,
+  UNIQUE (character_id, ability)
+);
+
+-- GM-only per-turn diagnostics: the context packet, tool rounds, usage and the integrity report.
+CREATE TABLE IF NOT EXISTS turn_diagnostics (
+  turn_id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL,
+  context_text TEXT NOT NULL,
+  steps_json TEXT NOT NULL DEFAULT '[]',
+  usage_json TEXT NOT NULL DEFAULT '{}',
+  integrity_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS ix_messages_campaign ON messages(campaign_id, id);
 CREATE INDEX IF NOT EXISTS ix_events_campaign ON events(campaign_id, id);
 CREATE INDEX IF NOT EXISTS ix_rolls_campaign ON dice_rolls(campaign_id, id);
@@ -385,9 +458,24 @@ def connect(path: Path) -> sqlite3.Connection:
     return conn
 
 
+# Columns added after v1. init_db adds any that an existing database lacks; nothing is ever dropped or rewritten.
+COLUMN_MIGRATIONS = [
+    ("characters", "assignment", "TEXT"),
+    ("campaigns", "day_length_minutes", "INTEGER"),
+    ("quests", "details_json", "TEXT NOT NULL DEFAULT '{}'"),
+    ("quests", "due_at_minutes", "INTEGER"),
+    ("quests", "owner_character_id", "INTEGER"),
+]
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    for table, column, decl in COLUMN_MIGRATIONS:
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
     conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
+    conn.execute("UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(SCHEMA_VERSION),))
 
 
 @contextmanager

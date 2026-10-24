@@ -113,6 +113,17 @@ export function CharacterSheetDialog({ cid, charId, onClose, onChanged }: { cid:
                     </table>
                   </>
                 )}
+                {(c.limited_uses?.length ?? 0) > 0 && (
+                  <>
+                    <div className="h2">Limited uses</div>
+                    <div className="chips">{c.limited_uses.map((u) => (
+                      <Chip key={u.ability} tone={u.uses >= u.uses_allowed ? "red" : "green"}>{u.ability} · {u.uses_allowed - u.uses}/{u.uses_allowed} left per {u.per.replace("_", " ")}</Chip>
+                    ))}</div>
+                  </>
+                )}
+                {Array.isArray(c.sheet?.hotlist) && (c.sheet.hotlist as unknown[]).length > 0 && (
+                  <><div className="h2">Hotlist</div><div className="chips">{(c.sheet.hotlist as unknown[]).map((h, i) => <Chip key={i} tone="cyan">{humanize(String(h))}</Chip>)}</div></>
+                )}
                 <div className="h2">Equipment &amp; inventory</div>
                 {c.items.length === 0 ? <div className="muted">Nothing recorded.</div> : (
                   <table className="data"><thead><tr><th>Item</th><th>Qty</th><th>Details</th></tr></thead>

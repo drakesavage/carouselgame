@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from .access import COOKIE, COOKIE_DAYS, AccessGate, lan_addresses, login_page
 from .config import ROOT_DIR, Settings, resolve_codex_bin
 from .db import connect, init_db, now_iso, one, rows
-from .gm.orchestrator import WRITE_LOCK, BusyError, TurnService
+from .gm.orchestrator import WRITE_LOCK, BusyError, TurnService, recover_interrupted_turns
 from .gm.providers import make_provider
 from .importer.ledger import import_ledger, refresh_mechanical_status, report_markdown
 from .ledger import sync as ledger_sync
@@ -115,6 +115,11 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         c = state.conn()
         init_db(c)
         refresh_mechanical_status(c)
+        if (n := recover_interrupted_turns(c)):
+            print(f"[startup] marked {n} interrupted turn(s) as failed")
+        from .importer.organization import backfill
+        for line in backfill(c):
+            print(f"[schema v2 backfill] {line}")
         if bootstrap:
             _bootstrap(state, c)
         c.close()
@@ -274,6 +279,27 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         (settings.portraits_dir / name).write_bytes(data)
         c.execute("UPDATE characters SET portrait_path = ? WHERE id = ?", (name, char_id))
         return {"portrait_path": name}
+
+    @app.get("/api/assets/manifest")
+    def asset_manifest():
+        """Local artwork map (data/assets/manifest.json): {"locations": {"Gilded Feathers": "file.jpg"}, "characters": {"slug": "file.png"}}.
+        Missing art falls back to generated placeholders in the UI; images are never generated per turn."""
+        path = settings.data_dir / "assets" / "manifest.json"
+        if not path.exists():
+            (settings.data_dir / "assets").mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"locations": {}, "characters": {}, "_help": "Put images in this folder and map names to files."}, indent=2), encoding="utf-8")
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return {"locations": {}, "characters": {}, "error": "manifest.json is not valid JSON"}
+
+    @app.get("/media/assets/{name}")
+    def asset_file(name: str):
+        base = (settings.data_dir / "assets").resolve()
+        path = (base / name).resolve()
+        if path.parent != base or not path.is_file() or path.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"):
+            raise HTTPException(404)
+        return FileResponse(path)
 
     @app.get("/media/portraits/{name}")
     def portrait(name: str):
@@ -486,6 +512,31 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
                 return fn(c, cid)
             return handler
         app.get(f"/api/gm/campaigns/{{cid}}/{route}")(make_gm())
+
+    @app.get("/api/gm/campaigns/{cid}/diagnostics")
+    def gm_diagnostics_list(cid: int, c=Depends(db), _=Depends(gm_auth)):
+        out = []
+        for r in rows(c, """SELECT d.turn_id, d.usage_json, d.integrity_json, d.created_at, t.status, substr(t.player_input, 1, 120) AS input
+                            FROM turn_diagnostics d JOIN turns t ON t.id = d.turn_id WHERE d.campaign_id = ? ORDER BY d.turn_id DESC LIMIT 30""", (cid,)):
+            rounds = (r["usage"] or {}).get("rounds") or []
+            out.append({"turn_id": r["turn_id"], "status": r["status"], "input": r["input"], "created_at": r["created_at"],
+                        "rounds": len(rounds), "flags": len(r["integrity"] or []),
+                        "input_tokens": sum(((x.get("usage") or {}).get("input_tokens") or 0) for x in rounds)})
+        return out
+
+    @app.get("/api/gm/turns/{turn_id}/diagnostics")
+    def gm_diagnostics(turn_id: int, c=Depends(db), _=Depends(gm_auth)):
+        from .gm.tools import TOOL_NAMES
+        from .rules.engine import CHANGE_OPS
+        d = one(c, "SELECT * FROM turn_diagnostics WHERE turn_id = ?", (turn_id,))
+        if not d:
+            raise HTTPException(404, "no diagnostics for this turn")
+        t = one(c, "SELECT id, status, player_input, error, provider, created_at, completed_at FROM turns WHERE id = ?", (turn_id,))
+        rolls_ = rows(c, "SELECT id, expression, dice_json, total, target, outcome, degree, reason, hidden, rng FROM dice_rolls WHERE turn_id = ? ORDER BY id", (turn_id,))
+        events_ = rows(c, "SELECT id, type, summary, visibility, rolled_back FROM events WHERE turn_id = ? ORDER BY id", (turn_id,))
+        return {"turn": t, "context_text": d["context_text"], "steps": d["steps"], "usage": d["usage"], "integrity": d["integrity"],
+                "rolls": rolls_, "events": events_, "available_tools": TOOL_NAMES, "available_ops": sorted(CHANGE_OPS),
+                "context_chars": len(d["context_text"])}
 
     @app.get("/api/gm/import/reports")
     def gm_import_reports(c=Depends(db), _=Depends(gm_auth)):

@@ -7,7 +7,7 @@ export type CharacterCard = {
   class_name?: string | null; level?: number | null; status: string; location?: string | null; in_party: number; party_order: number;
   hp_current?: number | null; hp_max?: number | null; mana_current?: number | null; mana_max?: number | null; ai_favor?: number | null;
   stats: Stats; derived: Record<string, unknown>; portrait_path?: string | null; statuses: Status[]; equipped: { id: number; name: string; slot?: string }[];
-  personality?: string | null; known_motivation?: string | null; attitude?: number | null; voice?: string | null;
+  personality?: string | null; known_motivation?: string | null; attitude?: number | null; voice?: string | null; assignment?: string | null;
 };
 export type Skill = { id: number; kind: string; name: string; rank: number | null; mana_cost: number | null; passive: number; marked: number; description?: string | null; properties: Record<string, unknown> };
 export type Item = { id: number; owner_character_id: number | null; owner_name?: string | null; name: string; quantity: number | null; equipped: number; deployed?: number; slot?: string | null; rarity?: string | null; description?: string | null; properties: Record<string, unknown> };
@@ -16,8 +16,14 @@ export type CharacterSheet = CharacterCard & {
   achievements: { title: string; description?: string; game_time_minutes?: number }[];
   npc_profile: { personality?: string; voice?: string; known_motivation?: string; attitude?: number | null } | null;
   relationships: { kind: string; description?: string; a_name: string; b_name: string }[];
+  limited_uses: { ability: string; per: string; uses: number; uses_allowed: number; cooldown_minutes: number | null }[];
 };
-export type Quest = { id: number; kind: string; title: string; description?: string | null; status: string; priority: number; progress?: string | null; giver?: string | null };
+export type Quest = { id: number; kind: string; title: string; description?: string | null; status: string; priority: number; progress?: string | null; giver?: string | null;
+  details?: Record<string, unknown>; due_at_minutes?: number | null };
+export type Scene = { id: number; title: string; location: string | null; group_key: string | null; situation: string | null; conditions: string | null;
+  threats: string | null; participants: string[]; started_game_minutes: number | null };
+export type Group = { key: string; label: string; location: string | null; activity: string | null; members: CharacterCard[] };
+export type DayInfo = { day: number; minutes_into_day: number; minutes_to_reset: number; day_length: number };
 export type FloorClock = { elapsed_minutes: number; deadline_minutes: number | null; remaining_minutes: number | null; remaining_display: string | null };
 export type Clock = { key: string; label: string; kind: string; current: number; maximum: number | null; unit?: string | null };
 export type Campaign = {
@@ -26,6 +32,8 @@ export type Campaign = {
   floor_clock: FloorClock; party: CharacterCard[]; quests: Quest[]; clocks: Clock[];
   encounter: Encounter | null;
   last_save: { id: number; label: string; kind: string; created_at: string } | null;
+  scene: Scene | null; groups: Group[]; roster: CharacterCard[]; day: DayInfo;
+  recent_events: { id: number; type: string; summary: string; game_time_minutes: number | null }[];
 };
 export type Combatant = { id: string; name: string; side: "party" | "foe"; defeated?: boolean; hb_percent?: number; actions_left?: number;
   evading?: boolean; hp_current?: number | null; hp_max?: number | null; dead?: boolean; dying?: string | null };
@@ -34,7 +42,10 @@ export type CampaignListItem = { id: number; name: string; is_demo: number; data
 export type RollCard = { roll_id: number; expression: string; dice: { sides: number; value: number; kept: boolean }[]; total: number; target: number | null;
   outcome: string | null; degree: string | null; reason: string | null; detail: Record<string, any> };
 export type Message = { id: number; turn_id: number | null; role: "player" | "gm" | "system"; content: string; created_at: string;
-  meta: { rolls?: RollCard[]; changes?: string[]; rules_cited?: string[]; provider?: string; floor_clock?: FloorClock; style?: string } };
+  meta: { rolls?: RollCard[]; changes?: string[]; rules_cited?: string[]; provider?: string; floor_clock?: FloorClock; style?: string;
+    cards?: { type: string; summary: string }[] } };
+export type Manifest = { locations: Record<string, string>; characters: Record<string, string> };
+export type DiagnosticsRow = { turn_id: number; status: string; input: string; created_at: string; rounds: number; flags: number; input_tokens: number };
 export type TurnStatus = { turn_id: number; status: "processing" | "completed" | "failed"; replayed: boolean; error: string | null;
   result: { narration: string; rolls: RollCard[]; changes: string[]; notices: { text: string; style: string }[] } | null;
   progress: { stage: string; detail: string; elapsed_s: number } | null };
@@ -114,6 +125,9 @@ export const api = {
   ledgerHistory: (id: number) => req<{ id: number; base_commit: string; new_commit: string; summary: { changes: number; files: string[] }; created_at: string }[]>(`api/campaigns/${id}/ledger/history`),
   access: () => req<{ passcode: string; lan_addresses: string[]; path: string; port: number; fixed_by_env: boolean }>("api/access"),
   regeneratePasscode: () => post<{ passcode: string }>("api/access/regenerate"),
+  manifest: () => req<Manifest>("api/assets/manifest"),
+  gmDiagnosticsList: (id: number, token: string) => req<DiagnosticsRow[]>(`api/gm/campaigns/${id}/diagnostics`, { headers: { "X-GM-Token": token } }),
+  gmDiagnostics: (turnId: number, token: string) => req<Record<string, any>>(`api/gm/turns/${turnId}/diagnostics`, { headers: { "X-GM-Token": token } }),
   makeDemo: () => post<{ campaign_id: number }>("api/campaigns/demo"),
   uploadPortrait: (id: number, cid: number, file: File) => {
     const fd = new FormData();

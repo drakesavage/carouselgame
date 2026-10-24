@@ -17,6 +17,9 @@ importers:
       '@fontsource/jetbrains-mono':
         specifier: 5.1.1
         version: 5.1.1
+      '@fontsource/literata':
+        specifier: 5.1.0
+        version: 5.1.0
       '@radix-ui/react-dialog':
         specifier: 1.1.2
         version: 1.1.2(@types/react-dom@18.3.1)(@types/react@18.3.12)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -301,6 +304,9 @@ packages:
 
   '@fontsource/jetbrains-mono@5.1.1':
     resolution: {integrity: sha512-5rwvmdQQpXev4LlBX1P+7h2dguu6iwW/9Npjde4+DEq+HgpVJI/7QY8DI1NVVFdvLtXZNP+vO2L/5BQED6FUhA==}
+
+  '@fontsource/literata@5.1.0':
+    resolution: {integrity: sha512-tua4CzPKfoKTrHUaSdsfMyaNwvAWATdqYtQO7qampM++XPiQ1mQV/XBwa5vHGBmdXobp2NSfcMy7O4z1t6nxHQ==}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -1473,6 +1479,8 @@ snapshots:
   '@fontsource/ibm-plex-sans@5.1.0': {}
 
   '@fontsource/jetbrains-mono@5.1.1': {}
+
+  '@fontsource/literata@5.1.0': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:

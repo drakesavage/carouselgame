@@ -71,6 +71,33 @@ everything else keeps that GM honest, consistent and remembered.
   reads GM rows, and it requires `X-GM-Token` (from `GM_TOKEN` or `data/gm_token.txt`).
   `tests/test_visibility.py` plants secrets everywhere and crawls every player endpoint.
 
+## GM briefing and memory layers (schema v2)
+
+`memory/context.py` builds one bounded, structured briefing per GM call (about 15k tokens for the Denton campaign):
+CAMPAIGN (identity, state version, clock, dungeon day, cycles, record conflicts) · CURRENT SCENE · PARTY (every group:
+location, activity, members) · PRESENT (full sheets for the PC and everyone in the scene or the PC's group, plus
+anyone named, with GM-only companion sheets and NPC memories) · OBJECTIVES (quests, projects, commitments, reservations,
+due times) · SHARED STASH · ACTIVE COMBAT · MEMORY (scene summaries, transcript summaries, relevant canonical facts) ·
+RULES (always-apply sections, matching house rules, recent rulings, auto-retrieved rulebook passages labelled "verify")
+· GM-ONLY SECRETS (relevance-ranked) · RECENT TRANSCRIPT. The player's exact input is a separate step.
+
+Presence comes from stored state (`scenes.participants`, `characters.assignment`), not name matching, and every op
+accepts stable ids. Memory layers: immutable transcript (`messages`) · authoritative state · episodic scene summaries
+(`memories` layer `episodic`, written when a scene closes) and transcript summaries (`memory_summaries`) · canonical
+facts (`lore_facts`) · NPC memories (`memories` layer `npc`, visibility player or gm) · GM knowledge (`gm_secrets`) ·
+rules (`house_rules`, `rulings`, rulebook index).
+
+New validated ops (`rules/state_ops.py`): `skill`, `level`, `ai_favor`, `group`, `move_group`, `move_character`, `scene`,
+`remember`, `use_ability`, `rest`; `advance_time` gained `mending` and dungeon-day resets; `quest` gained commitment and
+reservation kinds plus `details`, `due_in_minutes` and `owner`; item ops accept `item_id`. Tools `grind` and
+`resolve_floor_end` handle the dice-driven advancement rules. Existing databases migrate in place (`COLUMN_MIGRATIONS`);
+`importer/organization.py` seeds groups, the scene, project details, reservations and promises from ledger text, once.
+
+**Diagnostics:** every turn stores its context packet, tool rounds, Codex usage, game-time delta and a heuristic
+integrity report (`gm/integrity.py`) in `turn_diagnostics`, readable only via `/api/gm/...` with the GM token
+(*Saves & Settings → GM diagnostics*). Codex runs with no shell, hooks, sub-agents or MCP servers, and a result that ran
+any command is rejected.
+
 ## Combat (`backend/app/rules/combat.py`)
 
 The encounter row's `combatants_json` holds `{round, phase, floor, declared, combatants}`. Party combatants

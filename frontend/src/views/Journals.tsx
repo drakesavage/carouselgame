@@ -58,14 +58,30 @@ export function InventoryView({ cid, version }: { cid: number; version: number }
   const gold = data.shared.find((i) => i.name.toLowerCase() === "gold");
   const shared = data.shared.filter((i) => !i.deployed && i !== gold).filter(match);
   const deployed = data.shared.filter((i) => i.deployed).filter(match);
-  const qty = (i: Item) => (i.quantity == null ? <span className="chip amber" title="Count not established — the GM must establish it before spending">qty unknown</span> : <span className="mono">×{i.quantity}</span>);
   const table = (items: Item[]) => (
-    <table className="data"><thead><tr><th>Item</th><th style={{ width: 120 }}>Qty</th><th>Notes</th></tr></thead>
-      <tbody>{items.map((i) => (
-        <tr key={i.id}><td>{i.name} {i.equipped ? <Chip tone="cyan">{i.slot ?? "equipped"}</Chip> : null} {i.rarity && <Chip tone="violet">{i.rarity}</Chip>}</td><td>{qty(i)}</td>
-          <td className="sub">{Array.isArray(i.properties?.effects) ? (i.properties.effects as string[]).join("; ") : ""} {i.description ?? (i.properties?.note as string) ?? (i.properties?.status as string) ?? ""}</td></tr>))}
-      </tbody>
-    </table>
+    <div className="icards">{items.map((i) => {
+      const effects = Array.isArray(i.properties?.effects) ? (i.properties.effects as string[]) : [];
+      const note = i.description ?? (i.properties?.note as string) ?? (i.properties?.status as string) ?? "";
+      const prov = i.properties?.provenance as string | undefined;
+      return (
+        <div key={i.id} className={`icard ${i.equipped ? "equipped" : ""} ${i.quantity == null ? "unknown" : ""}`}>
+          <div className="icard-top">
+            <span className={`icard-name ${i.rarity ? "rarity-" + i.rarity.toLowerCase() : ""}`}>{i.name}</span>
+            {i.quantity == null ? <span className="chip amber" title="Count not established in the ledger">qty ?</span> : <span className="icard-qty">×{i.quantity}</span>}
+          </div>
+          <div className="chips">
+            {i.equipped ? <Chip tone="cyan">{i.slot ?? "equipped"}</Chip> : i.slot ? <Chip>{i.slot}</Chip> : null}
+            {i.deployed ? <Chip tone="amber">deployed</Chip> : null}
+            {i.rarity && <Chip tone="violet">{i.rarity}</Chip>}
+            {i.owner_name && <Chip>{i.owner_name}</Chip>}
+          </div>
+          {effects.length > 0 && <div>{effects.join("; ")}</div>}
+          {note && <div className="sub">{note}</div>}
+          {prov && <div className="sub">From: {prov}</div>}
+          <div className="sub mono" style={{ fontSize: 10.5 }}>#{i.id}</div>
+        </div>
+      );
+    })}</div>
   );
   return (
     <div className="view-inner">
