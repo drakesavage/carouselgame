@@ -58,19 +58,28 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
               <label>Provider
                 <select className="select input" value={prefs.gm_provider} onChange={(e) => update({ gm_provider: e.target.value })}>
                   <option value="codex">Codex CLI (your ChatGPT sign-in — no API billing)</option>
+                  <option value="gemini">Gemini API (API key; free tier has rate limits)</option>
                   <option value="mock">Mock GM (offline testing, scripted)</option>
                 </select>
               </label>
+              {prefs.gm_provider === "gemini" ? <>
+              <div className="sub">Gemini key: {prefs.gemini_key_present ? "found" : <span style={{ color: "var(--red)" }}>not found — set GEMINI_API_KEY or put it in data\gemini_api_key.txt</span>}</div>
+              <div className="flag warn">Free-tier Gemini inputs and outputs may be used by Google to improve its products. Every GM call sends the full briefing, including private companion sheets and GM secrets.</div>
+              <label>Model
+                <input className="input" defaultValue={prefs.gemini_model} placeholder="gemini-3.8-flash" onBlur={(e) => e.target.value !== prefs.gemini_model && update({ gemini_model: e.target.value })} />
+              </label>
+              </> : <>
               <div className="sub">Codex CLI: {prefs.codex_cli_path ? <span className="mono">{prefs.codex_cli_path}</span> : <span style={{ color: "var(--red)" }}>not found — install/sign in to Codex or set CODEX_BIN</span>}</div>
               <label>Model <span className="sub">(blank = your Codex default)</span>
                 <input className="input" defaultValue={prefs.codex_model} placeholder="e.g. gpt-5.5" onBlur={(e) => e.target.value !== prefs.codex_model && update({ codex_model: e.target.value })} />
               </label>
+              </>}
               <label>Reasoning effort
                 <select className="select input" value={prefs.codex_reasoning_effort} onChange={(e) => update({ codex_reasoning_effort: e.target.value })}>
                   {prefs.efforts.map((x) => <option key={x}>{x}</option>)}
                 </select>
               </label>
-              <div className="sub">Each turn is one or more sandboxed, read-only <span className="mono">codex exec</span> calls. Dice and state changes always run in this app, never in the model.</div>
+              <div className="sub">{prefs.gm_provider === "gemini" ? "Each turn is one or more Gemini API calls that can only return JSON (no model-side tools)." : <>Each turn is one or more sandboxed, read-only <span className="mono">codex exec</span> calls.</>} Dice and state changes always run in this app, never in the model.</div>
             </div>
           )}
         </Panel>

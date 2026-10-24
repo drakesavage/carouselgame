@@ -53,7 +53,7 @@ export type EventRow = { id: number; type: string; summary: string; game_time_mi
 export type HouseRule = { id: number; section: string | null; title: string; text: string; label: string | null; status: string; mechanical_status: string; source: string | null };
 export type Passage = { chunk_id: number; document_id: number; document: string; page: number; ref: string; text: string; score: number };
 export type SavePoint = { id: number; label: string; kind: string; turn_id: number | null; created_at: string };
-export type Prefs = { gm_provider: string; codex_model: string; codex_reasoning_effort: string; rulebook_dir: string; ledger_dir: string;
+export type Prefs = { gm_provider: string; codex_model: string; gemini_model: string; gemini_key_present?: boolean; codex_reasoning_effort: string; rulebook_dir: string; ledger_dir: string;
   active_campaign_id: number | null; codex_cli_path: string | null; providers: string[]; efforts: string[]; data_dir: string };
 
 export type LedgerChange = { id: string; file: string; summary: string; group: string; status: "clean" | "conflict"; visibility: string; kind: string;

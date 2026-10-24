@@ -122,6 +122,10 @@ any Codex update with `..\.venv\Scripts\python -m app.gm.isolation_probe` (from 
 remaining exposure (your global `~/.codex/AGENTS.md` is still injected, but neutralized) are in
 [docs/GM_RUNTIME.md](docs/GM_RUNTIME.md).
 
+**Gemini (optional).** *Saves & Settings → AI Game Master → Gemini API* uses Google's Gemini API instead of Codex.
+Put the key in `GEMINI_API_KEY` or `data\gemini_api_key.txt` (git-ignored). The free tier is rate-limited, and Google
+may use free-tier inputs, which include GM secrets, to improve its products. See docs/GM_RUNTIME.md §6.
+
 **GM diagnostics** (*Saves & Settings → GM diagnostics*, needs the GM token from `data/gm_token.txt`): each turn's
 full context packet, tool rounds, Codex usage, game time elapsed, and an integrity report that flags rejected changes,
 gold/HP/item/time mentions that don't match the ledger updates, counted cycles on a recap, and leaked GM-only text.

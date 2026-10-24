@@ -6,6 +6,8 @@ requests or final narration (or both). Providers never touch the database; the o
 * CodexCliProvider — runs `codex exec` non-interactively (the user's ChatGPT sign-in; no API billing).
   Each call is an isolated, ephemeral, read-only-sandboxed job with no tools, the GM contract as developer
   instructions, and a final message that must match a JSON schema. Its event stream is watched live.
+* GeminiProvider   — Google's Gemini REST API with a JSON response schema and no model-side tools (needs an API
+  key; free-tier inputs may be used by Google to improve its products).
 * MockProvider     — deterministic scripted GM for development and tests; exercises the same tool path.
 
 Extension point: implement `complete()` for another backend (a local model, another CLI) and register it in
@@ -20,6 +22,8 @@ import shutil
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -339,6 +343,132 @@ class CodexCliProvider:
         return json.loads(raw)["summary"]
 
 
+# ------------------------------------------------------------------ Gemini API
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+GEMINI_RETRY = {429, 500, 503}
+# Mature fiction (violence, crude humor) is the genre; only high-probability harms are blocked.
+GEMINI_SAFETY = [{"category": c, "threshold": "BLOCK_ONLY_HIGH"} for c in
+                 ("HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT")]
+
+
+class GeminiProvider:
+    """Google Gemini over its REST API (urllib; no SDK). Nothing but our JSON schema is offered to the model: no
+    function declarations, no Google Search or code-execution tools, so the GM can only return JSON and the server
+    runs every game tool, exactly as with Codex. The key comes from GEMINI_API_KEY or a key file (Settings) and is
+    sent only in the x-goog-api-key header. Stable content goes first (contract, then tools, then the briefing) so
+    Gemini's implicit prompt cache can reuse it across a turn's rounds."""
+
+    name = "gemini"
+
+    def __init__(self, settings: Settings, model: str | None = None, effort: str | None = None):
+        self.settings = settings
+        self.model = (model or settings.gemini_model).removeprefix("models/")
+        self.effort = effort or settings.codex_reasoning_effort
+        self.retry_delays = [10, 30, 60]
+
+    def available(self) -> tuple[bool, str]:
+        return (True, self.model) if self.settings.gemini_api_key() else (False, "no Gemini API key (GEMINI_API_KEY or gemini_api_key.txt)")
+
+    def _post(self, body: dict, meta: dict) -> dict:
+        key = self.settings.gemini_api_key()
+        if not key:
+            raise ProviderError("No Gemini API key: set GEMINI_API_KEY or put it in data\\gemini_api_key.txt.")
+        data = json.dumps(body).encode("utf-8")
+        for attempt, delay in enumerate([0, *self.retry_delays]):
+            if delay:
+                time.sleep(delay)
+            req = urllib.request.Request(GEMINI_URL.format(model=self.model), data=data, method="POST",
+                                         headers={"Content-Type": "application/json", "x-goog-api-key": key})
+            started = time.monotonic()
+            try:
+                with urllib.request.urlopen(req, timeout=self.settings.codex_timeout_s) as r:
+                    meta["duration_s"] = round(time.monotonic() - started, 1)
+                    return json.loads(r.read())
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", "replace")
+                try:
+                    err = json.loads(detail)["error"]
+                    msg, details = err["message"], err.get("details") or []
+                except (ValueError, KeyError, TypeError):
+                    msg, details = detail[:300], []
+                quota_ids = [v.get("quotaId", "") for d in details for v in d.get("violations") or []]
+                if exc.code == 429 and any("PerDay" in q for q in quota_ids):  # retrying only burns more of the day's quota
+                    raise ProviderError(f"Gemini daily free-tier quota for {self.model} is used up ({', '.join(quota_ids)}); "
+                                        "it resets daily, or switch the GM back to Codex.") from None
+                wait = next((d.get("retryDelay") for d in details if str(d.get("@type", "")).endswith("RetryInfo")), None)
+                if exc.code in GEMINI_RETRY and attempt < len(self.retry_delays):
+                    meta.setdefault("retries", []).append(exc.code)
+                    if wait and str(wait).rstrip("s").replace(".", "", 1).isdigit():
+                        time.sleep(min(float(str(wait).rstrip("s")), 90))  # the server's own retry hint
+                    continue
+                raise ProviderError(f"Gemini API error {exc.code}: {msg[:400]}") from None
+            except (urllib.error.URLError, TimeoutError) as exc:
+                if attempt < len(self.retry_delays):
+                    meta.setdefault("retries", []).append(str(exc)[:60])
+                    continue
+                raise ProviderError(f"Gemini API unreachable: {exc}") from None
+        raise ProviderError("Gemini API is rate-limited or unavailable; try again shortly")
+
+    def _generate(self, system: str, prompt: str, schema: dict, label: str) -> tuple[str, dict]:
+        meta: dict[str, Any] = {"model": self.model, "effort": self.effort, "provider": "gemini", "external_api": True}
+        cfg: dict[str, Any] = {"responseMimeType": "application/json", "responseJsonSchema": schema}
+        if self.effort in ("low", "medium", "high"):
+            cfg["thinkingConfig"] = {"thinkingLevel": self.effort}
+        elif self.effort == "minimal":
+            cfg["thinkingConfig"] = {"thinkingLevel": "minimal"}
+        body = {"systemInstruction": {"parts": [{"text": system}]}, "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": cfg, "safetySettings": GEMINI_SAFETY}
+        try:
+            out = self._post(body, meta)
+        except ProviderError as exc:
+            if "thinking" not in str(exc).lower() or "thinkingConfig" not in cfg:
+                raise
+            cfg.pop("thinkingConfig")  # model without thinking levels
+            out = self._post(body, meta)
+        um = out.get("usageMetadata") or {}
+        meta["usage"] = {"input_tokens": um.get("promptTokenCount", 0), "cached_input_tokens": um.get("cachedContentTokenCount", 0),
+                         "output_tokens": um.get("candidatesTokenCount", 0), "reasoning_output_tokens": um.get("thoughtsTokenCount", 0)}
+        cands = out.get("candidates") or []
+        if not cands:
+            block = (out.get("promptFeedback") or {}).get("blockReason")
+            raise ProviderError(f"Gemini returned no answer{f' (prompt blocked: {block})' if block else ''}")
+        cand = cands[0]
+        parts = (cand.get("content") or {}).get("parts") or []
+        if any(k in part for part in parts for k in ("functionCall", "executableCode", "codeExecutionResult")):
+            meta["violation"] = {"item_type": "tool part", "detail": json.dumps(parts)[:300]}
+            raise IsolationViolation("Gemini returned a tool call although none were offered; result discarded", dict(meta))
+        text = "".join(part.get("text", "") for part in parts if not part.get("thought"))
+        if cand.get("finishReason") not in (None, "STOP"):
+            meta["finish_reason"] = cand.get("finishReason")
+            if not text.strip():
+                raise ProviderError(f"Gemini stopped without an answer (finish reason {cand.get('finishReason')})")
+        return text, meta
+
+    def complete(self, system: str, steps: list[dict], tools: list[dict], *, job_label: str) -> ProviderResponse:
+        developer = "\n\n".join([system, OUTPUT_PROTOCOL.replace("Do not run shell commands or read files; everything\nyou need is in this prompt, and the server runs your tools.",
+                                                                   "Everything you need is in this prompt; the server runs your tools.")])
+        prompt = "\n\n".join(["# TOOLS\n" + tool_catalogue(tools), render_steps(steps)])
+        for attempt in range(2):  # one retry for malformed structured output
+            raw, meta = self._generate(developer, prompt, output_schema([t["name"] for t in tools]), job_label)
+            try:
+                data = json.loads(raw)
+                calls = [ToolCall(c["name"], json.loads(c["arguments_json"] or "{}")) for c in data.get("tool_calls") or []]
+                break
+            except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
+                if attempt:
+                    raise ProviderError(f"Gemini returned malformed output twice: {exc}") from None
+        meta["prompt_chars"] = len(prompt) + len(developer)
+        narration = data.get("narration")
+        return ProviderResponse(calls, narration.strip() if isinstance(narration, str) and narration.strip() else None, meta)
+
+    def summarize(self, text: str) -> str:
+        schema = {"type": "object", "additionalProperties": False, "required": ["summary"], "properties": {"summary": {"type": "string"}}}
+        system = ("Summarize this tabletop RPG transcript excerpt for the GM's long-term memory in under 250 words. "
+                  "Keep names, decisions, promises, consequences, unresolved threads and numbers that matter.")
+        raw, _ = self._generate(system, text, schema, "summary")
+        return json.loads(raw)["summary"]
+
+
 # ------------------------------------------------------------------ Mock
 class MockProvider:
     """Scripted GM. Picks tools from keywords in the player's input so the full pipeline (checks, dice,
@@ -400,9 +530,11 @@ class MockProvider:
 def make_provider(name: str, settings: Settings, model: str | None = None, effort: str | None = None) -> GMProvider:
     if name == "codex":
         return CodexCliProvider(settings, model=model, effort=effort)
+    if name == "gemini":
+        return GeminiProvider(settings, model=model, effort=effort)
     if name == "mock":
         return MockProvider()
-    raise ValueError(f"unknown GM provider {name!r} (use codex or mock)")
+    raise ValueError(f"unknown GM provider {name!r} (use codex, gemini or mock)")
 
 
 def prune_jobs(settings: Settings, keep: int = 20) -> None:

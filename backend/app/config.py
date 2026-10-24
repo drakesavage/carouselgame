@@ -64,6 +64,7 @@ class Settings:
     codex_model: str = field(default_factory=lambda: os.environ.get("CODEX_MODEL", ""))
     codex_reasoning_effort: str = field(default_factory=lambda: os.environ.get("CODEX_REASONING_EFFORT", "medium"))
     codex_timeout_s: int = field(default_factory=lambda: int(os.environ.get("CODEX_TIMEOUT_S", "240")))
+    gemini_model: str = field(default_factory=lambda: os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"))
     max_tool_rounds: int = 8   # combat needs evade -> resolve -> attacks -> bookkeeping
     recent_message_window: int = 12
     summarize_every_messages: int = 24
@@ -99,6 +100,18 @@ class Settings:
             return json.loads(self.prompt_capture_file.read_text(encoding="utf-8")).get("until", 0) > time.time()
         except (OSError, ValueError):
             return False
+
+    def gemini_api_key(self) -> str | None:
+        """GEMINI_API_KEY, else the first key file found: GEMINI_API_KEY_FILE, data/gemini_api_key.txt, ./gemini_api_key.txt
+        (both file names are git-ignored). Never logged or sent anywhere but the Gemini API header."""
+        if os.environ.get("GEMINI_API_KEY"):
+            return os.environ["GEMINI_API_KEY"].strip()
+        for p in (os.environ.get("GEMINI_API_KEY_FILE"), self.data_dir / "gemini_api_key.txt", ROOT_DIR / "gemini_api_key.txt"):
+            if p and Path(p).is_file():
+                key = Path(p).read_text(encoding="utf-8").strip()
+                if key:
+                    return key
+        return None
 
     def context_budgets(self) -> dict:
         """Per-install overrides of memory/context.py DEFAULT_BUDGET, e.g. CONTEXT_BUDGETS={"present_each": 3200}."""

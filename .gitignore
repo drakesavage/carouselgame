@@ -13,3 +13,5 @@ story history/
 # never commit rulebooks
 *.pdf
 frontend/*.tsbuildinfo
+# API keys for optional providers
+gemini_api_key.txt

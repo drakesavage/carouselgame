@@ -89,3 +89,36 @@ Every committed turn stores `continuity` in its diagnostics, shown under *GM dia
 * mechanics recorded
 
 It also lists the loaded categories, the omissions and the turn's validated changes. On recap or status turns, "mentioned but not recorded" heuristics are downgraded to info.
+
+## 6. Gemini provider (optional, `GM_PROVIDER=gemini`)
+
+`GeminiProvider` calls the Gemini REST API (`gemini-3.8-flash` by default) with the same contract, briefing and JSON
+schema. **No function declarations, Search or code-execution tools are sent**, so the model can only return JSON;
+a response containing a function-call or code part is rejected like a Codex violation. The key goes in the
+`x-goog-api-key` header only (never the URL, logs or player endpoints). Rate limits (429) and 5xx errors are retried
+with backoff; usage maps to the same diagnostics fields. Reasoning effort maps to Gemini's `thinkingLevel`.
+
+**Privacy:** Google says free-tier inputs and outputs may be used to improve its products, and every GM call carries
+private companion sheets and GM secrets. Settings shows this warning when Gemini is selected.
+
+**First results (demo campaign only, 2026-10-24):**
+
+* Five-round combat turn at "medium": correct combat flow, CSPRNG Evades and slot damage applied by the server,
+  self-corrected a rejected call. But slow: about 270 s, 37–73 s per round, mostly thinking tokens.
+* Narrative turn at "low": 17 s, one round, about 6.5k input tokens. It **invented continuity** (Bix "reported" a
+  boiler-room scout that never happened in the record), where Codex had flagged the same gap. Prompt-cache hits: 0.
+
+**Denton comparison (disposable copies, same starting state; Codex at medium, Gemini at low):**
+
+| Turn | Codex (gpt-6.1-sol) | Gemini 3.8 Flash |
+|---|---|---|
+| Status check | 1 round, 16 s, 21.4k tokens. Accurate; flagged the location conflict | 1 round, 93 s, 20.1k tokens. Accurate and richer, but invented a relationship and stated disputed Gold (4,016) as fact |
+| Rules + Stealth | 6 rounds (read pages, recorded a ruling), 62 s | 3 rounds, 128 s; correct DC 16 formula; NPCs covered for Cliff on their own; implicit cache hit 17–19k of 21k |
+| Party split | New "en route" group, 1 minute passes, no materials spent | Moved Nate and Priya straight into the saferoom group (no travel time); **wrote Cliff's dialogue** |
+| Reservation (two turns) | NPC refused a free hold; then 5 Gold paid, reservation with price, balance and deadline | Rolled Negotiation (near miss), then 5 Gold paid, reservation without price or balance; **scripted Cliff's speech and invented details** |
+| Prompt injection | Refused, no tools | Not run: quota exhausted |
+| Duplicate submission | Replayed | Replayed (no API call) |
+
+**Free-tier quota:** gemini-3.8-flash allows **20 requests**, and the error reports a per-day quota. About 14 requests
+on this copy plus 6 on the demo used it up in one session, and a Denton turn takes 1–6 requests. The provider now
+stops immediately on a daily-quota 429 instead of retrying, which only burned more quota.

@@ -206,3 +206,100 @@ def test_context_budgets_report_what_was_left_out(conn, demo_id):
     assert len(tight["text"]) < len(full["text"])
     assert any("sheet cut" in o for o in tight["omissions"]) and any(o.startswith("CURRENT SCENE") for o in tight["omissions"])
     assert set(full["categories"]) >= {"state", "scene_memory", "contract_rules", "narrative"}
+
+
+# ------------------------------------------------------------------ Gemini provider (HTTP faked)
+class _Resp:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def read(self):
+        return json.dumps(self.payload).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _gemini(settings, monkeypatch, answers):
+    import io
+    import urllib.error
+    from app.gm.providers import GeminiProvider
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-123")
+    sent = []
+
+    def fake_urlopen(req, timeout=None):
+        sent.append({"url": req.full_url, "headers": dict(req.header_items()), "body": json.loads(req.data)})
+        a = answers.pop(0)
+        if isinstance(a, int):
+            raise urllib.error.HTTPError(req.full_url, a, "err", {}, io.BytesIO(b'{"error": {"message": "quota"}}'))
+        return _Resp(a)
+    monkeypatch.setattr(providers.urllib.request, "urlopen", fake_urlopen)
+    prov = GeminiProvider(settings)
+    prov.retry_delays = [0, 0, 0]
+    return prov, sent
+
+
+def _answer(obj, **usage):
+    return {"candidates": [{"content": {"parts": [{"text": "thinking...", "thought": True}, {"text": json.dumps(obj)}]}, "finishReason": "STOP"}],
+            "usageMetadata": {"promptTokenCount": 900, "cachedContentTokenCount": 300, "candidatesTokenCount": 40, "thoughtsTokenCount": 12, **usage}}
+
+
+STEPS = [{"kind": "context", "text": "BRIEFING"}, {"kind": "player", "text": "I look around"}]
+
+
+def test_gemini_sends_schema_only_and_parses_tool_calls(settings, monkeypatch):
+    out = {"tool_calls": [{"name": "roll_dice", "arguments_json": "{\"expression\": \"1d20\"}"}], "narration": None}
+    prov, sent = _gemini(settings, monkeypatch, [429, _answer(out)])
+    resp = prov.complete("CONTRACT", STEPS, [{"name": "roll_dice", "description": "d", "parameters": {}}], job_label="t1r1")
+    assert [c.name for c in resp.tool_calls] == ["roll_dice"] and resp.tool_calls[0].arguments == {"expression": "1d20"}
+    assert resp.meta["usage"] == {"input_tokens": 900, "cached_input_tokens": 300, "output_tokens": 40, "reasoning_output_tokens": 12}
+    assert resp.meta["retries"] == [429]
+    body = sent[-1]["body"]
+    assert "tools" not in body and "toolConfig" not in body  # nothing but JSON can come back
+    assert body["generationConfig"]["responseMimeType"] == "application/json" and "responseJsonSchema" in body["generationConfig"]
+    assert "CONTRACT" in body["systemInstruction"]["parts"][0]["text"] and "BRIEFING" in body["contents"][0]["parts"][0]["text"]
+    assert "gemini-3.8-flash:generateContent" in sent[-1]["url"] and "key=" not in sent[-1]["url"]  # key only in the header
+    assert sent[-1]["headers"].get("X-goog-api-key") == "test-key-123"
+
+
+def test_gemini_tool_parts_are_rejected(settings, monkeypatch):
+    bad = {"candidates": [{"content": {"parts": [{"functionCall": {"name": "shell", "args": {}}}]}, "finishReason": "STOP"}]}
+    prov, _ = _gemini(settings, monkeypatch, [bad])
+    with pytest.raises(IsolationViolation):
+        prov.complete("CONTRACT", STEPS, [], job_label="t1r1")
+
+
+def test_gemini_without_a_key_fails_cleanly(settings, monkeypatch):
+    from app.gm.providers import GeminiProvider
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(type(settings), "gemini_api_key", lambda self: None)
+    with pytest.raises(ProviderError, match="No Gemini API key"):
+        GeminiProvider(settings).complete("C", STEPS, [], job_label="t1r1")
+
+
+def test_settings_accept_gemini(client):
+    r = client.put("/api/settings", json={"gm_provider": "gemini", "gemini_model": "gemini-3.8-flash"})
+    assert r.status_code == 200 and r.json()["gm_provider"] == "gemini" and "gemini" in r.json()["providers"]
+    assert "gemini_api_key" not in json.dumps(r.json()).replace("gemini_key_present", "")
+
+
+def test_gemini_daily_quota_is_not_retried(settings, monkeypatch):
+    import io
+    import urllib.error
+    from app.gm.providers import GeminiProvider
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    calls = []
+    body = {"error": {"code": 429, "message": "You exceeded your current quota", "details": [
+        {"@type": "type.googleapis.com/google.rpc.QuotaFailure", "violations": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]},
+        {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "40s"}]}}
+
+    def fake(req, timeout=None):
+        calls.append(1)
+        raise urllib.error.HTTPError(req.full_url, 429, "quota", {}, io.BytesIO(json.dumps(body).encode()))
+    monkeypatch.setattr(providers.urllib.request, "urlopen", fake)
+    with pytest.raises(ProviderError, match="daily free-tier quota"):
+        GeminiProvider(settings).complete("C", STEPS, [], job_label="t1r1")
+    assert len(calls) == 1

@@ -41,6 +41,7 @@ REPORTS_DIR = ROOT_DIR / "reports"
 class PrefsIn(BaseModel):
     gm_provider: str | None = None
     codex_model: str | None = None
+    gemini_model: str | None = None
     codex_reasoning_effort: str | None = None
     rulebook_dir: str | None = None
     ledger_dir: str | None = None
@@ -84,7 +85,7 @@ class AppState:
 
     # Preferences live in a small JSON file (not the DB) so they can change while a turn holds the DB write lock.
     def prefs(self) -> dict:
-        base = {"gm_provider": self.settings.gm_provider, "codex_model": self.settings.codex_model,
+        base = {"gm_provider": self.settings.gm_provider, "codex_model": self.settings.codex_model, "gemini_model": self.settings.gemini_model,
                 "codex_reasoning_effort": self.settings.codex_reasoning_effort,
                 "rulebook_dir": str(self.settings.rulebook_dir) if self.settings.rulebook_dir else "",
                 "ledger_dir": str(self.settings.campaign_ledger_dir or DEFAULT_LEDGER), "active_campaign_id": None}
@@ -99,7 +100,8 @@ class AppState:
 
     def make_provider(self):
         p = self.prefs()
-        return make_provider(p["gm_provider"], self.settings, model=p.get("codex_model") or "", effort=p.get("codex_reasoning_effort"))
+        model = p.get("gemini_model") if p["gm_provider"] == "gemini" else p.get("codex_model")
+        return make_provider(p["gm_provider"], self.settings, model=model or "", effort=p.get("codex_reasoning_effort"))
 
     def conn(self):
         return connect(self.settings.campaign_db)
@@ -224,15 +226,15 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     @app.get("/api/settings")
     def get_settings():
         p = state.prefs()
-        return {**p, "codex_cli_path": resolve_codex_bin(), "providers": ["codex", "mock"],
+        return {**p, "codex_cli_path": resolve_codex_bin(), "providers": ["codex", "gemini", "mock"], "gemini_key_present": bool(settings.gemini_api_key()),
                 "efforts": ["minimal", "low", "medium", "high"], "data_dir": str(settings.data_dir)}
 
     @app.put("/api/settings")
     def put_settings(body: PrefsIn):
         p = state.prefs()
         upd = body.model_dump(exclude_none=True)
-        if "gm_provider" in upd and upd["gm_provider"] not in ("codex", "mock"):
-            raise HTTPException(422, "gm_provider must be codex or mock")
+        if "gm_provider" in upd and upd["gm_provider"] not in ("codex", "gemini", "mock"):
+            raise HTTPException(422, "gm_provider must be codex, gemini or mock")
         if "codex_reasoning_effort" in upd and upd["codex_reasoning_effort"] not in ("minimal", "low", "medium", "high"):
             raise HTTPException(422, "invalid reasoning effort")
         p.update(upd)
