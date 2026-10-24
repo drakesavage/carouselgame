@@ -74,6 +74,12 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
                 <input className="input" defaultValue={prefs.codex_model} placeholder="e.g. gpt-5.5" onBlur={(e) => e.target.value !== prefs.codex_model && update({ codex_model: e.target.value })} />
               </label>
               </>}
+              <label>Briefing size
+                <select className="select input" value={prefs.context_profile ?? "standard"} onChange={(e) => update({ context_profile: e.target.value })}>
+                  <option value="standard">Standard (~20k tokens; the GM looks up the rest)</option>
+                  <option value="large">Large (~80–100k tokens: whole party, every private sheet and house rule, ledger state files)</option>
+                </select>
+              </label>
               <label>Reasoning effort
                 <select className="select input" value={prefs.codex_reasoning_effort} onChange={(e) => update({ codex_reasoning_effort: e.target.value })}>
                   {prefs.efforts.map((x) => <option key={x}>{x}</option>)}

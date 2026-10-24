@@ -32,10 +32,22 @@ from .views import floor_clock
 DEFAULT_BUDGET = {"scene": 3500, "party": 3000, "present_each": 2600, "companion": 3800, "objectives": 3500, "memory": 4500,
                   "transcript_msg": 1500, "rules_always_each": 2600, "rules_relevant": 2400, "official": 1600, "secrets": 3500,
                   "max_present_full": 10, "max_companions": 8, "max_named_absent": 4, "max_facts": 8, "max_secrets": 10,
-                  "official_passages": 2}
+                  "official_passages": 2, "max_house_rules": 3, "house_rule_each": 700, "include_absent_party": 0, "ledger_docs": 0}
 BUDGET = DEFAULT_BUDGET  # backwards-compatible name
+# Profiles for models with very large context windows (e.g. Gemini, 1M tokens): front-load the whole party, every
+# private sheet, every house rule, a longer transcript and the ledger's current-state documents verbatim, instead of
+# relying on the GM to look things up. About 55k tokens per call for the Denton campaign (character YAMLs are
+# left out: their content is already in the PRESENT sheets).
+PROFILES: dict[str, dict] = {
+    "standard": {},
+    "large": {"scene": 12000, "party": 12000, "present_each": 12000, "companion": 12000, "objectives": 30000, "memory": 40000,
+              "transcript_msg": 8000, "rules_always_each": 12000, "rules_relevant": 80000, "house_rule_each": 8000, "official": 9000,
+              "secrets": 40000, "max_present_full": 40, "max_companions": 40, "max_named_absent": 40, "max_facts": 200,
+              "max_secrets": 200, "official_passages": 6, "max_house_rules": 500, "recent_messages": 40, "include_absent_party": 1,
+              "ledger_docs": 112000},  # core state files only: ~55k tokens total, ~4 calls/minute on a 250k TPM tier
+}
 CATEGORIES = {"CAMPAIGN": "state", "PARTY": "state", "PRESENT": "state", "OBJECTIVES": "state", "SHARED STASH": "state",
-              "ACTIVE COMBAT": "state", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
+              "ACTIVE COMBAT": "state", "LEDGER RECORDS": "ledger", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
               "RULEBOOK": "rulebook", "RECENT TRANSCRIPT": "narrative", "GM-ONLY SECRETS": "gm_private"}
 STOP = set("the a an and or of to in on for with by is are be as at it this that from what how does do can when which who i we my our me us "
            "you your he she they them his her their then than into onto about there here just also will would should could".split())
@@ -151,6 +163,7 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     from ..rules.state_ops import day_info
     B = {**DEFAULT_BUDGET, **(budgets or {})}
     omissions: list[str] = []
+    recent_window = int(B.get("recent_messages") or recent_window)
 
     def cut(section: str, text: str, n: int) -> str:
         if len(text) > n:
@@ -240,6 +253,8 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
 
     # 4 PRESENT CHARACTERS (+ named elsewhere)
     full_ids = present[:B["max_present_full"]] + [i for i in named if i not in present][:B["max_named_absent"]]
+    if B["include_absent_party"]:  # large profile: everyone in the party, labelled NOT PRESENT, so offscreen play stays in character
+        full_ids += [c["id"] for c in chars if c["in_party"] and c["id"] not in full_ids and c["status"] not in ("deceased", "dead")]
     blocks, companions = [], 0
     for i in full_ids:
         c = dict(by_id[i])
@@ -320,9 +335,10 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     hr = rows(conn, "SELECT section, title, text, label FROM house_rules WHERE campaign_id = ? AND always_include = 0", (cid,))
     act = _words(player_input)
     hits = sorted(((len(act & _words(h["title"] + " " + h["text"][:1500])), h) for h in hr), key=lambda x: -x[0])
-    rel_rules = [h for s, h in hits if s >= 2][:3]
+    rel_rules = [h for s, h in hits if s >= 2 or B["max_house_rules"] > 50][:B["max_house_rules"]]
     if rel_rules:
-        ru.append("Possibly relevant house rules for this action:\n" + cut("HOUSE RULES: relevant", "\n".join(f"- §{h['section'] or ''} {h['title']} ({h['label'] or 'campaign'}): {h['text'][:700]}" for h in rel_rules), B["rules_relevant"]))
+        label = "Possibly relevant house rules for this action" if B["max_house_rules"] <= 50 else "All other house rules (most relevant first)"
+        ru.append(label + ":\n" + cut("HOUSE RULES: relevant", "\n".join(f"- §{h['section'] or ''} {h['title']} ({h['label'] or 'campaign'}): {h['text'][:B['house_rule_each']]}" for h in rel_rules), B["rules_relevant"]))
     rl = rows(conn, "SELECT topic, ruling, label FROM rulings WHERE campaign_id = ? ORDER BY id DESC LIMIT 8", (cid,))
     if rl:
         ru.append("Recent rulings: " + " | ".join(f"({r['label']}) {r['topic']}: {r['ruling'][:240]}" for r in rl))
@@ -348,6 +364,10 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
         sections["GM-ONLY SECRETS"] = cut("GM-ONLY SECRETS", "Never reveal directly; reveal only through play, then reveal_secret.\n"
                                           + "\n".join(f"- #{s['id']} [{s['kind']}] {s['subject']}: {s['content'][:500]}" for s in chosen), B["secrets"])
 
+    # ledger documents (large profile): the imported current-state files, verbatim
+    if B["ledger_docs"]:
+        sections["LEDGER RECORDS"] = _ledger_docs(conn, cid, [by_id[i] for i in full_ids], B["ledger_docs"], omissions)
+
     # transcript
     if recent:
         long_msgs = sum(1 for m in recent if len(m["content"]) > B["transcript_msg"])
@@ -365,6 +385,32 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
             "sizes": {k: len(v) for k, v in sections.items()}, "categories": categories, "omissions": omissions,
             "group_keys": [g["key"] for g in groups], "open_quest_ids": [q["id"] for q in rows(conn, "SELECT id FROM quests WHERE campaign_id = ? AND visibility = 'player' AND status IN ('active','paused')", (cid,))],
             "present": [by_id[i]["name"] for i in present], "named": [by_id[i]["name"] for i in named]}
+
+
+LEDGER_ORDER = ["checkpoints/latest.md", "state/campaign.yaml", "state/roster.yaml", "state/shared_inventory.yaml", "state/advancement.yaml"]
+
+
+def _ledger_docs(conn: sqlite3.Connection, cid: int, chars: list[dict], budget: int, omissions: list[str]) -> str:
+    """Current-state ledger files as imported (player-visible only; private sheets are already in PRESENT): the
+    checkpoint, campaign, roster, stash, advancement, other state files, then the YAML of each character shown above."""
+    docs = [r["document_path"] for r in rows(conn, "SELECT DISTINCT document_path FROM source_sections WHERE campaign_id = ? AND visibility = 'player'", (cid,))]
+    slugs = [c["slug"] for c in chars]
+    order = [d for d in LEDGER_ORDER if d in docs]
+    order += sorted(d for d in docs if d.startswith("state/") and not d.startswith("state/characters/") and d not in order)
+    if budget > 200000:  # only with a very large ledger budget: the per-character YAMLs (duplicates of the sheets)
+        order += [f"state/characters/{s}.yaml" for s in slugs if f"state/characters/{s}.yaml" in docs]
+    parts, used, dropped = [], 0, []
+    for d in order:
+        body = "\n".join(r["content"] for r in rows(conn, "SELECT content FROM source_sections WHERE campaign_id = ? AND document_path = ? AND visibility = 'player' ORDER BY id", (cid, d)))
+        if used + len(body) > budget:
+            dropped.append(d)
+            continue
+        parts.append(f"=== {d} ===\n{body}")
+        used += len(body)
+    if dropped:
+        omissions.append(f"LEDGER RECORDS: {len(dropped)} documents over budget ({', '.join(dropped[:6])})")
+    return ("As imported from the Git ledger at the last import. Where these differ from CAMPAIGN / PARTY / PRESENT / OBJECTIVES "
+            "above, the sections above are the current authoritative state (play since the import is applied there).\n\n" + "\n\n".join(parts))
 
 
 def _combat_context(conn: sqlite3.Connection, enc: dict) -> str:

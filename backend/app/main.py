@@ -42,6 +42,7 @@ class PrefsIn(BaseModel):
     gm_provider: str | None = None
     codex_model: str | None = None
     gemini_model: str | None = None
+    context_profile: str | None = None
     codex_reasoning_effort: str | None = None
     rulebook_dir: str | None = None
     ledger_dir: str | None = None
@@ -85,7 +86,7 @@ class AppState:
 
     # Preferences live in a small JSON file (not the DB) so they can change while a turn holds the DB write lock.
     def prefs(self) -> dict:
-        base = {"gm_provider": self.settings.gm_provider, "codex_model": self.settings.codex_model, "gemini_model": self.settings.gemini_model,
+        base = {"gm_provider": self.settings.gm_provider, "codex_model": self.settings.codex_model, "gemini_model": self.settings.gemini_model, "context_profile": "standard",
                 "codex_reasoning_effort": self.settings.codex_reasoning_effort,
                 "rulebook_dir": str(self.settings.rulebook_dir) if self.settings.rulebook_dir else "",
                 "ledger_dir": str(self.settings.campaign_ledger_dir or DEFAULT_LEDGER), "active_campaign_id": None}
@@ -101,7 +102,9 @@ class AppState:
     def make_provider(self):
         p = self.prefs()
         model = p.get("gemini_model") if p["gm_provider"] == "gemini" else p.get("codex_model")
-        return make_provider(p["gm_provider"], self.settings, model=model or "", effort=p.get("codex_reasoning_effort"))
+        prov = make_provider(p["gm_provider"], self.settings, model=model or "", effort=p.get("codex_reasoning_effort"))
+        prov.context_profile = p.get("context_profile") or "standard"  # briefing size: standard | large (memory/context.py PROFILES)
+        return prov
 
     def conn(self):
         return connect(self.settings.campaign_db)
@@ -235,6 +238,8 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         upd = body.model_dump(exclude_none=True)
         if "gm_provider" in upd and upd["gm_provider"] not in ("codex", "gemini", "mock"):
             raise HTTPException(422, "gm_provider must be codex, gemini or mock")
+        if "context_profile" in upd and upd["context_profile"] not in ("standard", "large"):
+            raise HTTPException(422, "context_profile must be standard or large")
         if "codex_reasoning_effort" in upd and upd["codex_reasoning_effort"] not in ("minimal", "low", "medium", "high"):
             raise HTTPException(422, "invalid reasoning effort")
         p.update(upd)

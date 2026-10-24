@@ -303,3 +303,21 @@ def test_gemini_daily_quota_is_not_retried(settings, monkeypatch):
     with pytest.raises(ProviderError, match="daily free-tier quota"):
         GeminiProvider(settings).complete("C", STEPS, [], job_label="t1r1")
     assert len(calls) == 1
+
+
+def test_token_pacer_waits_instead_of_exceeding_the_per_minute_cap():
+    from app.gm.providers import TokenPacer
+    TokenPacer._windows.pop("pace-test", None)
+    clock = {"t": 1000.0}
+    slept = []
+
+    def sleep(s):
+        slept.append(s)
+        clock["t"] += s
+    now = lambda: clock["t"]  # noqa: E731
+    assert TokenPacer.wait("pace-test", 120_000, 230_000, sleep, now) == 0
+    clock["t"] += 10
+    assert TokenPacer.wait("pace-test", 100_000, 230_000, sleep, now) == 0   # 220k in the window: fits
+    clock["t"] += 5
+    waited = TokenPacer.wait("pace-test", 100_000, 230_000, sleep, now)     # would be 320k: wait for the first to age out
+    assert waited > 0 and slept and clock["t"] - 1000.0 >= 60

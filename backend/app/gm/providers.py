@@ -351,6 +351,47 @@ GEMINI_SAFETY = [{"category": c, "threshold": "BLOCK_ONLY_HIGH"} for c in
                  ("HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT")]
 
 
+class TokenPacer:
+    """Sliding 60-second window of input tokens per model. The free tier caps input tokens per minute (250k for
+    gemini-3.5-flash-lite, cached tokens included), so a call that would exceed the cap waits instead of failing.
+    Shared by every provider instance in the process (one per turn)."""
+
+    _lock = threading.Lock()
+    _windows: dict[str, list[tuple[float, int]]] = {}
+    _ratio: dict[str, float] = {}  # observed tokens per prompt character
+
+    @classmethod
+    def estimate(cls, model: str, chars: int) -> int:
+        return int(chars * cls._ratio.get(model, 0.3)) + 500
+
+    @classmethod
+    def wait(cls, model: str, tokens: int, limit: int, sleep=time.sleep, now=time.monotonic) -> float:
+        waited = 0.0
+        while True:
+            with cls._lock:
+                t = now()
+                win = [(ts, n) for ts, n in cls._windows.get(model, []) if t - ts < 60]
+                cls._windows[model] = win
+                used = sum(n for _, n in win)
+                if not win or used + tokens <= limit:
+                    win.append((t, tokens))  # reserve; corrected by record()
+                    return waited
+                pause = 60 - (t - win[0][0]) + 0.5
+            sleep(pause)
+            waited += pause
+
+    @classmethod
+    def record(cls, model: str, estimated: int, actual: int, chars: int) -> None:
+        with cls._lock:
+            win = cls._windows.get(model, [])
+            for i in range(len(win) - 1, -1, -1):
+                if win[i][1] == estimated:
+                    win[i] = (win[i][0], actual)
+                    break
+            if actual and chars:
+                cls._ratio[model] = actual / chars
+
+
 class GeminiProvider:
     """Google Gemini over its REST API (urllib; no SDK). Nothing but our JSON schema is offered to the model: no
     function declarations, no Google Search or code-execution tools, so the GM can only return JSON and the server
@@ -411,6 +452,15 @@ class GeminiProvider:
 
     def _generate(self, system: str, prompt: str, schema: dict, label: str) -> tuple[str, dict]:
         meta: dict[str, Any] = {"model": self.model, "effort": self.effort, "provider": "gemini", "external_api": True}
+        chars = len(system) + len(prompt)
+        est = TokenPacer.estimate(self.model, chars)
+        limit = self.settings.gemini_tpm_limit
+        if est > limit:
+            raise ProviderError(f"This briefing (~{est:,} tokens) exceeds the {self.model} per-minute limit of {limit:,}; "
+                                "use the standard briefing size or raise GEMINI_TPM_LIMIT on a paid tier.")
+        paced = TokenPacer.wait(self.model, est, int(limit * 0.92))
+        if paced:
+            meta["paced_s"] = round(paced, 1)
         cfg: dict[str, Any] = {"responseMimeType": "application/json", "responseJsonSchema": schema}
         if self.effort in ("low", "medium", "high"):
             cfg["thinkingConfig"] = {"thinkingLevel": self.effort}
@@ -426,6 +476,7 @@ class GeminiProvider:
             cfg.pop("thinkingConfig")  # model without thinking levels
             out = self._post(body, meta)
         um = out.get("usageMetadata") or {}
+        TokenPacer.record(self.model, est, int(um.get("promptTokenCount") or est), chars)
         meta["usage"] = {"input_tokens": um.get("promptTokenCount", 0), "cached_input_tokens": um.get("cachedContentTokenCount", 0),
                          "output_tokens": um.get("candidatesTokenCount", 0), "reasoning_output_tokens": um.get("thoughtsTokenCount", 0)}
         cands = out.get("candidates") or []

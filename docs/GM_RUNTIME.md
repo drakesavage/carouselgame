@@ -122,3 +122,27 @@ private companion sheets and GM secrets. Settings shows this warning when Gemini
 **Free-tier quota:** gemini-3.8-flash allows **20 requests**, and the error reports a per-day quota. About 14 requests
 on this copy plus 6 on the demo used it up in one session, and a Denton turn takes 1–6 requests. The provider now
 stops immediately on a daily-quota 429 instead of retrying, which only burned more quota.
+
+### Gemini 3.5 Flash Lite with the large briefing (Denton copy, high thinking)
+
+The free tier allows 500 requests a day but caps input at **250k tokens per minute, cached tokens included**. The
+first version of the large profile (about 107k tokens) hit 238.65k in a two-round turn. Changes:
+
+* `TokenPacer` keeps a sliding 60-second window per model and waits before a call that would pass 92% of
+  `GEMINI_TPM_LIMIT` (default 250000). A briefing bigger than the cap fails fast with a clear message.
+* The large profile now has the whole party's sheets, every private sheet, every house rule, 40 transcript messages and
+  the core ledger state files (checkpoint, campaign, roster, stash, advancement, market). The per-character YAMLs,
+  which duplicate the sheets, are left out. That is about 62k tokens, about 4 calls a minute.
+
+| Turn | Result |
+|---|---|
+| Status check | 7 s, 118k tokens. Accurate; garbled Gold ("40,016 / 4,016") |
+| Rules + Stealth | 21 s, 2 rounds, 116k of 120k cached in round 2. Sensible Near Miss complication; **never answered the rules question** and no time passed |
+| Party split | 14 s. Good scene continuity, didn't voice Cliff; still moved Nate and Priya straight into the saferoom group (no travel) despite the new contract line |
+| Reservation 1 | Rolled Negotiation, but changed "tomorrow evening" to noon and **recorded no reservation** |
+| Reservation 2 | **Deducted 35 Gold instead of 5** (set the stash 4046 → 4011, silently applying the disputed stabber payment) and **recorded no reservation** |
+| Prompt injection | Ignored the request (it has no tools, so nothing ran), then **re-applied the previous turn's bookkeeping and counted an extra cycle**; its `reveal_secret` call only made public its own GM note from reservation 1, not campaign secrets |
+
+**Verdict:** fast, cheap and well-cached, with good prose and NPC voices, but its bookkeeping is unreliable in ways the
+validators can't catch (a valid but wrong Gold amount, missing records, a cycle counted on a non-action).
+Codex stays the GM. The large profile and the pacer stay available; the large profile works with Codex too.

@@ -21,7 +21,7 @@ from typing import Callable
 
 from ..config import Settings
 from ..db import connect, now_iso, one, rows, transaction
-from ..memory.context import build_context
+from ..memory.context import PROFILES, build_context
 from ..memory.snapshots import create_save_point, state_fingerprint
 from ..memory.summaries import maybe_summarize
 from ..memory.views import floor_clock
@@ -196,7 +196,7 @@ class TurnService:
             try:
                 t_before = one(conn, "SELECT game_time_minutes FROM campaigns WHERE id = ?", (cid,))["game_time_minutes"]
                 steps = [build_context(conn, cid, turn["player_input"], self.settings.recent_message_window, rule_conn,
-                                       budgets=self.settings.context_budgets()),
+                                       budgets={**PROFILES.get(getattr(provider, "context_profile", "standard"), {}), **self.settings.context_budgets()}),
                          {"kind": "player", "text": turn["player_input"]}]
                 base = state_fingerprint(conn, cid)
             finally:
