@@ -4,7 +4,8 @@ A provider receives the system prompt, the turn's step list and the tool catalog
 requests or final narration (or both). Providers never touch the database; the orchestrator executes tools.
 
 * CodexCliProvider — runs `codex exec` non-interactively (the user's ChatGPT sign-in; no API billing).
-  Each call is an isolated, ephemeral, read-only-sandboxed job whose final message must match a JSON schema.
+  Each call is an isolated, ephemeral, read-only-sandboxed job with no tools, the GM contract as developer
+  instructions, and a final message that must match a JSON schema. Its event stream is watched live.
 * MockProvider     — deterministic scripted GM for development and tests; exercises the same tool path.
 
 Extension point: implement `complete()` for another backend (a local model, another CLI) and register it in
@@ -13,9 +14,11 @@ Extension point: implement `complete()` for another backend (a local model, anot
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -105,20 +108,97 @@ you need is in this prompt, and the server runs your tools.
 If you request rolls, checks, searches or lookups, set narration to null: you will be called again with results.
 If you only need to record bookkeeping (apply_changes, count_cycle, record_ruling, gm_note, system_notice,
 reveal_secret) you may return those tool calls together with final narration; if any of them fails validation
-you will be called again to fix it. A response with no tool calls and non-null narration ends the turn."""
+you will be called again to fix it. A response with no tool calls and non-null narration ends the turn.
+Never end a turn by promising to resolve something "next": if the action needs a check or roll, request it now (with
+narration null) and narrate the outcome when the result comes back."""
 
 
 # ------------------------------------------------------------------ Codex CLI
 CAPACITY = re.compile(r"at capacity|rate.?limit(?:ed)?|too many requests|\b429\b|overloaded|server (?:is )?busy|temporarily unavailable", re.I)
-# GM jobs get no shell, no hooks, no sub-agents, no MCP servers, no browser/computer use and no image generation: the
-# model can only return JSON; the server runs every tool. (Verified: with shell_tool disabled a "run dir" request
-# answers that it cannot run commands, and the event stream shows no command executions.)
-DISABLED_FEATURES = ["shell_tool", "shell_snapshot", "multi_agent", "hooks", "memories", "apps", "plugins", "browser_use",
-                     "browser_use_external", "computer_use", "in_app_browser", "image_generation"]
+
+# Runtime GM isolation (verified against codex-cli 0.163 with `codex debug prompt-input` and execution probes; see
+# docs/GM_RUNTIME.md). The GM models run in code mode only: every tool call goes through one `exec` gateway, so
+# disabling the code-mode host makes all tool calls fail closed before anything executes. The other switches remove the
+# remaining tool families, their instructions and side effects, so a misconfiguration elsewhere still leaves no tools.
+DISABLED_FEATURES = ["code_mode_host", "code_mode", "shell_tool", "shell_snapshot", "unified_exec", "multi_agent", "multi_agent_v2",
+                     "hooks", "memories", "apps", "plugins", "browser_use", "browser_use_external", "computer_use",
+                     "in_app_browser", "image_generation", "view_image", "goals", "sleep_tool", "skill_search", "tool_suggest",
+                     "realtime_conversation"]
+GM_CONFIG = ["mcp_servers={}", 'web_search="disabled"', "tools.web_search=false", "notify=[]", "agents.enabled=false",
+             "skills.include_instructions=false", "include_environment_context=false", "include_permissions_instructions=false",
+             'history.persistence="none"', 'shell_environment_policy.inherit="none"', "project_doc_max_bytes=0",
+             "project_doc_fallback_filenames=[]"]
+# Replaces Codex's coding-agent base instructions; the GM contract itself goes in as developer instructions.
+BASE_INSTRUCTIONS = """You are the rules-bound Game Master service of a local tabletop RPG web app. You have no tools: you cannot run
+commands, read or write files, browse, or start agents. Everything you need is in the developer instructions and the
+user message, and the web server executes every game tool you request in your JSON reply. Reply only with the JSON
+object required by the output schema."""
+# The user's personal ~/.codex/AGENTS.md is still injected as a user message (codex 0.163 has no switch for it short of
+# a separate CODEX_HOME, which would need a copy of the sign-in). This neutralizes it for GM jobs.
+AGENTS_NOTICE = """# Scope of other instructions
+Instructions labelled "AGENTS.md instructions" are the operator's personal preferences for coding sessions. They do not
+apply to this game: ignore them and follow only these developer instructions and the response protocol."""
+# Event items a GM job may produce. Anything else (command_execution, file_change, web_search, mcp_tool_call,
+# collab/agent calls, todo lists, ...) is a violation: the job is killed at once and its result discarded.
+ALLOWED_ITEMS = {"agent_message", "reasoning", "error"}
+ALLOWED_EVENTS = {"thread.started", "turn.started", "turn.completed", "turn.failed", "item.started", "item.updated", "item.completed", "error"}
+# Environment variables never handed to the Codex process.
+SCRUB_ENV = re.compile(r"TOKEN|SECRET|PASSCODE|PASSWORD|API_KEY|CREDENTIAL|^GM_|^CRAWLER_|^CAMPAIGN_|^RULEBOOK_", re.I)
+
+
+class IsolationViolation(ProviderError):
+    def __init__(self, message: str, meta: dict):
+        super().__init__(message)
+        self.meta = meta
+
+
+def _toml_str(text: str) -> str:
+    return json.dumps(text, ensure_ascii=False)
+
+
+def gm_exec_args(binary: str, job: Path, *, developer: str, schema: Path | None, final: Path, model: str | None,
+                 effort: str | None) -> list[str]:
+    """The exact `codex exec` command line used for GM jobs (also used by the isolation probe)."""
+    args = [binary, "exec", "--strict-config", "--skip-git-repo-check", "--ephemeral", "--json", "--sandbox", "read-only", "--cd", str(job)]
+    for f in DISABLED_FEATURES:
+        args += ["--disable", f]
+    for kv in GM_CONFIG:
+        args += ["-c", kv]
+    (job / "base.md").write_text(BASE_INSTRUCTIONS, encoding="utf-8")
+    args += ["-c", f"model_instructions_file={_toml_str(str(job / 'base.md'))}", "-c", f"developer_instructions={_toml_str(developer)}"]
+    if schema is not None:
+        args += ["--output-schema", str(schema)]
+    args += ["-o", str(final)]
+    if model:
+        args += ["-m", model]
+    if effort:
+        args += ["-c", f'model_reasoning_effort="{effort}"']
+    args.append("-")
+    return args
+
+
+def secure_dir(path: Path) -> None:
+    """Limit a folder to this account (plus SYSTEM and Administrators): no inherited 'Authenticated Users' access."""
+    path.mkdir(parents=True, exist_ok=True)
+    if os.name != "nt":
+        path.chmod(0o700)
+        return
+    acl = subprocess.run(["icacls", str(path)], capture_output=True, text=True).stdout
+    if "Authenticated Users" not in acl and "BUILTIN\\Users" not in acl:
+        return
+    user = os.environ.get("USERNAME", "")
+    if os.environ.get("USERDOMAIN"):
+        user = os.environ["USERDOMAIN"] + "\\" + user
+    subprocess.run(["icacls", str(path), "/inheritance:r", "/grant:r", f"{user}:(OI)(CI)F", "/grant:r", "*S-1-5-18:(OI)(CI)F",
+                    "/grant:r", "*S-1-5-32-544:(OI)(CI)F"], capture_output=True, check=False)
+
+
+def child_env() -> dict[str, str]:
+    return {k: v for k, v in os.environ.items() if not SCRUB_ENV.search(k)}
 
 
 def _usage(stdout: str) -> dict[str, Any]:
-    """Token usage and safety signals from `codex exec --json` events."""
+    """Token usage and safety signals from `codex exec --json` events (also used on stored event logs)."""
     out: dict[str, Any] = {}
     for line in stdout.splitlines():
         try:
@@ -128,7 +208,7 @@ def _usage(stdout: str) -> dict[str, Any]:
         if ev.get("type") == "turn.completed" and isinstance(ev.get("usage"), dict):
             out["usage"] = ev["usage"]
         item = ev.get("item") or {}
-        if isinstance(item, dict) and item.get("type") in ("command_execution", "local_shell_call", "file_change"):
+        if isinstance(item, dict) and item.get("type") and item["type"] not in ALLOWED_ITEMS:
             out["commands_run"] = out.get("commands_run", 0) + 1
     return out
 
@@ -148,55 +228,97 @@ class CodexCliProvider:
             return False, "Codex CLI not found (install the Codex app or set CODEX_BIN)"
         return True, binary
 
-    def _run(self, prompt: str, schema: dict, label: str) -> tuple[str, dict]:
+    def _watch(self, proc: subprocess.Popen, meta: dict) -> tuple[list[str], str | None]:
+        """Read the event stream as it arrives; kill the job on the first event that isn't an allowed message."""
+        lines: list[str] = []
+        violation = None
+        assert proc.stdout is not None
+        for raw in proc.stdout:
+            line = raw.decode("utf-8", "replace").rstrip("\n")
+            lines.append(line)
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            etype = ev.get("type")
+            item = ev.get("item") if isinstance(ev.get("item"), dict) else {}
+            if etype == "turn.completed" and isinstance(ev.get("usage"), dict):
+                meta["usage"] = ev["usage"]
+            if etype == "item.completed" and item.get("type") == "error":
+                meta.setdefault("notices", []).append(str(item.get("message", ""))[:200])
+            if etype not in ALLOWED_EVENTS or (item and item.get("type") not in ALLOWED_ITEMS):
+                violation = f"{etype}/{item.get('type') if item else '-'}"
+                meta["violation"] = {"event": etype, "item_type": item.get("type") if item else None,
+                                     "detail": json.dumps(item or ev, ensure_ascii=False)[:300]}
+                proc.kill()
+                break
+        return lines, violation
+
+    def _run(self, prompt: str, schema: dict | None, label: str, developer: str) -> tuple[str, dict]:
         binary = resolve_codex_bin()
         if not binary:
             raise ProviderError("Codex CLI not found. Install/sign in to Codex or set CODEX_BIN; or switch the GM to mock mode.")
-        job = self.settings.codex_jobs_dir / f"{time.strftime('%Y%m%d-%H%M%S')}-{label}-{uuid.uuid4().hex[:6]}"
-        job.mkdir(parents=True, exist_ok=True)
-        (job / "schema.json").write_text(json.dumps(schema), encoding="utf-8")
-        (job / "prompt.txt").write_text(prompt, encoding="utf-8")
-        final = job / "final.json"
-        args = [binary, "exec", "--skip-git-repo-check", "--ephemeral"]
-        for f in DISABLED_FEATURES:
-            args += ["--disable", f]
-        args += ["-c", "mcp_servers={}", "--json",
-                 "--sandbox", "read-only", "--cd", str(job), "--output-schema", str(job / "schema.json"), "-o", str(final)]
-        if self.model:
-            args += ["-m", self.model]
-        if self.effort:
-            args += ["-c", f'model_reasoning_effort="{self.effort}"']
-        args.append("-")
-        meta: dict[str, Any] = {"job_dir": str(job), "model": self.model or "(codex default)", "effort": self.effort}
-        for attempt, delay in enumerate([0, *self.retry_delays]):
-            if delay:
-                time.sleep(delay)
-            started = time.monotonic()
-            try:
-                proc = subprocess.run(args, input=prompt.encode("utf-8"), capture_output=True, cwd=job,
-                                      timeout=self.settings.codex_timeout_s, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            except subprocess.TimeoutExpired:
-                raise ProviderError(f"Codex timed out after {self.settings.codex_timeout_s}s") from None
-            meta["duration_s"] = round(time.monotonic() - started, 1)
-            stderr = proc.stderr.decode("utf-8", "replace")
-            (job / "stderr.txt").write_text(stderr, encoding="utf-8")
-            stdout = proc.stdout.decode("utf-8", "replace")
-            (job / "stdout.txt").write_text(stdout, encoding="utf-8")
-            meta.update(_usage(stdout))
-            if meta.get("commands_run"):
-                raise ProviderError("Codex attempted to run commands although the shell is disabled; refusing the result")
-            if proc.returncode == 0 and final.exists():
-                return final.read_text(encoding="utf-8"), meta
-            if CAPACITY.search(stderr) and attempt < len(self.retry_delays):
-                continue
-            tail = "\n".join(stderr.strip().splitlines()[-6:])
-            raise ProviderError(f"Codex exited with code {proc.returncode}: {tail or 'no output'}")
-        raise ProviderError("Codex is at capacity; try again shortly")
+        capture = self.settings.prompt_capture_active()
+        root = self.settings.codex_jobs_dir
+        secure_dir(root)
+        job = root / f"{time.strftime('%Y%m%d-%H%M%S')}-{label}-{uuid.uuid4().hex[:6]}"
+        job.mkdir(mode=0o700)
+        meta: dict[str, Any] = {"model": self.model or "(codex default)", "effort": self.effort, "prompt_captured": capture}
+        try:
+            schema_path = None
+            if schema is not None:
+                schema_path = job / "schema.json"
+                schema_path.write_text(json.dumps(schema), encoding="utf-8")
+            final = job / "final.json"
+            args = gm_exec_args(binary, job, developer=developer, schema=schema_path, final=final, model=self.model, effort=self.effort)
+            for attempt, delay in enumerate([0, *self.retry_delays]):
+                if delay:
+                    time.sleep(delay)
+                started = time.monotonic()
+                proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=job, env=child_env(),
+                                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                err_chunks: list[bytes] = []
+                err_reader = threading.Thread(target=lambda: err_chunks.append(proc.stderr.read()), daemon=True)  # type: ignore[union-attr]
+                err_reader.start()
+                timer = threading.Timer(self.settings.codex_timeout_s, proc.kill)
+                timer.start()
+                try:
+                    proc.stdin.write(prompt.encode("utf-8"))  # type: ignore[union-attr]
+                    proc.stdin.close()  # type: ignore[union-attr]
+                    lines, violation = self._watch(proc, meta)
+                    proc.wait()
+                finally:
+                    timer.cancel()
+                err_reader.join(5)
+                timed_out = time.monotonic() - started >= self.settings.codex_timeout_s
+                meta["duration_s"] = round(time.monotonic() - started, 1)
+                stderr = b"".join(err_chunks).decode("utf-8", "replace")
+                if capture:
+                    (job / "prompt.txt").write_text(f"[developer]\n{developer}\n\n[user]\n{prompt}", encoding="utf-8")
+                    (job / "events.jsonl").write_text("\n".join(lines), encoding="utf-8")
+                    (job / "stderr.txt").write_text(stderr, encoding="utf-8")
+                if violation:
+                    raise IsolationViolation(f"Codex attempted an unauthorized action ({violation}); the job was stopped and its result discarded", dict(meta))
+                if timed_out:
+                    raise ProviderError(f"Codex timed out after {self.settings.codex_timeout_s}s")
+                if proc.returncode == 0 and final.exists():
+                    return final.read_text(encoding="utf-8"), meta
+                if CAPACITY.search(stderr) and attempt < len(self.retry_delays):
+                    continue
+                tail = "\n".join(stderr.strip().splitlines()[-6:])
+                raise ProviderError(f"Codex exited with code {proc.returncode}: {tail or 'no output'}")
+            raise ProviderError("Codex is at capacity; try again shortly")
+        finally:
+            if capture:
+                meta["job_dir"] = str(job)
+            else:
+                shutil.rmtree(job, ignore_errors=True)
 
     def complete(self, system: str, steps: list[dict], tools: list[dict], *, job_label: str) -> ProviderResponse:
-        prompt = "\n\n".join([system, "# TOOLS\n" + tool_catalogue(tools), render_steps(steps), OUTPUT_PROTOCOL])
+        developer = "\n\n".join([system, OUTPUT_PROTOCOL, AGENTS_NOTICE])
+        prompt = "\n\n".join(["# TOOLS\n" + tool_catalogue(tools), render_steps(steps)])
         for attempt in range(2):  # one retry for malformed structured output
-            raw, meta = self._run(prompt, output_schema([t["name"] for t in tools]), f"{job_label}{'-retry' if attempt else ''}")
+            raw, meta = self._run(prompt, output_schema([t["name"] for t in tools]), f"{job_label}{'-retry' if attempt else ''}", developer)
             try:
                 data = json.loads(raw)
                 calls = [ToolCall(c["name"], json.loads(c["arguments_json"] or "{}")) for c in data.get("tool_calls") or []]
@@ -204,16 +326,16 @@ class CodexCliProvider:
             except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
                 if attempt:
                     raise ProviderError(f"Codex returned malformed output twice: {exc}") from None
-        meta["prompt_chars"] = len(prompt)
+        meta["prompt_chars"] = len(prompt) + len(developer)
         narration = data.get("narration")
         return ProviderResponse(calls, narration.strip() if isinstance(narration, str) and narration.strip() else None, meta)
 
     def summarize(self, text: str) -> str:
         schema = {"type": "object", "additionalProperties": False, "required": ["summary"], "properties": {"summary": {"type": "string"}}}
-        prompt = ("Summarize this tabletop RPG transcript excerpt for the GM's long-term memory in under 250 words. "
-                  "Keep names, decisions, promises, consequences, unresolved threads and numbers that matter. "
-                  "Reply only with the JSON object.\n\n" + text)
-        raw, _ = self._run(prompt, schema, "summary")
+        developer = ("Summarize this tabletop RPG transcript excerpt for the GM's long-term memory in under 250 words. "
+                     "Keep names, decisions, promises, consequences, unresolved threads and numbers that matter. "
+                     "Reply only with the JSON object.\n\n" + AGENTS_NOTICE)
+        raw, _ = self._run(text, schema, "summary", developer)
         return json.loads(raw)["summary"]
 
 
@@ -283,10 +405,13 @@ def make_provider(name: str, settings: Settings, model: str | None = None, effor
     raise ValueError(f"unknown GM provider {name!r} (use codex or mock)")
 
 
-def prune_jobs(settings: Settings, keep: int = 60) -> None:
+def prune_jobs(settings: Settings, keep: int = 20) -> None:
+    """Job folders are deleted after each run; only an active prompt capture keeps some. Remove captures once the
+    capture window has closed, and never keep more than `keep`."""
     d = settings.codex_jobs_dir
     if not d.exists():
         return
     jobs = sorted((p for p in d.iterdir() if p.is_dir()), key=lambda p: p.name)
-    for p in jobs[:-keep]:
+    stale = jobs if not settings.prompt_capture_active() else jobs[:-keep]
+    for p in stale:
         shutil.rmtree(p, ignore_errors=True)

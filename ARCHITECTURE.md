@@ -7,7 +7,7 @@ everything else keeps that GM honest, consistent and remembered.
 
 | Decision | Why |
 |---|---|
-| **Runtime GM = Codex CLI** (`codex exec`), not the OpenAI API | Uses the player's ChatGPT/Codex sign-in, so no per-token API billing. Each GM step is an isolated, `--ephemeral`, `--sandbox read-only` job whose final message must match a JSON schema (`--output-schema`). Same binary lookup as Barcode Battles (desktop app's newest build in `%LOCALAPPDATA%\OpenAI\Codex\bin`, then `CODEX_BIN`, then PATH). |
+| **Runtime GM = Codex CLI** (`codex exec`), not the OpenAI API | Uses the player's ChatGPT/Codex sign-in, so no per-token API billing. Each GM step is an isolated, `--ephemeral`, `--sandbox read-only` job with no tools (code-mode gateway disabled), the GM contract as developer instructions, a live event watcher, and a final message that must match a JSON schema (`--output-schema`). See [docs/GM_RUNTIME.md](docs/GM_RUNTIME.md). Same binary lookup as Barcode Battles (desktop app's newest build in `%LOCALAPPDATA%\OpenAI\Codex\bin`, then `CODEX_BIN`, then PATH). |
 | Provider abstraction (`gm/providers.py`) | `codex` and `mock` today; a local model or another CLI only needs `complete()` + `summarize()`. |
 | Tool protocol in JSON, executed by the server | The model *requests* checks, dice and state changes; Python validates and applies them. Narration can't change state. |
 | **FastAPI serves the built React app** | Running only needs Python. Node is needed only to rebuild the UI (the Codex app ships one; `build-frontend.cmd` finds it). |
@@ -47,15 +47,17 @@ everything else keeps that GM honest, consistent and remembered.
 ## A turn
 
 1. `POST /api/campaigns/{id}/turns {text, idempotency_key}` — a repeated key returns the stored result (no re-run).
-2. A global write lock serializes turns; the turn row is created `processing` and the work runs in a thread.
+2. A global lock serializes turns (a Python lock, not a database lock); the turn row is created `processing` and the work runs in a thread.
    The UI polls `GET /api/turns/{id}` for stage and progress.
 3. `memory/context.py` builds the context: position and floor clock, the PC's full mechanics, compact party, quests,
    shared stash, always-apply constitution sections, recent rulings, summaries, the last 12 messages, and, for
    characters named in the input or the recent scene, their sheet plus **GM-only companion sheet**.
 4. Loop (max 5 rounds): the provider returns tool calls and/or narration → `ToolRunner` executes them → results go
    back. Bookkeeping-only calls plus narration finish in one round, so a typical turn is 1–2 Codex calls.
-5. Everything is staged in **one SQLite transaction**: state changes, events, transcript, autosave. On failure it
-   all rolls back, except dice, which are re-recorded against the failed turn so retrying can't fish for rolls.
+5. **No write transaction is held while Codex runs.** Each round's tools run in a short transaction that is rolled
+   back (staging); the commit replays every staged call with the same dice (`ReplayDice`) in **one** transaction with
+   the transcript, events and autosave, after checking the state fingerprint is unchanged. A failure or a concurrent
+   change commits nothing; drawn dice are recorded against the failed/interrupted turn so retrying can't fish for rolls.
 6. Each `apply_changes` call is itself atomic: drinking a potion removes it *and* heals, or neither.
 
 ## Data model highlights

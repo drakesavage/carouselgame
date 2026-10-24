@@ -5,9 +5,11 @@ so no paid API key is needed. "mock" runs a scripted GM for development and test
 """
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import shutil
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -81,7 +83,30 @@ class Settings:
 
     @property
     def codex_jobs_dir(self) -> Path:
+        """Scratch folders for GM jobs (git-ignored; access restricted to this account by providers.secure_dir).
+        Codex 0.163 fails with "path not found" when its working folder is under LocalAppData, so they stay in data/."""
+        if os.environ.get("CODEX_JOBS_DIR"):
+            return Path(os.environ["CODEX_JOBS_DIR"])
         return self.data_dir / "codex_jobs"
+
+    @property
+    def prompt_capture_file(self) -> Path:
+        """Holds the expiry of the opt-in, short-lived full-prompt capture (development only)."""
+        return self.data_dir / "prompt_capture.json"
+
+    def prompt_capture_active(self) -> bool:
+        try:
+            return json.loads(self.prompt_capture_file.read_text(encoding="utf-8")).get("until", 0) > time.time()
+        except (OSError, ValueError):
+            return False
+
+    def context_budgets(self) -> dict:
+        """Per-install overrides of memory/context.py DEFAULT_BUDGET, e.g. CONTEXT_BUDGETS={"present_each": 3200}."""
+        try:
+            raw = json.loads(os.environ.get("CONTEXT_BUDGETS") or "{}")
+        except ValueError:
+            return {}
+        return {k: int(v) for k, v in raw.items() if isinstance(v, (int, float))}
 
     def gm_token(self) -> str:
         """Token guarding /api/gm. From GM_TOKEN, else generated once into data/gm_token.txt."""

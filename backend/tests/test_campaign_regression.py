@@ -190,3 +190,15 @@ def test_repeated_request_never_applies_twice(client, conn, denton, settings):
         client.post(f"/api/campaigns/{denton}/turns", json={"text": "We browse the stalls for an hour.", "idempotency_key": key})
     assert state(conn, denton)[0] == t0 + 60
     assert one(conn, "SELECT usage_json FROM turn_diagnostics ORDER BY turn_id DESC LIMIT 1")["usage"]["game_time_after"] == t0 + 60
+
+
+def test_briefing_carries_what_the_gm_needs_and_the_continuity_report_passes(conn, denton):
+    from app.gm.integrity import continuity
+    ctx = build_context(conn, denton, "What is everyone doing right now, and what do we still owe people?")
+    text = ctx["text"]
+    for needle in ("[prison-recon]", "[training-market]", "[saferoom]", "Personal Stabber", "siphon", "reservation", "commitment"):
+        assert needle.lower() in text.lower(), needle
+    assert ctx["categories"]["state"] > 0 and ctx["categories"]["contract_rules"] > 0
+    report = continuity(conn, denton, ctx, [], 0, 0, [])
+    failing = [c for c in report["checks"] if c["status"] != "pass"]
+    assert not failing, failing

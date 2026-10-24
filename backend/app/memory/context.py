@@ -8,10 +8,14 @@ Sections, in order:
                     anyone named); GM-ONLY companion sheets and memories for them
   5 OBJECTIVES      quests, projects, crafting, commitments, reservations (details, due times, owners)
   6 MEMORY          closed-scene summaries, transcript summaries, relevant canonical facts, the last N messages
-  7 RULES           always-apply constitution sections, house rules matching this action, recent rulings,
-                    auto-retrieved rulebook passages with page refs (to verify before citing)
-  8 GM-ONLY         relevant unrevealed secrets
+  7 HOUSE RULES     always-apply constitution sections, house rules matching this action, recent rulings
+  8 RULEBOOK        auto-retrieved rulebook passages with page refs (to verify before citing)
+  9 GM-ONLY         relevant unrevealed secrets
 The player's exact input is sent separately as its own step.
+
+Every section maps to one category (CATEGORIES) so diagnostics can report what was loaded. Budgets are characters
+(DEFAULT_BUDGET, overridable per install with CONTEXT_BUDGETS); anything cut or left out is listed in `omissions`
+instead of disappearing silently.
 
 Presence comes from stored state (scene participants, group membership), not only name matching; characters are
 listed with stable ids, which every op accepts. Each section has a character budget, so the packet stays bounded.
@@ -25,10 +29,14 @@ import sqlite3
 from ..db import one, rows
 from .views import floor_clock
 
-BUDGET = {"scene": 3500, "party": 3000, "present_each": 2600, "companion": 2500, "objectives": 3500, "memory": 4500,
-          "transcript_msg": 1500, "rules_relevant": 2400, "official": 1600, "secrets": 3500}
-MAX_PRESENT_FULL = 10
-MAX_COMPANIONS = 8
+DEFAULT_BUDGET = {"scene": 3500, "party": 3000, "present_each": 2600, "companion": 3800, "objectives": 3500, "memory": 4500,
+                  "transcript_msg": 1500, "rules_always_each": 2600, "rules_relevant": 2400, "official": 1600, "secrets": 3500,
+                  "max_present_full": 10, "max_companions": 8, "max_named_absent": 4, "max_facts": 8, "max_secrets": 10,
+                  "official_passages": 2}
+BUDGET = DEFAULT_BUDGET  # backwards-compatible name
+CATEGORIES = {"CAMPAIGN": "state", "PARTY": "state", "PRESENT": "state", "OBJECTIVES": "state", "SHARED STASH": "state",
+              "ACTIVE COMBAT": "state", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
+              "RULEBOOK": "rulebook", "RECENT TRANSCRIPT": "narrative", "GM-ONLY SECRETS": "gm_private"}
 STOP = set("the a an and or of to in on for with by is are be as at it this that from what how does do can when which who i we my our me us "
            "you your he she they them his her their then than into onto about there here just also will would should could".split())
 
@@ -90,7 +98,7 @@ def _uses(conn: sqlite3.Connection, char_id: int) -> str:
     return ", ".join(f"{u['ability']} {u['uses']}/{u['uses_allowed']} per {u['per'].replace('_', ' ')}" for u in us)
 
 
-def _full_char(conn: sqlite3.Connection, c: dict, where: str | None = None) -> str:
+def _full_char(conn: sqlite3.Connection, c: dict, where: str | None = None, budget: int = DEFAULT_BUDGET["present_each"]) -> str:
     d = c.get("derived") or {}
     sheet = c.get("sheet") or {}
     lines = [f"### {c['name']} (id {c['id']}, {c['slug']}) — {c['kind']}, {c.get('roster_category') or ''}, status {c['status']}" + (f" — {where}" if where else ""),
@@ -117,7 +125,7 @@ def _full_char(conn: sqlite3.Connection, c: dict, where: str | None = None) -> s
     p = c.get("npc_profile")
     if p:
         lines.append(f"attitude to party: {'unrecorded' if p.get('attitude') is None else format(p['attitude'], '+d')}; voice: {p.get('voice') or '-'}")
-    return _cut("\n".join(lines), BUDGET["present_each"])
+    return _cut("\n".join(lines), budget)
 
 
 def _named(chars: list[dict], text: str) -> list[int]:
@@ -138,8 +146,17 @@ def _due(q: dict, now: int) -> str:
     return f" [due in {left // 60}h{left % 60:02d}m]" if left >= 0 else f" [OVERDUE by {-left // 60}h{-left % 60:02d}m]"
 
 
-def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_window: int = 12, rule_conn: sqlite3.Connection | None = None) -> dict:
+def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_window: int = 12, rule_conn: sqlite3.Connection | None = None,
+                  budgets: dict | None = None) -> dict:
     from ..rules.state_ops import day_info
+    B = {**DEFAULT_BUDGET, **(budgets or {})}
+    omissions: list[str] = []
+
+    def cut(section: str, text: str, n: int) -> str:
+        if len(text) > n:
+            omissions.append(f"{section}: {len(text) - n} characters cut (budget {n})")
+        return _cut(text, n)
+
     camp = one(conn, "SELECT * FROM campaigns WHERE id = ?", (cid,))
     clock = floor_clock(camp)
     now = camp["game_time_minutes"]
@@ -190,7 +207,7 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
                        AND type NOT IN ('time_advanced','memory_recorded','fact_recorded') ORDER BY id DESC LIMIT 8""", (cid,))[::-1]
     if ev:
         sc.append("Recent events: " + " | ".join(e["summary"][:160] for e in ev))
-    sections["CURRENT SCENE"] = _cut("\n".join(sc), BUDGET["scene"])
+    sections["CURRENT SCENE"] = cut("CURRENT SCENE", "\n".join(sc), B["scene"])
 
     # 3 PARTY ORGANIZATION
     pc_group = pc.get("assignment") if pc else None
@@ -219,30 +236,37 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     if not groups:
         po.append("No party groups recorded: everyone in the active party is assumed together. Record splits with op group / move_group.")
     po.append("Only characters PRESENT below can act in this scene; others are elsewhere doing their activity (resolve offscreen per §15).")
-    sections["PARTY"] = _cut("\n".join(po), BUDGET["party"])
+    sections["PARTY"] = cut("PARTY", "\n".join(po), B["party"])
 
     # 4 PRESENT CHARACTERS (+ named elsewhere)
-    full_ids = present[:MAX_PRESENT_FULL] + [i for i in named if i not in present][:4]
+    full_ids = present[:B["max_present_full"]] + [i for i in named if i not in present][:B["max_named_absent"]]
     blocks, companions = [], 0
     for i in full_ids:
         c = dict(by_id[i])
         c["npc_profile"] = one(conn, "SELECT * FROM npc_profiles WHERE character_id = ?", (i,))
         where = None if i in present else f"NOT PRESENT (group {c.get('assignment') or '-'}, {c.get('location') or 'location unknown'})"
         role = "PLAYER CHARACTER — controlled only by the player" if pc and i == pc["id"] else where
-        blocks.append(_full_char(conn, c, role))
+        sheet = _full_char(conn, c, role, budget=10**6)
+        if len(sheet) > B["present_each"]:
+            omissions.append(f"PRESENT: {c['name']}'s sheet cut by {len(sheet) - B['present_each']} characters")
+        blocks.append(_cut(sheet, B["present_each"]))
         if pc and i == pc["id"]:
             continue
         mem = rows(conn, "SELECT content, visibility FROM memories WHERE campaign_id = ? AND character_id = ? ORDER BY importance, id DESC LIMIT 6", (cid, i))
         if mem:
             blocks.append("memories: " + " | ".join(("[GM-ONLY] " if m["visibility"] == "gm" else "[party saw] ") + m["content"][:220] for m in mem))
         comp = one(conn, "SELECT id, content FROM gm_secrets WHERE campaign_id = ? AND kind = 'companion_sheet' AND subject = ? AND revealed = 0", (cid, c["slug"]))
-        if comp and companions < MAX_COMPANIONS:
+        if comp and companions < B["max_companions"]:
             companions += 1
-            blocks.append(f"GM-ONLY private companion sheet (secret id {comp['id']}; perform it, never expose it):\n" + _cut(comp["content"], BUDGET["companion"]))
+            blocks.append(f"GM-ONLY private companion sheet (secret id {comp['id']}; perform it, never expose it):\n"
+                          + cut(f"PRESENT: {c['name']}'s companion sheet", comp["content"], B["companion"]))
+        elif comp:
+            omissions.append(f"PRESENT: {c['name']}'s companion sheet left out (max_companions {B['max_companions']})")
     absent_named = [by_id[i]["name"] for i in named if i not in full_ids]
-    if len(present) > MAX_PRESENT_FULL:
+    if len(present) > B["max_present_full"]:
+        omissions.append(f"PRESENT: {len(present) - B['max_present_full']} present characters shown compact (max_present_full {B['max_present_full']})")
         blocks.append("Also present (compact): " + ", ".join(f"{by_id[i]['name']} (id {i}): L{by_id[i]['level']}, {_res(by_id[i], 'hp', 'HP')}; top skills {_skills(conn, i, 5)}"
-                                                          for i in present[MAX_PRESENT_FULL:]))
+                                                          for i in present[B["max_present_full"]:]))
     if absent_named:
         blocks.append("Also mentioned: " + ", ".join(absent_named))
     sections["PRESENT"] = "\n".join(blocks) or "No characters recorded."
@@ -256,7 +280,7 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
                   + (f" — holder: {owner['name']}" if owner else "") + (f" — {q['progress']}" if q["progress"] else "")
                   + (f"\n  details: {_cut(json.dumps(det, ensure_ascii=False, default=str), 500)}" if det else ""))
     ob.append("Reservations are held, not owned: never treat a reserved item as in anyone's inventory until it is actually acquired.")
-    sections["OBJECTIVES"] = _cut("\n".join(ob), BUDGET["objectives"])
+    sections["OBJECTIVES"] = cut("OBJECTIVES", "\n".join(ob), B["objectives"])
 
     # shared stash (resources) belongs with objectives/resources
     shared = rows(conn, "SELECT id, name, quantity, deployed, description, properties_json FROM items WHERE campaign_id = ? AND owner_character_id IS NULL ORDER BY deployed, name", (cid,))
@@ -279,53 +303,68 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     want = _words(player_input + " " + (scene["title"] + " " + (scene["situation"] or "") if scene else ""))
     facts = rows(conn, "SELECT subject, fact, certainty FROM lore_facts WHERE campaign_id = ? AND visibility = 'player'", (cid,))
     scored = sorted(((len(want & _words(f["subject"] + " " + f["fact"])), f) for f in facts), key=lambda x: -x[0])
-    rel = [f for s, f in scored if s >= 2][:8]
+    rel_all = [f for s, f in scored if s >= 2]
+    rel = rel_all[:B["max_facts"]]
+    if len(rel_all) > len(rel):
+        omissions.append(f"MEMORY: {len(rel_all) - len(rel)} more matching facts not included (max_facts {B['max_facts']})")
     if rel:
         mem.append("Relevant established facts: " + " | ".join(f"{f['fact'][:260]}" + ("" if f["certainty"] == "canonical" else f" [{f['certainty']}]") for f in rel))
     mem.append("History beyond this briefing: lookup_records (imported ledger) and the event log. If a needed memory can't be found, "
                "say so and make an explicit provisional ruling; never invent continuity.")
-    sections["MEMORY"] = _cut("\n".join(mem), BUDGET["memory"])
+    sections["MEMORY"] = cut("MEMORY", "\n".join(mem), B["memory"])
 
     # 7 RULES
     ru = []
     for r in rows(conn, "SELECT section, title, text FROM house_rules WHERE campaign_id = ? AND always_include = 1 ORDER BY id", (cid,)):
-        ru.append(f"### {r['section'] or ''} {r['title']}\n{r['text'][:1600]}")
+        ru.append(f"### {r['section'] or ''} {r['title']}\n" + cut(f"HOUSE RULES: §{r['section'] or ''} {r['title']}", r["text"], B["rules_always_each"]))
     hr = rows(conn, "SELECT section, title, text, label FROM house_rules WHERE campaign_id = ? AND always_include = 0", (cid,))
     act = _words(player_input)
     hits = sorted(((len(act & _words(h["title"] + " " + h["text"][:1500])), h) for h in hr), key=lambda x: -x[0])
     rel_rules = [h for s, h in hits if s >= 2][:3]
     if rel_rules:
-        ru.append("Possibly relevant house rules for this action:\n" + _cut("\n".join(f"- §{h['section'] or ''} {h['title']} ({h['label'] or 'campaign'}): {h['text'][:700]}" for h in rel_rules), BUDGET["rules_relevant"]))
+        ru.append("Possibly relevant house rules for this action:\n" + cut("HOUSE RULES: relevant", "\n".join(f"- §{h['section'] or ''} {h['title']} ({h['label'] or 'campaign'}): {h['text'][:700]}" for h in rel_rules), B["rules_relevant"]))
     rl = rows(conn, "SELECT topic, ruling, label FROM rulings WHERE campaign_id = ? ORDER BY id DESC LIMIT 8", (cid,))
     if rl:
         ru.append("Recent rulings: " + " | ".join(f"({r['label']}) {r['topic']}: {r['ruling'][:240]}" for r in rl))
-    if rule_conn is not None and len(act) >= 2:
-        from ..reference import rulebooks
-        ps = rulebooks.search(rule_conn, player_input, limit=2)
-        if ps:
-            ru.append("Auto-retrieved rulebook passages (keyword match; read_rule_page before citing):\n"
-                      + _cut("\n".join(f"- {p.ref()}: {p.text[:600]}" for p in ps), BUDGET["official"]))
     ru.append("Other constitution sections and the rulebooks: search_rules. Unsupported mechanics: retrieve, then record_ruling a provisional label.")
-    sections["RULES"] = "\n".join(ru)
+    sections["HOUSE RULES"] = "\n".join(ru)
+    if rule_conn is not None and len(act) >= 2 and B["official_passages"] > 0:
+        from ..reference import rulebooks
+        ps = rulebooks.search(rule_conn, player_input, limit=B["official_passages"])
+        if ps:
+            sections["RULEBOOK"] = ("Auto-retrieved rulebook passages (keyword match; read_rule_page before citing):\n"
+                                    + cut("RULEBOOK", "\n".join(f"- {p.ref()}: {p.text[:600]}" for p in ps), B["official"]))
 
     # 8 GM-ONLY
     pres_words = _words(" ".join(by_id[i]["name"] + " " + by_id[i]["slug"] for i in present + named) + " " + (scene["title"] if scene else "") + " " + player_input)
     secrets = rows(conn, "SELECT id, subject, kind, content FROM gm_secrets WHERE campaign_id = ? AND revealed = 0 AND kind != 'companion_sheet' ORDER BY id DESC", (cid,))
     ranked = sorted(((len(pres_words & _words(s["subject"] + " " + s["content"][:400])), -s["id"], s) for s in secrets), key=lambda x: (-x[0], x[1]))
-    chosen = [s for score, _, s in ranked if score > 0][:6] + [s for score, _, s in ranked if score == 0][:4]
+    hi = [s for score, _, s in ranked if score > 0]
+    chosen = hi[:max(B["max_secrets"] - 4, 0)] + [s for score, _, s in ranked if score == 0][:min(4, B["max_secrets"])]
+    if len(secrets) > len(chosen):
+        omissions.append(f"GM-ONLY SECRETS: {len(secrets) - len(chosen)} lower-ranked unrevealed secrets not included "
+                         f"({max(len(hi) - len(chosen), 0)} of them matched this scene)")
     if chosen:
-        sections["GM-ONLY SECRETS"] = _cut("Never reveal directly; reveal only through play, then reveal_secret.\n"
-                                           + "\n".join(f"- #{s['id']} [{s['kind']}] {s['subject']}: {s['content'][:500]}" for s in chosen), BUDGET["secrets"])
+        sections["GM-ONLY SECRETS"] = cut("GM-ONLY SECRETS", "Never reveal directly; reveal only through play, then reveal_secret.\n"
+                                          + "\n".join(f"- #{s['id']} [{s['kind']}] {s['subject']}: {s['content'][:500]}" for s in chosen), B["secrets"])
 
     # transcript
     if recent:
-        sections["RECENT TRANSCRIPT"] = "\n".join(f"[{m['role'].upper()}] {m['content'][:BUDGET['transcript_msg']]}" for m in recent)
+        long_msgs = sum(1 for m in recent if len(m["content"]) > B["transcript_msg"])
+        if long_msgs:
+            omissions.append(f"RECENT TRANSCRIPT: {long_msgs} long messages cut to {B['transcript_msg']} characters")
+        sections["RECENT TRANSCRIPT"] = "\n".join(f"[{m['role'].upper()}] {m['content'][:B['transcript_msg']]}" for m in recent)
     else:
         sections["RECENT TRANSCRIPT"] = "(No play has happened in this app yet. Use lookup_records for where the campaign left off.)"
 
     text = "\n\n".join(f"## {name}\n{body}" for name, body in sections.items())
+    categories: dict[str, int] = {}
+    for k, v in sections.items():
+        categories[CATEGORIES.get(k, "other")] = categories.get(CATEGORIES.get(k, "other"), 0) + len(v)
     return {"kind": "context", "text": text, "player_character": pc["name"] if pc else "player",
-            "sizes": {k: len(v) for k, v in sections.items()}, "present": [by_id[i]["name"] for i in present], "named": [by_id[i]["name"] for i in named]}
+            "sizes": {k: len(v) for k, v in sections.items()}, "categories": categories, "omissions": omissions,
+            "group_keys": [g["key"] for g in groups], "open_quest_ids": [q["id"] for q in rows(conn, "SELECT id FROM quests WHERE campaign_id = ? AND visibility = 'player' AND status IN ('active','paused')", (cid,))],
+            "present": [by_id[i]["name"] for i in present], "named": [by_id[i]["name"] for i in named]}
 
 
 def _combat_context(conn: sqlite3.Connection, enc: dict) -> str:

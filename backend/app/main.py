@@ -10,6 +10,7 @@ import json
 import os
 import secrets
 import threading
+import time
 import traceback
 import uuid
 from contextlib import asynccontextmanager
@@ -24,7 +25,7 @@ from .access import COOKIE, COOKIE_DAYS, AccessGate, lan_addresses, login_page
 from .config import ROOT_DIR, Settings, resolve_codex_bin
 from .db import connect, init_db, now_iso, one, rows
 from .gm.orchestrator import WRITE_LOCK, BusyError, TurnService, recover_interrupted_turns
-from .gm.providers import make_provider
+from .gm.providers import make_provider, prune_jobs, secure_dir
 from .importer.ledger import import_ledger, refresh_mechanical_status, report_markdown
 from .ledger import sync as ledger_sync
 from .ledger.sync import LedgerError
@@ -117,6 +118,8 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         refresh_mechanical_status(c)
         if (n := recover_interrupted_turns(c)):
             print(f"[startup] marked {n} interrupted turn(s) as failed")
+        secure_dir(settings.codex_jobs_dir)
+        prune_jobs(settings)  # temporary GM job folders (full prompts) never outlive a run unless capture is on
         from .importer.organization import backfill
         for line in backfill(c):
             print(f"[schema v2 backfill] {line}")
@@ -537,6 +540,28 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         return {"turn": t, "context_text": d["context_text"], "steps": d["steps"], "usage": d["usage"], "integrity": d["integrity"],
                 "rolls": rolls_, "events": events_, "available_tools": TOOL_NAMES, "available_ops": sorted(CHANGE_OPS),
                 "context_chars": len(d["context_text"])}
+
+    @app.get("/api/gm/runtime")
+    def gm_runtime(_=Depends(gm_auth)):
+        """GM runtime isolation: the last probe report and whether full-prompt capture is on."""
+        probe = settings.data_dir / "diagnostics" / "isolation_probe.json"
+        cap = {}
+        try:
+            cap = json.loads(settings.prompt_capture_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+        return {"probe": json.loads(probe.read_text(encoding="utf-8")) if probe.exists() else None,
+                "prompt_capture": {"active": settings.prompt_capture_active(), "until": cap.get("until")}}
+
+    @app.post("/api/gm/runtime/prompt-capture")
+    def gm_prompt_capture(body: dict, _=Depends(gm_auth)):
+        """Development only: keep complete GM prompts (they contain GM secrets) for at most 60 minutes."""
+        minutes = max(0, min(int(body.get("minutes", 0)), 60))
+        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        settings.prompt_capture_file.write_text(json.dumps({"until": time.time() + minutes * 60 if minutes else 0}), encoding="utf-8")
+        if not minutes:
+            prune_jobs(settings)
+        return {"active": settings.prompt_capture_active(), "minutes": minutes}
 
     @app.get("/api/gm/import/reports")
     def gm_import_reports(c=Depends(db), _=Depends(gm_auth)):

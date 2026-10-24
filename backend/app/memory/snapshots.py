@@ -7,6 +7,7 @@ A 'pre_restore' save point is taken automatically first, so a restore can itself
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 
@@ -50,6 +51,19 @@ def _raw_rows(conn: sqlite3.Connection, sql: str, cid: int) -> list[dict]:
 def _high_water(conn: sqlite3.Connection, cid: int) -> dict[str, int]:
     return {col: conn.execute(f"SELECT COALESCE(MAX(id), 0) FROM {t} WHERE campaign_id = ?", (cid,)).fetchone()[0]
             for t, col in _LOGS.items()}
+
+
+def state_fingerprint(conn: sqlite3.Connection, cid: int) -> str:
+    """Hash of everything a save point captures plus the log high-water marks: equal fingerprints mean the
+    authoritative state did not change in between (used to stage a turn without holding a write transaction)."""
+    h = hashlib.sha256()
+    for t, sql in SNAPSHOT_TABLES.items():
+        h.update(t.encode())
+        for r in conn.execute(sql, (cid,)).fetchall():
+            h.update(json.dumps(tuple(r), default=str).encode())
+    hw = _high_water(conn, cid)
+    h.update(json.dumps({k: v for k, v in hw.items() if k != "max_turn_id"}).encode())
+    return h.hexdigest()
 
 
 def create_save_point(conn: sqlite3.Connection, cid: int, label: str, kind: str = "manual", turn_id: int | None = None,

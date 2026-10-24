@@ -465,6 +465,7 @@ COLUMN_MIGRATIONS = [
     ("quests", "details_json", "TEXT NOT NULL DEFAULT '{}'"),
     ("quests", "due_at_minutes", "INTEGER"),
     ("quests", "owner_character_id", "INTEGER"),
+    ("turns", "stage_json", "TEXT"),  # staged tool calls and roll records while a turn is in flight
 ]
 
 

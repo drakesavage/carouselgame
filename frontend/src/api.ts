@@ -128,6 +128,9 @@ export const api = {
   manifest: () => req<Manifest>("api/assets/manifest"),
   gmDiagnosticsList: (id: number, token: string) => req<DiagnosticsRow[]>(`api/gm/campaigns/${id}/diagnostics`, { headers: { "X-GM-Token": token } }),
   gmDiagnostics: (turnId: number, token: string) => req<Record<string, any>>(`api/gm/turns/${turnId}/diagnostics`, { headers: { "X-GM-Token": token } }),
+  gmRuntime: (token: string) => req<Record<string, any>>("api/gm/runtime", { headers: { "X-GM-Token": token } }),
+  gmPromptCapture: (minutes: number, token: string) =>
+    req<{ active: boolean; minutes: number }>("api/gm/runtime/prompt-capture", { method: "POST", headers: { "X-GM-Token": token, "Content-Type": "application/json" }, body: JSON.stringify({ minutes }) }),
   makeDemo: () => post<{ campaign_id: number }>("api/campaigns/demo"),
   uploadPortrait: (id: number, cid: number, file: File) => {
     const fd = new FormData();

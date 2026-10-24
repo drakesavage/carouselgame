@@ -12,7 +12,8 @@ export function Diagnostics({ cid }: { cid: number }) {
   const [list, setList] = useState<DiagnosticsRow[] | null>(null);
   const [sel, setSel] = useState<number | null>(null);
   const [detail, setDetail] = useState<Record<string, any> | null>(null);
-  const [tab, setTab] = useState<"integrity" | "context" | "steps" | "rolls" | "usage">("integrity");
+  const [tab, setTab] = useState<"continuity" | "integrity" | "context" | "steps" | "rolls" | "usage" | "runtime">("continuity");
+  const [runtime, setRuntime] = useState<Record<string, any> | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const load = async (t = token) => {
@@ -22,6 +23,8 @@ export function Diagnostics({ cid }: { cid: number }) {
   };
   useEffect(() => { if (token) load(); }, [cid, token]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (sel != null && token) api.gmDiagnostics(sel, token).then(setDetail).catch((e) => setErr(String(e))); }, [sel, token]);
+  useEffect(() => { if (token && tab === "runtime") api.gmRuntime(token).then(setRuntime).catch((e) => setErr(String(e))); }, [token, tab]);
+  const capture = async (minutes: number) => { await api.gmPromptCapture(minutes, token); setRuntime(await api.gmRuntime(token)); };
 
   if (!token) {
     return (
@@ -65,8 +68,45 @@ export function Diagnostics({ cid }: { cid: number }) {
                   {usage.rolled_back && <Chip tone="red">rolled back</Chip>}
                 </div>
                 <div className="tabs">
-                  {(["integrity", "context", "steps", "rolls", "usage"] as const).map((t) => <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{t}</button>)}
+                  {(["continuity", "integrity", "context", "steps", "rolls", "usage", "runtime"] as const).map((t) => <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{t}</button>)}
                 </div>
+                {tab === "continuity" && (() => {
+                  const cont = usage.continuity;
+                  return !cont ? <div className="muted">No continuity report for this turn (failed, or from before this check existed).</div> : (
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <div className="row"><Chip tone={cont.passed ? "green" : "amber"}>{cont.passed ? "all continuity checks passed" : "some checks need a look"}</Chip></div>
+                      <table className="data"><thead><tr><th>Check</th><th>Result</th><th>Detail</th></tr></thead>
+                        <tbody>{cont.checks.map((c: any) => <tr key={c.check}><td>{c.check}</td><td><Chip tone={c.status === "pass" ? "green" : "amber"}>{c.status}</Chip></td><td className="sub">{c.detail}</td></tr>)}</tbody>
+                      </table>
+                      <div className="h2">Context loaded (approx. tokens)</div>
+                      <div className="chips">{Object.entries(cont.categories ?? {}).map(([k, v]) => <Chip key={k}>{k.replace("_", " ")} ~{Math.round(Number(v) / 4).toLocaleString()}t</Chip>)}</div>
+                      <div className="h2">Left out by budgets</div>
+                      {(cont.omissions ?? []).length === 0 ? <div className="sub">Nothing was cut.</div>
+                        : <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>{cont.omissions.map((o: string, i: number) => <li key={i}>{o}</li>)}</ul>}
+                      <div className="h2">Mechanical changes</div>
+                      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>{(usage.changes ?? []).length ? usage.changes.map((c: string, i: number) => <li key={i}>{c}</li>) : <li className="muted">none</li>}</ul>
+                    </div>);
+                })()}
+                {tab === "runtime" && (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {!runtime ? <div className="muted">Loading…</div> : <>
+                      <div className="h2">Isolation probe</div>
+                      {!runtime.probe ? <div className="sub">Not run yet: <span className="mono">python -m app.gm.isolation_probe</span> (from backend\).</div> : <>
+                        <div className="row"><Chip tone={runtime.probe.verdict === "PASS" ? "green" : "red"}>{runtime.probe.verdict}</Chip><span className="sub">{runtime.probe.codex} · {runtime.probe.ran_at}</span></div>
+                        <div className="sub">Exposed tools (model's own list): {runtime.probe.visibility?.answer ?? runtime.probe.visibility?.error}</div>
+                        <div className="sub">Execution: watcher {runtime.probe.execution?.watcher ?? "—"}; file written {String(runtime.probe.execution?.file_written)}; canary leaked {String(runtime.probe.execution?.canary_leaked)}</div>
+                        <div className="sub">Personal AGENTS.md still injected: {String(runtime.probe.agents_md_injected)} (neutralized by a developer instruction)</div>
+                      </>}
+                      <div className="h2">Full-prompt capture</div>
+                      <div className="sub">Off by default. When on, GM job folders keep complete prompts (with GM secrets) until the window closes.</div>
+                      <div className="row">
+                        <Chip tone={runtime.prompt_capture?.active ? "amber" : "green"}>{runtime.prompt_capture?.active ? `on until ${new Date(runtime.prompt_capture.until * 1000).toLocaleTimeString()}` : "off"}</Chip>
+                        <button className="btn small" onClick={() => capture(15)}>Capture 15 min</button>
+                        <button className="btn small ghost" onClick={() => capture(0)}>Turn off and delete</button>
+                      </div>
+                    </>}
+                  </div>
+                )}
                 {tab === "integrity" && (
                   <div style={{ display: "grid", gap: 6 }}>
                     {(detail.integrity ?? []).length === 0 ? <div className="flag info">No inconsistencies detected between the narration and the validated changes.</div>
@@ -113,9 +153,9 @@ export function Diagnostics({ cid }: { cid: number }) {
                       <Chip tone="cyan">{totals.input.toLocaleString()} input tokens</Chip><Chip>{totals.cached.toLocaleString()} cached</Chip>
                       <Chip>{totals.output.toLocaleString()} output</Chip><Chip>{totals.secs.toFixed(1)} s in Codex</Chip>
                     </div>
-                    <table className="data"><thead><tr><th>Round</th><th>Model</th><th>Effort</th><th>Prompt chars</th><th>Input</th><th>Output</th><th>Seconds</th></tr></thead>
+                    <table className="data"><thead><tr><th>Round</th><th>Model</th><th>Effort</th><th>Prompt chars</th><th>Input</th><th>Cached</th><th>Output</th><th>Seconds</th></tr></thead>
                       <tbody>{rounds.map((r) => <tr key={r.round}><td>{r.round}</td><td>{r.model ?? "—"}</td><td>{r.effort ?? "—"}</td><td className="mono">{r.prompt_chars?.toLocaleString() ?? "—"}</td>
-                        <td className="mono">{r.usage?.input_tokens?.toLocaleString() ?? "—"}</td><td className="mono">{r.usage?.output_tokens ?? "—"}</td><td className="mono">{r.duration_s ?? "—"}</td></tr>)}</tbody>
+                        <td className="mono">{r.usage?.input_tokens?.toLocaleString() ?? "—"}</td><td className="mono">{r.usage?.cached_input_tokens?.toLocaleString() ?? "—"}</td><td className="mono">{r.usage?.output_tokens ?? "—"}</td><td className="mono">{r.duration_s ?? "—"}</td></tr>)}</tbody>
                     </table>
                     <div className="h2">Available to the GM</div>
                     <div className="sub">Tools: {(detail.available_tools ?? []).join(", ")}</div>

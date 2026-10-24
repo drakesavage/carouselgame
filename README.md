@@ -116,6 +116,12 @@ are quests with details and due times, so a reserved item is never counted as ow
 the importer seeds groups, the scene, the siphon project, the Personal Stabber reservation and Scout's promise from
 the ledger text. See [docs/AUDIT.md](docs/AUDIT.md) for what is verified and what is still open.
 
+**GM runtime.** GM jobs run with no tools (shell, files, web, agents and apps all disabled; the code-mode gateway fails
+closed), a live watcher that kills a job at its first unauthorized event, and no prompt files kept on disk. Check it after
+any Codex update with `..\.venv\Scripts\python -m app.gm.isolation_probe` (from `backend\`). Details, measurements and the
+remaining exposure (your global `~/.codex/AGENTS.md` is still injected, but neutralized) are in
+[docs/GM_RUNTIME.md](docs/GM_RUNTIME.md).
+
 **GM diagnostics** (*Saves & Settings → GM diagnostics*, needs the GM token from `data/gm_token.txt`): each turn's
 full context packet, tool rounds, Codex usage, game time elapsed, and an integrity report that flags rejected changes,
 gold/HP/item/time mentions that don't match the ledger updates, counted cycles on a recap, and leaked GM-only text.

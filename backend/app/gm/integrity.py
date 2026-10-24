@@ -24,21 +24,26 @@ def check(conn: sqlite3.Connection, cid: int, player_input: str, narration: str,
     text = narration + " " + " ".join(n.get("text", "") for n in notices)
     ch = " ".join(changes).lower()
 
-    def flag(level: str, msg: str) -> None:
+    recap = bool(RECAP.search(player_input))
+
+    def flag(level: str, msg: str, recounting: bool = False) -> None:
+        # On a recap/status turn the narration retells past events, so "mentioned but not recorded" is expected.
+        if recounting and recap and level == "warn":
+            level, msg = "info", msg + " (recap turn: probably retelling earlier play)"
         flags.append({"level": level, "message": msg})
 
     for e in errors:
         flag("warn", f"A requested change was rejected: {e[:240]}")
     if re.search(r"\b\d[\d,]*\s+gold\b", text, re.I) and re.search(r"\b(pay|paid|spend|spent|cost|buy|bought|earn|loot|receive)", text, re.I) \
             and "gold" not in ch:
-        flag("warn", "Narration mentions spending or gaining Gold, but no Gold change was recorded.")
+        flag("warn", "Narration mentions spending or gaining Gold, but no Gold change was recorded.", recounting=True)
     if re.search(r"\b(heal(?:s|ed)?|lose[s]?|take[s]?|took|suffer(?:s|ed)?)\s+\d+\s*(damage|hp|health|slots?)\b", text, re.I) \
             and not re.search(r"\bhp\b|health bar|slot|heals|loses", ch):
-        flag("warn", "Narration describes damage or healing, but no Health change was recorded.")
+        flag("warn", "Narration describes damage or healing, but no Health change was recorded.", recounting=True)
     if re.search(r"\b\d+\s*(minutes?|hours?)\s+(pass|later|go by|elapse)", text, re.I) and "minutes pass" not in ch:
-        flag("warn", "Narration says time passed, but the floor clock did not advance.")
+        flag("warn", "Narration says time passed, but the floor clock did not advance.", recounting=True)
     if re.search(r"\b(you|cliff)\s+(receive|obtain|acquire|pocket|pick(?:s)? up|buy|bought)\b", text, re.I) and not re.search(r"receives|gains \d|stash gains", ch):
-        flag("info", "Narration may describe acquiring an item, but no item was added.")
+        flag("info", "Narration may describe acquiring an item, but no item was added.", recounting=True)
     produced = {str(r.get("total")) for r in rolls} | {str((r.get("detail") or {}).get("natural")) for r in rolls}
     for m in re.finditer(r"\bd20\s*\(?(\d{1,2})\)?", text, re.I):
         if m.group(1) not in produced:
@@ -50,3 +55,49 @@ def check(conn: sqlite3.Connection, cid: int, player_input: str, narration: str,
     if leak:
         flag("warn", f"Narration repeats wording from a GM-only record ({len(leak)} 8-word run(s)); check for an accidental reveal.")
     return flags
+
+
+def continuity(conn: sqlite3.Connection, cid: int, ctx: dict, flags: list[dict], time_before: int | None, time_after: int | None,
+               changes: list[str]) -> dict:
+    """Per-turn continuity report: did the briefing carry what the GM needed, and does the outcome add up?
+    Each check is pass / warn with a short reason; `categories` and `omissions` come from the context builder."""
+    text = ctx.get("text", "")
+    checks: list[dict] = []
+
+    def add(name: str, ok: bool, detail: str) -> None:
+        checks.append({"check": name, "status": "pass" if ok else "warn", "detail": detail})
+
+    camp = rows(conn, "SELECT active_character_id FROM campaigns WHERE id = ?", (cid,))[0]
+    pc = rows(conn, "SELECT id, name FROM characters WHERE id = ?", (camp["active_character_id"],)) if camp["active_character_id"] else []
+    add("player character sheet", bool(pc) and f"(id {pc[0]['id']}," in text, pc[0]["name"] if pc else "no player character set")
+    # Compare against what existed when the briefing was built (this turn may have created groups or quests since).
+    keys = ctx.get("group_keys")
+    if keys is None:
+        keys = [g["key"] for g in rows(conn, "SELECT key FROM party_groups WHERE campaign_id = ? AND status = 'active'", (cid,))]
+    missing = [k for k in keys if f"[{k}]" not in text]
+    add("party groups", not missing, f"{len(keys)} groups listed" if not missing else "missing: " + ", ".join(missing))
+    open_q = rows(conn, "SELECT id, kind, title FROM quests WHERE campaign_id = ? AND visibility = 'player'", (cid,))
+    wanted = set(ctx.get("open_quest_ids") or [])
+    open_q = [q for q in open_q if q["id"] in wanted] if "open_quest_ids" in ctx else         rows(conn, "SELECT id, kind, title FROM quests WHERE campaign_id = ? AND visibility = 'player' AND status IN ('active','paused')", (cid,))
+    lost = [q for q in open_q if f"(id {q['id']})" not in text]
+    kinds = sorted({q["kind"] for q in open_q})
+    add("objectives, projects, promises, reservations", not lost,
+        f"{len(open_q)} open ({', '.join(kinds) or 'none'})" if not lost else f"cut from the briefing: {', '.join(q['title'] for q in lost[:5])}")
+    present = ctx.get("present") or []
+    npc_rows = rows(conn, """SELECT c.name, c.slug FROM characters c JOIN gm_secrets g ON g.subject = c.slug AND g.kind = 'companion_sheet'
+                             AND g.revealed = 0 AND g.campaign_id = c.campaign_id WHERE c.campaign_id = ?""", (cid,))
+    want = [n["name"] for n in npc_rows if n["name"] in present]
+    lacking = [n for n in want if f"### {n} " in text and "private companion sheet" not in text.split(f"### {n} ", 1)[1].split("### ", 1)[0]]
+    add("private personalities for present NPCs", not lacking,
+        f"{len(want)} present NPCs with private sheets" if not lacking else "sheet left out for: " + ", ".join(lacking))
+    add("current scene", "## CURRENT SCENE" in text and "No scene recorded" not in text, "scene loaded" if "No scene recorded" not in text else "no scene recorded")
+    elapsed = (time_after or 0) - (time_before or 0)
+    add("dungeon time", elapsed >= 0 and not any("floor clock did not advance" in f["message"] for f in flags),
+        f"{elapsed} game minutes elapsed")
+    add("advancement cycles", not any("cycle" in f["message"].lower() for f in flags),
+        "cycle counted" if any("cycle" in c.lower() for c in changes) else "no cycle counted")
+    add("GM secrets stayed hidden", not any("GM-only" in f["message"] or "secret" in f["message"].lower() for f in flags), "no verbatim leak detected")
+    add("mechanics recorded", not any(f["level"] in ("warn", "error") and ("recorded" in f["message"] or "advance" in f["message"]) for f in flags),
+        f"{len(changes)} validated changes")
+    return {"categories": ctx.get("categories", {}), "omissions": ctx.get("omissions", []), "checks": checks,
+            "passed": all(c["status"] == "pass" for c in checks)}
