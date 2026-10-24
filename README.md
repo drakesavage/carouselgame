@@ -28,6 +28,19 @@ opens <http://127.0.0.1:8777>. Stop it with Ctrl+C.
 On first start the app seeds a clearly labelled **DEMO** campaign, imports the ledger from `CAMPAIGN_LEDGER_DIR`
 as a new campaign, and indexes the PDFs in `RULEBOOK_DIR` (about 10 seconds).
 
+### From other devices (through Barcode Battles)
+
+Barcode Battles forwards `/dcc` on its port to Crawler Console, so the household uses one address:
+
+* This PC: <http://localhost:8787/dcc/> works without a passcode, as does <http://127.0.0.1:8777>.
+* Phones and other devices: `http://<this PC's address>:8787/dcc/`. They need the **passcode** once, and a cookie
+  remembers it. *Saves & Settings → Other devices* shows the exact address and the passcode, and can set a new one,
+  which signs every device out. To fix the passcode yourself, set `CRAWLER_PASSCODE` in `.env`.
+* Both apps must be running. If Crawler Console is stopped, `/dcc` shows a page saying so.
+* Crawler Console itself listens only on 127.0.0.1. Barcode always replaces `X-Forwarded-For` with the real client
+  address, so another device can't pretend to be this PC. Eight wrong passcodes lock that device out for 10 minutes.
+  GM-only pages still need the GM token.
+
 ### Requirements
 
 | Need | Notes |

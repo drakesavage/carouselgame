@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { AlertTriangle, Bot, Database, Download, History, Save } from "lucide-react";
+import { AlertTriangle, Bot, Database, Download, History, KeyRound, Save, Smartphone } from "lucide-react";
 import { api, Prefs, SavePoint } from "../api";
 import { Chip, Empty, Panel } from "../ui";
 
@@ -13,7 +13,8 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
   const [reports, setReports] = useState<Awaited<ReturnType<typeof api.importReports>> | null>(null);
   const [importing, setImporting] = useState(false);
 
-  useEffect(() => { api.settings().then(setPrefs); api.importReports().then(setReports); }, []);
+  const [access, setAccess] = useState<Awaited<ReturnType<typeof api.access>> | null>(null);
+  useEffect(() => { api.settings().then(setPrefs); api.importReports().then(setReports); api.access().then(setAccess).catch(() => setAccess(null)); }, []);
   useEffect(() => { api.saves(cid).then(setSaves); }, [cid, version]);
 
   const update = async (p: Partial<Prefs>) => { setPrefs(await api.saveSettings(p)); setMsg("Settings saved."); };
@@ -72,6 +73,26 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
             </div>
           )}
         </Panel>
+
+        {access && (
+          <Panel title={<><Smartphone size={13} /> Other devices</>}>
+            <div className="sub" style={{ marginBottom: 8 }}>Through Barcode Battles on port {access.port}. Devices other than this PC need the passcode once.</div>
+            {(access.lan_addresses.length ? access.lan_addresses : ["<this PC's address>"]).map((ip) => (
+              <div key={ip} className="mono" style={{ fontSize: 14 }}>http://{ip}:{access.port}{access.path}</div>
+            ))}
+            <div className="row" style={{ marginTop: 10 }}>
+              <span className="sub">Passcode</span>
+              <span className="mono" style={{ fontSize: 22, letterSpacing: "0.12em", color: "var(--cyan)" }}>{access.passcode}</span>
+              <span className="spacer" />
+              {!access.fixed_by_env && (
+                <button className="btn small" onClick={async () => { const r = await api.regeneratePasscode(); setAccess({ ...access, passcode: r.passcode }); setMsg("New passcode set; every other device must sign in again."); }}>
+                  <KeyRound size={12} /> New passcode
+                </button>
+              )}
+            </div>
+            {access.fixed_by_env && <div className="sub">Set by CRAWLER_PASSCODE in .env.</div>}
+          </Panel>
+        )}
 
         <Panel title={<><Database size={13} /> Campaign import</>}>
           {prefs && (

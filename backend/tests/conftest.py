@@ -48,7 +48,7 @@ def demo_id(conn) -> int:
 
 @pytest.fixture
 def client(settings, conn, demo_id):
-    app = create_app(settings, bootstrap=False)
+    app = create_app(settings, bootstrap=False, local_hosts={"testclient"})
     state = app.state.crawler
     p = state.prefs()
     p["gm_provider"] = "mock"

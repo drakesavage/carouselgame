@@ -31,7 +31,7 @@ function hash(s: string) {
 /** Local artwork from /media/portraits when present; otherwise a generated HUD placeholder (never a network image). */
 export function Portrait({ name, path, size = 52 }: { name: string; path?: string | null; size?: number }) {
   const style = { width: size, height: size };
-  if (path) return <div className="portrait" style={style}><img src={`/media/portraits/${encodeURIComponent(path)}`} alt={name} /></div>;
+  if (path) return <div className="portrait" style={style}><img src={`media/portraits/${encodeURIComponent(path)}`} alt={name} /></div>;
   const h = hash(name);
   const hue = h % 360;
   const initials = name.replace(/\(.*?\)/g, "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("");

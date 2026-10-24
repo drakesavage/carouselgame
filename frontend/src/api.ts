@@ -62,6 +62,11 @@ export class ApiError extends Error {
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { ...init, headers: { ...(init?.body && !(init.body instanceof FormData) ? { "Content-Type": "application/json" } : {}), ...init?.headers } });
+  if (res.status === 401) {
+    // Another device without the passcode cookie (access through Barcode Battles): go to the passcode page.
+    window.location.href = "login";
+    throw new ApiError(401, "passcode required");
+  }
   if (!res.ok) {
     let msg = res.statusText;
     try { const j = await res.json(); msg = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail ?? j); } catch { /* not json */ }
@@ -72,46 +77,48 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 const post = <T,>(path: string, body?: unknown) => req<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
 
 export const api = {
-  health: () => req<{ provider: string; codex_cli: string | null; rulebook_index: boolean }>("/api/health"),
-  campaigns: () => req<CampaignListItem[]>("/api/campaigns"),
-  campaign: (id: number) => req<Campaign>(`/api/campaigns/${id}`),
-  characters: (id: number) => req<CharacterCard[]>(`/api/campaigns/${id}/characters`),
-  character: (id: number, cid: number) => req<CharacterSheet>(`/api/campaigns/${id}/characters/${cid}`),
-  inventory: (id: number) => req<{ shared: Item[]; by_character: Item[] }>(`/api/campaigns/${id}/inventory`),
-  quests: (id: number) => req<Quest[]>(`/api/campaigns/${id}/quests`),
-  npcs: (id: number) => req<CharacterCard[]>(`/api/campaigns/${id}/npcs`),
-  timeline: (id: number) => req<EventRow[]>(`/api/campaigns/${id}/timeline`),
-  messages: (id: number, before?: number) => req<Message[]>(`/api/campaigns/${id}/messages${before ? `?before=${before}` : ""}`),
-  houseRules: (id: number) => req<HouseRule[]>(`/api/campaigns/${id}/house-rules`),
-  rulings: (id: number) => req<{ id: number; topic: string; ruling: string; certainty: string; label: string; created_at: string }[]>(`/api/campaigns/${id}/rulings`),
-  lore: (id: number) => req<{ id: number; subject: string; fact: string; certainty: string; source: string }[]>(`/api/campaigns/${id}/lore`),
-  records: (id: number, q?: string) => req<{ id: number; document_path: string; section: string; snippet?: string }[]>(`/api/campaigns/${id}/records${q ? `?q=${encodeURIComponent(q)}` : ""}`),
-  record: (id: number, sid: number) => req<{ id: number; document_path: string; section: string; content: string }>(`/api/campaigns/${id}/records/${sid}`),
-  submitTurn: (id: number, text: string, key: string) => post<TurnStatus>(`/api/campaigns/${id}/turns`, { text, idempotency_key: key }),
-  turn: (turnId: number) => req<TurnStatus>(`/api/turns/${turnId}`),
-  activeTurn: (id: number) => req<TurnStatus | null>(`/api/campaigns/${id}/turns/active`),
-  saves: (id: number) => req<SavePoint[]>(`/api/campaigns/${id}/saves`),
-  createSave: (id: number, label: string) => post<{ save_point_id: number }>(`/api/campaigns/${id}/saves`, { label }),
-  restore: (id: number, sid: number) => post<{ restored: number; backup_save_point_id: number }>(`/api/campaigns/${id}/saves/${sid}/restore`),
-  ruleSearch: (q: string, cid?: number) => req<{ campaign: (HouseRule & { score: number })[]; official: Passage[] }>(`/api/rules/search?q=${encodeURIComponent(q)}${cid ? `&cid=${cid}` : ""}`),
-  rulePage: (doc: number, page: number) => req<{ document: string; page: number; page_count: number; text: string }>(`/api/rules/page?document_id=${doc}&page=${page}`),
-  ruleDocs: () => req<{ documents: { id: number; title: string; filename: string; page_count: number; chunks: number }[]; index_status: Record<string, any> }>("/api/rules/documents"),
-  indexRules: (directory?: string) => post<Record<string, any>>("/api/rules/index", { directory }),
-  settings: () => req<Prefs>("/api/settings"),
-  saveSettings: (p: Partial<Prefs>) => req<Prefs>("/api/settings", { method: "PUT", body: JSON.stringify(p) }),
-  importLedger: (path?: string) => post<{ campaign_id: number | null; report: any }>("/api/import", { path }),
-  importReports: () => req<{ id: number; campaign_id: number | null; source_path: string; created_at: string; report: any }[]>("/api/import/reports"),
-  ledgerPreview: (id: number, fetch = true) => req<LedgerPreview>(`/api/campaigns/${id}/ledger/preview?fetch=${fetch}`),
+  health: () => req<{ provider: string; codex_cli: string | null; rulebook_index: boolean }>("api/health"),
+  campaigns: () => req<CampaignListItem[]>("api/campaigns"),
+  campaign: (id: number) => req<Campaign>(`api/campaigns/${id}`),
+  characters: (id: number) => req<CharacterCard[]>(`api/campaigns/${id}/characters`),
+  character: (id: number, cid: number) => req<CharacterSheet>(`api/campaigns/${id}/characters/${cid}`),
+  inventory: (id: number) => req<{ shared: Item[]; by_character: Item[] }>(`api/campaigns/${id}/inventory`),
+  quests: (id: number) => req<Quest[]>(`api/campaigns/${id}/quests`),
+  npcs: (id: number) => req<CharacterCard[]>(`api/campaigns/${id}/npcs`),
+  timeline: (id: number) => req<EventRow[]>(`api/campaigns/${id}/timeline`),
+  messages: (id: number, before?: number) => req<Message[]>(`api/campaigns/${id}/messages${before ? `?before=${before}` : ""}`),
+  houseRules: (id: number) => req<HouseRule[]>(`api/campaigns/${id}/house-rules`),
+  rulings: (id: number) => req<{ id: number; topic: string; ruling: string; certainty: string; label: string; created_at: string }[]>(`api/campaigns/${id}/rulings`),
+  lore: (id: number) => req<{ id: number; subject: string; fact: string; certainty: string; source: string }[]>(`api/campaigns/${id}/lore`),
+  records: (id: number, q?: string) => req<{ id: number; document_path: string; section: string; snippet?: string }[]>(`api/campaigns/${id}/records${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  record: (id: number, sid: number) => req<{ id: number; document_path: string; section: string; content: string }>(`api/campaigns/${id}/records/${sid}`),
+  submitTurn: (id: number, text: string, key: string) => post<TurnStatus>(`api/campaigns/${id}/turns`, { text, idempotency_key: key }),
+  turn: (turnId: number) => req<TurnStatus>(`api/turns/${turnId}`),
+  activeTurn: (id: number) => req<TurnStatus | null>(`api/campaigns/${id}/turns/active`),
+  saves: (id: number) => req<SavePoint[]>(`api/campaigns/${id}/saves`),
+  createSave: (id: number, label: string) => post<{ save_point_id: number }>(`api/campaigns/${id}/saves`, { label }),
+  restore: (id: number, sid: number) => post<{ restored: number; backup_save_point_id: number }>(`api/campaigns/${id}/saves/${sid}/restore`),
+  ruleSearch: (q: string, cid?: number) => req<{ campaign: (HouseRule & { score: number })[]; official: Passage[] }>(`api/rules/search?q=${encodeURIComponent(q)}${cid ? `&cid=${cid}` : ""}`),
+  rulePage: (doc: number, page: number) => req<{ document: string; page: number; page_count: number; text: string }>(`api/rules/page?document_id=${doc}&page=${page}`),
+  ruleDocs: () => req<{ documents: { id: number; title: string; filename: string; page_count: number; chunks: number }[]; index_status: Record<string, any> }>("api/rules/documents"),
+  indexRules: (directory?: string) => post<Record<string, any>>("api/rules/index", { directory }),
+  settings: () => req<Prefs>("api/settings"),
+  saveSettings: (p: Partial<Prefs>) => req<Prefs>("api/settings", { method: "PUT", body: JSON.stringify(p) }),
+  importLedger: (path?: string) => post<{ campaign_id: number | null; report: any }>("api/import", { path }),
+  importReports: () => req<{ id: number; campaign_id: number | null; source_path: string; created_at: string; report: any }[]>("api/import/reports"),
+  ledgerPreview: (id: number, fetch = true) => req<LedgerPreview>(`api/campaigns/${id}/ledger/preview?fetch=${fetch}`),
   ledgerApply: (id: number, body: { fingerprint: string; selected: string[]; message: string; author_name: string; author_email: string; regenerate_checkpoint: boolean }) =>
-    post<{ commit: string; summary: { changes: number; files: string[]; skipped: number; conflicts: number }; checkpoint: string | null }>(`/api/campaigns/${id}/ledger/apply`, body),
-  ledgerPull: (id: number) => post<LedgerPreview["status"]>(`/api/campaigns/${id}/ledger/pull`),
-  ledgerPush: (id: number) => post<LedgerPreview["status"]>(`/api/campaigns/${id}/ledger/push`),
-  ledgerHistory: (id: number) => req<{ id: number; base_commit: string; new_commit: string; summary: { changes: number; files: string[] }; created_at: string }[]>(`/api/campaigns/${id}/ledger/history`),
-  makeDemo: () => post<{ campaign_id: number }>("/api/campaigns/demo"),
+    post<{ commit: string; summary: { changes: number; files: string[]; skipped: number; conflicts: number }; checkpoint: string | null }>(`api/campaigns/${id}/ledger/apply`, body),
+  ledgerPull: (id: number) => post<LedgerPreview["status"]>(`api/campaigns/${id}/ledger/pull`),
+  ledgerPush: (id: number) => post<LedgerPreview["status"]>(`api/campaigns/${id}/ledger/push`),
+  ledgerHistory: (id: number) => req<{ id: number; base_commit: string; new_commit: string; summary: { changes: number; files: string[] }; created_at: string }[]>(`api/campaigns/${id}/ledger/history`),
+  access: () => req<{ passcode: string; lan_addresses: string[]; path: string; port: number; fixed_by_env: boolean }>("api/access"),
+  regeneratePasscode: () => post<{ passcode: string }>("api/access/regenerate"),
+  makeDemo: () => post<{ campaign_id: number }>("api/campaigns/demo"),
   uploadPortrait: (id: number, cid: number, file: File) => {
     const fd = new FormData();
     fd.append("file", file);
-    return req<{ portrait_path: string }>(`/api/campaigns/${id}/characters/${cid}/portrait`, { method: "POST", body: fd });
+    return req<{ portrait_path: string }>(`api/campaigns/${id}/characters/${cid}/portrait`, { method: "POST", body: fd });
   },
 };
 

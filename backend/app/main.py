@@ -7,6 +7,7 @@ under /api/gm.
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import threading
 import traceback
@@ -14,11 +15,12 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .access import COOKIE, COOKIE_DAYS, AccessGate, lan_addresses, login_page
 from .config import ROOT_DIR, Settings, resolve_codex_bin
 from .db import connect, init_db, now_iso, one, rows
 from .gm.orchestrator import WRITE_LOCK, BusyError, TurnService
@@ -102,9 +104,10 @@ class AppState:
         return connect(self.settings.campaign_db)
 
 
-def create_app(settings: Settings | None = None, *, bootstrap: bool = True) -> FastAPI:
+def create_app(settings: Settings | None = None, *, bootstrap: bool = True, local_hosts: set[str] | None = None) -> FastAPI:
     settings = settings or Settings()
     state = AppState(settings)
+    gate = AccessGate(settings.data_dir, local_hosts)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -119,6 +122,63 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True) -> F
 
     app = FastAPI(title="Crawler Console", lifespan=lifespan)
     app.state.crawler = state
+    app.state.gate = gate
+
+    def _client(request: Request) -> tuple[bool, str]:
+        peer = request.client.host if request.client else None
+        fwd = request.headers.get("x-forwarded-for")
+        return gate.is_local(peer, fwd), gate.client_address(peer, fwd)
+
+    def _prefix(request: Request) -> str:
+        p = request.headers.get("x-forwarded-prefix", "").rstrip("/")
+        return p if p.startswith("/") and all(ch.isalnum() or ch in "/-_" for ch in p) else ""
+
+    @app.middleware("http")
+    async def passcode_gate(request: Request, call_next):
+        local, _ = _client(request)
+        path = request.url.path
+        if local or path in ("/login", "/favicon.svg") or gate.has_valid_cookie(request.cookies.get(COOKIE)):
+            return await call_next(request)
+        if path.startswith(("/api/", "/media/")):
+            return JSONResponse({"detail": "passcode required"}, status_code=401)
+        return RedirectResponse(f"{_prefix(request)}/login", status_code=303)
+
+    @app.get("/login", include_in_schema=False)
+    def login_form(request: Request):
+        local, client = _client(request)
+        if local or gate.has_valid_cookie(request.cookies.get(COOKIE)):
+            return RedirectResponse(f"{_prefix(request)}/", status_code=303)
+        wait = gate.locked_for(client)
+        return HTMLResponse(login_page(_prefix(request), f"Too many attempts; try again in {wait // 60 + 1} min." if wait else None))
+
+    @app.post("/login", include_in_schema=False)
+    def login_submit(request: Request, passcode: str = Form("")):
+        _, client = _client(request)
+        prefix = _prefix(request)
+        if not gate.check(client, passcode):
+            wait = gate.locked_for(client)
+            msg = f"Too many attempts; try again in {wait // 60 + 1} min." if wait else "That passcode didn't match."
+            return HTMLResponse(login_page(prefix, msg), status_code=401)
+        resp = RedirectResponse(f"{prefix}/", status_code=303)
+        resp.set_cookie(COOKIE, gate.cookie_value(), max_age=COOKIE_DAYS * 86400, httponly=True, samesite="lax",
+                        path=f"{prefix}/" if prefix else "/", secure=request.headers.get("x-forwarded-proto") == "https")
+        return resp
+
+    def local_only(request: Request):
+        if not _client(request)[0]:
+            raise HTTPException(403, "only available on the game PC")
+
+    @app.get("/api/access")
+    def access_info(_=Depends(local_only)):
+        return {"passcode": gate.passcode(), "lan_addresses": lan_addresses(), "path": "/dcc/", "port": 8787,
+                "fixed_by_env": bool(os.environ.get("CRAWLER_PASSCODE"))}
+
+    @app.post("/api/access/regenerate")
+    def access_regenerate(_=Depends(local_only)):
+        try:
+            return {"passcode": gate.regenerate()}
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
 
     def db():
         c = state.conn()
