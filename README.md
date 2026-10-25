@@ -122,6 +122,21 @@ any Codex update with `..\.venv\Scripts\python -m app.gm.isolation_probe` (from 
 remaining exposure (your global `~/.codex/AGENTS.md` is still injected, but neutralized) are in
 [docs/GM_RUNTIME.md](docs/GM_RUNTIME.md).
 
+**Auto GM (recommended when you have a Gemini key).** *Saves & Settings → Provider → Auto* spends the daily Gemini
+free-tier quotas on the turns Gemini handles well and keeps Codex for mechanics:
+
+| Turn | Goes to |
+|---|---|
+| Recaps, status and rules questions | Gemini 3.5 Flash Lite (500/day) |
+| Conversation and roleplay with no mechanics | Gemini 3.8 Flash, then 3.6 Flash (20/day each) |
+| Rolls, combat, money, items, travel, rest; every turn during combat | Codex |
+
+Gemini turns run in conversation mode, with only lookups, notes, NPC memories and attitudes, facts, cycle counting and
+picture suggestions. If the GM finds the turn needs mechanics it hands the turn to Codex before anything is applied, and
+a model that runs out of quota mid-turn passes it to the next. Transcript summaries and the Paint dialog's *Draft with
+Gemini* appearance helper use Flash Lite. Today's usage shows in Settings; quotas reset at midnight Pacific (override
+the limits with `GEMINI_DAILY_LIMITS`). Diagnostics show each turn's route.
+
 **Gemini (optional).** *Saves & Settings → AI Game Master → Gemini API* uses Google's Gemini API instead of Codex.
 Put the key in `GEMINI_API_KEY` or `data\gemini_api_key.txt` (git-ignored). The free tier is rate-limited, and Google
 may use free-tier inputs, which include GM secrets, to improve its products. See docs/GM_RUNTIME.md §6.

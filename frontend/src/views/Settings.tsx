@@ -57,11 +57,13 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
             <div style={{ display: "grid", gap: 10 }}>
               <label>Provider
                 <select className="select input" value={prefs.gm_provider} onChange={(e) => update({ gm_provider: e.target.value })}>
+                  <option value="auto">Auto: Gemini for questions and conversation, Codex for mechanics</option>
                   <option value="codex">Codex CLI (your ChatGPT sign-in — no API billing)</option>
                   <option value="gemini">Gemini API (API key; free tier has rate limits)</option>
                   <option value="mock">Mock GM (offline testing, scripted)</option>
                 </select>
               </label>
+              {prefs.gm_provider === "auto" && <AutoInfo prefs={prefs} update={update} />}
               {prefs.gm_provider === "gemini" ? <>
               <div className="sub">Gemini key: {prefs.gemini_key_present ? "found" : <span style={{ color: "var(--red)" }}>not found — set GEMINI_API_KEY or put it in data\gemini_api_key.txt</span>}</div>
               <div className="flag warn">Free-tier Gemini inputs and outputs may be used by Google to improve its products. Every GM call sends the full briefing, including private companion sheets and GM secrets.</div>
@@ -85,7 +87,7 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
                   {prefs.efforts.map((x) => <option key={x}>{x}</option>)}
                 </select>
               </label>
-              <div className="sub">{prefs.gm_provider === "gemini" ? "Each turn is one or more Gemini API calls that can only return JSON (no model-side tools)." : <>Each turn is one or more sandboxed, read-only <span className="mono">codex exec</span> calls.</>} Dice and state changes always run in this app, never in the model.</div>
+              <div className="sub">{prefs.gm_provider === "auto" ? "Codex turns: sandboxed, read-only codex exec calls; Gemini turns: API calls that can only return JSON." : prefs.gm_provider === "gemini" ? "Each turn is one or more Gemini API calls that can only return JSON (no model-side tools)." : <>Each turn is one or more sandboxed, read-only <span className="mono">codex exec</span> calls.</>} Dice and state changes always run in this app, never in the model.</div>
             </div>
           )}
         </Panel>
@@ -159,6 +161,36 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+    </div>
+  );
+}
+
+
+/** Auto GM: what goes where, and today's Gemini quota. */
+function AutoInfo({ prefs, update }: { prefs: Prefs; update: (p: Partial<Prefs>) => Promise<void> }) {
+  const [q, setQ] = useState<Record<string, any> | null>(null);
+  useEffect(() => { api.geminiQuota().then(setQ).catch(() => {}); }, []);
+  return (
+    <div className="card" style={{ display: "grid", gap: 6 }}>
+      <div className="sub">Recaps, status and rules questions → Gemini 3.5 Flash Lite. Conversation and roleplay → Gemini 3.8, then 3.6.
+        Anything with rolls, combat, money, items, travel or rest, and every combat turn → Codex. A Gemini turn that turns out to need
+        mechanics is handed to Codex before anything is applied. Summaries use Flash Lite.</div>
+      {q && <div className="chips">{Object.entries(q.models as Record<string, any>).map(([m, v]) => (
+        <span key={m} className={`chip ${v.spent || v.used >= v.limit ? "red" : v.limit - v.used < 5 ? "amber" : "green"}`}>{m.replace("gemini-", "")} {v.used}/{v.limit}</span>))}
+        <span className="sub">today (resets midnight Pacific{q.key_present ? "" : "; no Gemini key found"})</span></div>}
+      <div className="flag warn">Free-tier Gemini inputs and outputs may be used by Google to improve its products, and Gemini turns carry private sheets and GM secrets.</div>
+      <div className="row">
+        <label className="grow">Gemini thinking
+          <select className="select input" value={prefs.gemini_effort ?? "medium"} onChange={(e) => update({ gemini_effort: e.target.value })}>
+            {["low", "medium", "high"].map((x) => <option key={x}>{x}</option>)}
+          </select>
+        </label>
+        <label className="grow">Gemini briefing
+          <select className="select input" value={prefs.gemini_context_profile ?? "large"} onChange={(e) => update({ gemini_context_profile: e.target.value })}>
+            <option value="large">Large (~60k tokens)</option><option value="standard">Standard (~20k)</option>
+          </select>
+        </label>
+      </div>
     </div>
   );
 }

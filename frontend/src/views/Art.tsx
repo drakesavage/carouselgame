@@ -1,5 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { Check, ImagePlus, Loader2, Paintbrush, RefreshCw, X } from "lucide-react";
+import { Check, ImagePlus, Loader2, Paintbrush, RefreshCw, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api, ArtJob, ArtKind } from "../api";
 import { Chip, Panel } from "../ui";
@@ -38,6 +38,7 @@ function ArtDialog({ cid, kind, subjectId, subjectName, onClose }:
   const [look, setLook] = useState("");
   const [savedLook, setSavedLook] = useState("");
   const [open, setOpen] = useState<string[]>([]);
+  const [drafting, setDrafting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [status, setStatus] = useState<Record<string, any> | null>(null);
   useEffect(() => {
@@ -81,6 +82,11 @@ function ArtDialog({ cid, kind, subjectId, subjectName, onClose }:
                 <div className="h2">Appearance</div>
                 <textarea className="input" rows={3} value={look} onChange={(e) => setLook(e.target.value)} onBlur={saveLook}
                   placeholder={kind === "character" ? "e.g. woman in her forties, short grey-streaked hair, broad shoulders, tired eyes" : "what it looks like"} />
+                {kind === "character" && subjectId != null && (
+                  <button className="btn small ghost" style={{ justifySelf: "start", marginTop: 4 }} disabled={drafting} onClick={async () => {
+                    setDrafting(true); setErr(null);
+                    try { setLook((await api.artDraftAppearance(cid, subjectId)).appearance); } catch (e) { setErr(String(e)); } finally { setDrafting(false); }
+                  }}>{drafting ? <Loader2 size={11} className="spin" /> : <Sparkles size={11} />} Draft with Gemini</button>)}
                 <div className="sub">{open.length ? <>The ledger leaves these open: {open.join(", ").toLowerCase()}. </> : null}
                   Saved for every future picture of {subjectName}, so they stay consistent. Art only; not campaign canon.</div>
               <div className="h2" style={{ marginTop: 10 }}>Prompt</div>

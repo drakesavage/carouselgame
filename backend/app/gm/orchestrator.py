@@ -30,6 +30,7 @@ from ..rules.dice import DiceRoller, record_roll
 from .integrity import check as check_integrity, continuity
 from .prompts import SYSTEM_PROMPT
 from .providers import GMProvider, ProviderError, prune_jobs
+from .router import CONVERSATION_MODE, ESCALATE_SPEC, SAFE_TOOLS, Escalate, check_call
 from .tools import BOOKKEEPING_TOOLS, TOOL_SPECS, ToolRunner
 
 WRITE_LOCK = threading.Lock()
@@ -173,7 +174,7 @@ class TurnService:
         finally:
             WRITE_LOCK.release()
 
-    def _process(self, turn_id: int) -> None:
+    def _process(self, turn_id: int, forced: tuple | None = None) -> None:
         """No write transaction is held while the GM thinks. Each round's tool calls run against the committed state
         inside a short transaction that is then rolled back (staging); the final commit re-applies every staged call
         with the same dice in one transaction, after checking the state fingerprint is still the one the GM saw."""
@@ -182,7 +183,16 @@ class TurnService:
         rule_conn = self._rule_conn()
         turn = one(conn, "SELECT * FROM turns WHERE id = ?", (turn_id,))
         cid = turn["campaign_id"]
-        provider = self.provider_factory()
+        root = provider = self.provider_factory()
+        route = None
+        if forced is not None:  # an escalated conversation turn, re-run by the mechanics GM
+            provider, route = forced
+        elif hasattr(provider, "route"):
+            combat = one(conn, "SELECT 1 AS x FROM encounters WHERE campaign_id = ? AND status = 'active'", (cid,)) is not None
+            provider, route = provider.route(turn["player_input"], combat)
+        conversation = bool(getattr(provider, "conversation", False))
+        tools = [t for t in TOOL_SPECS if t["name"] in SAFE_TOOLS] + [ESCALATE_SPEC] if conversation else TOOL_SPECS
+        system = SYSTEM_PROMPT + "\n\n" + CONVERSATION_MODE if conversation else SYSTEM_PROMPT
         dice = ReplayDice(self.roller.source)
         roller = DiceRoller(source=dice)
         staged: list[dict] = []  # executed tool calls: {name, arguments, ok}
@@ -205,8 +215,17 @@ class TurnService:
             for round_no in range(1, self.settings.max_tool_rounds + 1):
                 prog.rounds = round_no
                 prog.set("gm_thinking", f"{provider.name} round {round_no}")
-                resp = provider.complete(SYSTEM_PROMPT, steps, TOOL_SPECS, job_label=f"t{turn_id}r{round_no}")
+                try:
+                    resp = provider.complete(system, steps, tools, job_label=f"t{turn_id}r{round_no}")
+                except ProviderError as perr:
+                    if getattr(provider, "name", "") == "gemini" and hasattr(root, "route") and "quota" in str(perr).lower():
+                        raise Escalate(f"{getattr(provider, 'model', 'gemini')} quota: {perr}", reroute=True) from None
+                    raise
                 usage.append({"round": round_no, **{k: resp.meta.get(k) for k in ("usage", "duration_s", "model", "effort", "prompt_chars", "notices", "prompt_captured") if k in resp.meta}})
+                if conversation:
+                    why = next((w for c in resp.tool_calls if (w := check_call(c.name, c.arguments))), None)
+                    if why:
+                        raise Escalate(why)
                 if not resp.tool_calls:
                     narration = resp.narration
                     if narration:
@@ -240,14 +259,36 @@ class TurnService:
                 t_after = one(conn, "SELECT game_time_minutes FROM campaigns WHERE id = ?", (cid,))["game_time_minutes"]
                 self._save_diagnostics(conn, turn_id, cid, steps, usage, flags, {"game_time_before": t_before, "game_time_after": t_after,
                                                                                    "changes": fx.changes, "errors": fx.errors,
-                                                                                   "staged_calls": len(staged), "dice_drawn": len(dice.log),
+                                                                                   "staged_calls": len(staged), "dice_drawn": len(dice.log), "route": route,
                                                                                    "continuity": continuity(conn, cid, steps[0], flags, t_before, t_after, fx.changes)})
             prog.set("done")
             try:
-                maybe_summarize(conn, cid, provider, self.settings.summarize_every_messages)
+                maybe_summarize(conn, cid, root.summarizer() if hasattr(root, "summarizer") else provider, self.settings.summarize_every_messages)
             except Exception:  # summaries are an optimisation; never fail a committed turn over them
                 traceback.print_exc()
             prune_jobs(self.settings)
+        except Escalate as exc:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            conn.execute("UPDATE turns SET stage_json = NULL WHERE id = ?", (turn_id,))
+            prog.set("escalating", str(exc)[:200])
+            info = {**(route or {}), "escalated_from": (route or {}).get("model"), "escalation_reason": str(exc)[:300],
+                    "provider": "codex", "model": "codex", "gemini_usage": usage}
+            nxt = root.codex() if hasattr(root, "codex") else self.provider_factory()
+            if exc.reroute and hasattr(root, "route"):
+                c2 = connect(self.settings.campaign_db)
+                try:
+                    combat = one(c2, "SELECT 1 AS x FROM encounters WHERE campaign_id = ? AND status = 'active'", (cid,)) is not None
+                finally:
+                    c2.close()
+                nxt, again = root.route(turn["player_input"], combat)
+                info = {**again, "rerouted_from": (route or {}).get("model"), "reroute_reason": str(exc)[:300]}
+            conn.close()
+            if rule_conn is not None:
+                rule_conn.close()
+            conn = rule_conn = None
+            self._process(turn_id, forced=(nxt, info))
+            return
         except Exception as exc:
             prog.set("failed", str(exc)[:300])
             if getattr(exc, "meta", None):  # e.g. an isolation violation: keep what the job attempted
@@ -263,11 +304,12 @@ class TurnService:
                     record_roll(conn, cid, res, turn_id=turn_id, character_id=char_id, hidden=hidden)
                 self._save_diagnostics(conn, turn_id, cid, steps, usage, [{"level": "error", "message": err[:1000]}],
                                        {"game_time_before": t_before, "game_time_after": t_before, "changes": [], "errors": runner.effects.errors,
-                                        "rolled_back": True, "staged_calls": len(staged), "dice_drawn": len(dice.log)})
+                                        "rolled_back": True, "staged_calls": len(staged), "dice_drawn": len(dice.log), "route": route})
             if not isinstance(exc, (ProviderError, StateConflict, ValueError, KeyError)):
                 traceback.print_exc()
         finally:
-            conn.close()
+            if conn is not None:
+                conn.close()
             if rule_conn is not None:
                 rule_conn.close()
 

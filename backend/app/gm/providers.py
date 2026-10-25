@@ -424,7 +424,10 @@ class GeminiProvider:
             try:
                 with urllib.request.urlopen(req, timeout=self.settings.codex_timeout_s) as r:
                     meta["duration_s"] = round(time.monotonic() - started, 1)
-                    return json.loads(r.read())
+                    out = json.loads(r.read())
+                from .router import GeminiQuota
+                GeminiQuota(self.settings).record(self.model)
+                return out
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", "replace")
                 try:
@@ -434,6 +437,8 @@ class GeminiProvider:
                     msg, details = detail[:300], []
                 quota_ids = [v.get("quotaId", "") for d in details for v in d.get("violations") or []]
                 if exc.code == 429 and any("PerDay" in q for q in quota_ids):  # retrying only burns more of the day's quota
+                    from .router import GeminiQuota
+                    GeminiQuota(self.settings).mark_spent(self.model)
                     raise ProviderError(f"Gemini daily free-tier quota for {self.model} is used up ({', '.join(quota_ids)}); "
                                         "it resets daily, or switch the GM back to Codex.") from None
                 wait = next((d.get("retryDelay") for d in details if str(d.get("@type", "")).endswith("RetryInfo")), None)
@@ -583,9 +588,12 @@ def make_provider(name: str, settings: Settings, model: str | None = None, effor
         return CodexCliProvider(settings, model=model, effort=effort)
     if name == "gemini":
         return GeminiProvider(settings, model=model, effort=effort)
+    if name == "auto":
+        from .router import AutoGM
+        return AutoGM(settings, codex_model=model, effort=effort)
     if name == "mock":
         return MockProvider()
-    raise ValueError(f"unknown GM provider {name!r} (use codex, gemini or mock)")
+    raise ValueError(f"unknown GM provider {name!r} (use auto, codex, gemini or mock)")
 
 
 def prune_jobs(settings: Settings, keep: int = 20) -> None:

@@ -146,3 +146,20 @@ first version of the large profile (about 107k tokens) hit 238.65k in a two-roun
 **Verdict:** fast, cheap and well-cached, with good prose and NPC voices, but its bookkeeping is unreliable in ways the
 validators can't catch (a valid but wrong Gold amount, missing records, a cycle counted on a non-action).
 Codex stays the GM. The large profile and the pacer stay available; the large profile works with Codex too.
+
+## 7. Auto GM routing (`gm/router.py`)
+
+The player's words and the campaign state decide the route before any model call (`classify`): recap, status and rules
+questions → Flash Lite; conversation with no action words before the talk verb → 3.8, then 3.6; everything else, and
+every turn during combat → Codex. It errs toward Codex. Quotas are counted per model per Pacific day
+(`data/gemini_quota.json`), a model is skipped unless it has enough requests left to finish a turn (2 for questions, 3
+for conversation), and a daily 429 marks it spent.
+
+Conversation mode gives Gemini only `SAFE_TOOLS` and `apply_changes` ops `remember`, `npc_attitude` and `fact`, plus an
+`escalate` tool. Any other request, or `escalate`, raises `Escalate`: the staged round is discarded (nothing was
+applied) and the turn is re-run by Codex. A quota error mid-turn re-routes instead, to the next model with quota.
+
+**Live check (Denton copy, 2026-10-24):** a status question on Flash Lite (5 s, accurate, but listed only one of three
+open obligations); Vada roleplay on 3.8 (in character, no mechanics); a scent search that 3.8 couldn't take (daily
+quota), 3.6 escalated ("requires a Perception or Tracking check") and Codex rolled and committed; a purchase straight
+to Codex (−2 Gold, item added).

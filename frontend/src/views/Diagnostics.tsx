@@ -66,6 +66,8 @@ export function Diagnostics({ cid }: { cid: number }) {
                   <Chip>context {Math.round((detail.context_chars ?? 0) / 4).toLocaleString()} tokens</Chip>
                   <Chip>present: {(usage.present ?? []).join(", ") || "—"}</Chip>
                   {usage.rolled_back && <Chip tone="red">rolled back</Chip>}
+                  {usage.route && <Chip tone={usage.route.escalated_from ? "amber" : "cyan"} title={usage.route.escalation_reason ?? usage.route.reason}>
+                    {usage.route.kind} → {usage.route.escalated_from ? `${usage.route.escalated_from} → codex` : usage.route.model}</Chip>}
                 </div>
                 <div className="tabs">
                   {(["continuity", "integrity", "context", "steps", "rolls", "usage", "runtime"] as const).map((t) => <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{t}</button>)}

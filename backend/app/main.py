@@ -45,6 +45,8 @@ class PrefsIn(BaseModel):
     codex_model: str | None = None
     gemini_model: str | None = None
     context_profile: str | None = None
+    gemini_effort: str | None = None
+    gemini_context_profile: str | None = None
     codex_reasoning_effort: str | None = None
     rulebook_dir: str | None = None
     ledger_dir: str | None = None
@@ -119,6 +121,11 @@ class AppState:
 
     def make_provider(self):
         p = self.prefs()
+        if p["gm_provider"] == "auto":  # gm/router.py: Gemini for questions and conversation, Codex for mechanics
+            from .gm.router import AutoGM
+            return AutoGM(self.settings, codex_model=p.get("codex_model") or "", effort=p.get("codex_reasoning_effort"),
+                          gemini_effort=p.get("gemini_effort") or "medium", gemini_profile=p.get("gemini_context_profile") or "large",
+                          codex_profile=p.get("context_profile") or "standard")
         model = p.get("gemini_model") if p["gm_provider"] == "gemini" else p.get("codex_model")
         prov = make_provider(p["gm_provider"], self.settings, model=model or "", effort=p.get("codex_reasoning_effort"))
         prov.context_profile = p.get("context_profile") or "standard"  # briefing size: standard | large (memory/context.py PROFILES)
@@ -248,15 +255,15 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     @app.get("/api/settings")
     def get_settings():
         p = state.prefs()
-        return {**p, "codex_cli_path": resolve_codex_bin(), "providers": ["codex", "gemini", "mock"], "gemini_key_present": bool(settings.gemini_api_key()),
+        return {**p, "codex_cli_path": resolve_codex_bin(), "providers": ["auto", "codex", "gemini", "mock"], "gemini_key_present": bool(settings.gemini_api_key()),
                 "efforts": ["minimal", "low", "medium", "high"], "data_dir": str(settings.data_dir)}
 
     @app.put("/api/settings")
     def put_settings(body: PrefsIn):
         p = state.prefs()
         upd = body.model_dump(exclude_none=True)
-        if "gm_provider" in upd and upd["gm_provider"] not in ("codex", "gemini", "mock"):
-            raise HTTPException(422, "gm_provider must be codex, gemini or mock")
+        if "gm_provider" in upd and upd["gm_provider"] not in ("auto", "codex", "gemini", "mock"):
+            raise HTTPException(422, "gm_provider must be auto, codex, gemini or mock")
         if "context_profile" in upd and upd["context_profile"] not in ("standard", "large"):
             raise HTTPException(422, "context_profile must be standard or large")
         if "codex_reasoning_effort" in upd and upd["codex_reasoning_effort"] not in ("minimal", "low", "medium", "high"):
@@ -331,6 +338,37 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         return FileResponse(path)
 
     # ------------------------------------------------------------------ art (local ComfyUI)
+    @app.get("/api/gemini/quota")
+    def gemini_quota():
+        from .gm.router import GeminiQuota
+        return {**GeminiQuota(settings).report(), "key_present": bool(settings.gemini_api_key())}
+
+    @app.post("/api/campaigns/{cid}/art/draft-appearance")
+    def art_draft_appearance(cid: int, body: AppearanceIn, c=Depends(db)):
+        """Ask Gemini Flash Lite to propose appearance notes for traits the record leaves open. Returned, never saved."""
+        from .gm.providers import GeminiProvider, ProviderError
+        from .gm.router import GeminiQuota
+        campaign_or_404(c, cid)
+        if body.kind != "character" or not body.subject_id:
+            raise HTTPException(422, "drafts are for characters")
+        if not settings.gemini_api_key() or GeminiQuota(settings).remaining("gemini-3.5-flash-lite") < 1:
+            raise HTTPException(409, "No Gemini key or Flash Lite quota left today")
+        ch = one(c, "SELECT * FROM characters WHERE campaign_id = ? AND id = ?", (cid, body.subject_id))
+        if not ch:
+            raise HTTPException(404, "unknown character")
+        brief = art.character_brief(c, cid, ch)
+        record = json.dumps({"name": ch["name"], "race": ch.get("race"), "visual": (ch.get("sheet") or {}).get("visual"),
+                             "public_persona": ((ch.get("sheet") or {}).get("narrative") or {}).get("personality_summary")}, ensure_ascii=False)
+        system = ("You help a tabletop player keep character portraits consistent. Propose a short physical description (under 45 "
+                  "words, comma-separated) covering only the traits the record leaves open: " + (", ".join(brief["unestablished"]) or
+                  "age, face, hair, build") + ". Stay consistent with everything the record does say. Plain visual words, no backstory.")
+        schema = {"type": "object", "additionalProperties": False, "required": ["appearance"], "properties": {"appearance": {"type": "string"}}}
+        try:
+            raw, _ = GeminiProvider(settings, model="gemini-3.5-flash-lite", effort="low")._generate(system, record, schema, "appearance")
+        except ProviderError as exc:
+            raise HTTPException(502, str(exc))
+        return {"appearance": json.loads(raw)["appearance"].strip()}
+
     @app.get("/api/art/status")
     def art_status():
         return state.art.status()
