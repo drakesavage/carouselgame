@@ -4,37 +4,32 @@ Generated from `backend/app/rules/coverage.py` (`python -m app.rules.coverage`);
 
 | Status | Rules | Meaning |
 |---|---|---|
-| implemented and tested | 38 | the console enforces it and a test exercises it |
+| implemented and tested | 42 | the console enforces it and a test exercises it |
 | implemented, untested | 2 | enforced, but no test yet |
-| partly implemented | 12 | part is enforced; the gap column says what is not |
+| partly implemented | 11 | part is enforced; the gap column says what is not |
 | GM ruling | 37 | table procedure the GM applies with the existing tools |
 | reference only | 7 | history, authority or bibliography |
-| missing | 8 | a mechanic the console should enforce and does not |
+| missing | 5 | a mechanic the console should enforce and does not |
 
 ## Gaps by priority
 
-### P1 (10)
+### P1 (6)
 - **§7.8 Party Skill Checks** (missing): no party Skill Check: each crawler is rolled separately; 'half succeed' and the Amazing/Major conversions are not computed
 - **§10.7 Evade and Interrupts** (partly implemented): Catcher and the other class Interrupts are not tools (Marcus and Terri have Catcher +3)
 - **§10.8 Attacks** (partly implemented): firing does not spend ammunition (64 shared bolts, 22 pistol rounds are now counted)
 - **§10.9 Call a Play** (missing): Call a Play (2d6 keep high, bonus to the proposed Action's Check or damage) is not a tool
-- **§13.1 Declare before crafting** (partly implemented): no crafting tool requires the declaration before materials or time are spent
-- **§13.2 Mundane crafting** (missing): no crafting Check: Misc. Junk by size, time = size squared, Fabricate/Engineering
-- **§13.5 Failure and salvage** (missing): materials are not consumed on the attempt and there is no degree-based salvage on Failure
-- **§13.6 Assistance** (partly implemented): comes with the crafting tool
 - **§13.7 Traps** (missing): traps are items with a status; deploy, trigger, Check, damage and reset are not modelled
 - **§15.2 Off-screen resolution** (GM ruling): needs the party Skill Check (7.8) for a group's outcome
 
-### P2 (7)
+### P2 (6)
 - **§— Ai Favor Rerolls** (partly implemented): the reroll itself is not a tool: no reroll window, no 'Natural 1 cannot be rerolled' check, and the Favor is not spent automatically
 - **§7.4 Opposed Skill Checks** (implemented, untested): no test of the opposed default
 - **§7.7 Help and Intervene** (partly implemented): Intervene (an Action after the roll, +1d6) is not a tool
 - **§10.2 Surprise** (implemented, untested): no test of either surprise case
 - **§12.3 Looting and salvage** (GM ruling): no salvage step and no 'looted or salvaged once' guard
-- **§13.3 Magical crafting gate** (missing): the Floor 4+ and crafting-table gate for magical items is not checked
 - **§14.2 Level awards** (partly implemented): award sizes (Quest >= 1; Boss tiers 1-6) are not checked
 
-### P3 (10)
+### P3 (11)
 - **§— Recurring Character Completeness** (GM ruling): no check flags null combat-critical fields before an encounter
 - **§4.1 Player character** (GM ruling): no integrity flag when narration gives Cliff dialogue or decisions
 - **§5.10 Flavor cannot override agency or state** (partly implemented): flags warn only; nothing blocks the turn
@@ -43,6 +38,7 @@ Generated from `backend/app/rules/coverage.py` (`python -m app.rules.coverage`);
 - **§11.3 Injuries** (partly implemented): repeated injuries never become long-term
 - **§12.2 Hotlist and access** (missing): the hotlist is on the sheets but retrieval Action costs are not enforced
 - **§12.4 Achievement and loot-box continuity** (partly implemented): no check that a box is not opened twice or a reward duplicated
+- **§13.3 Magical crafting gate** (partly implemented): from Floor 4: crafting tables, tier bonus and enchantment Difficulty are not a tool yet
 - **§14.6 Grinding Skills** (implemented and tested): the Endurance Check beyond 5 hours is reminded, not rolled
 - **§14.7 Leveling through grinding** (partly implemented): the sole-lowest-Level 1d2 catch-up is not applied
 
@@ -127,12 +123,12 @@ Generated from `backend/app/rules/coverage.py` (`python -m app.rules.coverage`);
 | 12.2 | Hotlist and access | missing |  |  | the hotlist is on the sheets but retrieval Action costs are not enforced | P3 |
 | 12.3 | Looting and salvage | GM ruling | loot and salvage are recorded with add_item/remove_item |  | no salvage step and no 'looted or salvaged once' guard | P2 |
 | 12.4 | Achievement and loot-box continuity | partly implemented | achievement op; boxes are items with an opened state |  | no check that a box is not opened twice or a reward duplicated | P3 |
-| 13.1 | Declare before crafting | partly implemented | projects keep their design, materials and build time as quest details | `test_margit_siphon_project_keeps_its_design` | no crafting tool requires the declaration before materials or time are spent | P1 |
-| 13.2 | Mundane crafting | missing |  |  | no crafting Check: Misc. Junk by size, time = size squared, Fabricate/Engineering | P1 |
-| 13.3 | Magical crafting gate | missing |  |  | the Floor 4+ and crafting-table gate for magical items is not checked | P2 |
+| 13.1 | Declare before crafting | implemented and tested | craft tool: item, Skill, materials, time and Difficulty settled first (Table 43 or a declared project's design); nothing is spent unless every material is on hand with a known count | `test_gold_siphon_is_built_from_its_declared_design`, `test_failed_crafting_consumes_then_salvages_by_margin_and_nothing_is_spent_when_short` |  |  |
+| 13.2 | Mundane crafting | implemented and tested | craft: common items cost 1 Misc. Junk; uncommon mundane items take Junk by size and size x size hours, Unopposed Fabricate (Engineering with moving parts) | `test_failed_crafting_consumes_then_salvages_by_margin_and_nothing_is_spent_when_short`, `test_gm_turn_crafts_the_siphon_once_with_one_set_of_rolls` |  |  |
+| 13.3 | Magical crafting gate | partly implemented | craft refuses magical crafting below Floor 4 | `test_failed_crafting_consumes_then_salvages_by_margin_and_nothing_is_spent_when_short` | from Floor 4: crafting tables, tier bonus and enchantment Difficulty are not a tool yet | P3 |
 | 13.4 | Legacy System-recognized equipment | GM ruling | grandfathered gear keeps its recorded effect on the sheet |  |  |  |
-| 13.5 | Failure and salvage | missing |  |  | materials are not consumed on the attempt and there is no degree-based salvage on Failure | P1 |
-| 13.6 | Assistance | partly implemented | Help dice exist for the lead crafter's Check |  | comes with the crafting tool | P1 |
+| 13.5 | Failure and salvage | implemented and tested | craft consumes materials on the attempt; Failure salvages by margin (Table 47: 1-2 all, 3-9 half, 10+ none) | `test_failed_crafting_consumes_then_salvages_by_margin_and_nothing_is_spent_when_short` |  |  |
+| 13.6 | Assistance | implemented and tested | the lead crafter makes the one Check, with Help dice from assistants; a project's lead is enforced | `test_gold_siphon_is_built_from_its_declared_design` |  |  |
 | 13.7 | Traps | missing |  |  | traps are items with a status; deploy, trigger, Check, damage and reset are not modelled | P1 |
 | 14.1 | No experience-point total | reference only | there is no XP pool by design |  |  |  |
 | 14.2 | Level awards | partly implemented | level op records source (quest, boss, grind, crawler kill) | `test_level_award_banks_stat_points_and_resets_grind_progress` | award sizes (Quest >= 1; Boss tiers 1-6) are not checked | P2 |

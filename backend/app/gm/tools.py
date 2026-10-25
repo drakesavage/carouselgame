@@ -119,6 +119,18 @@ TOOL_SPECS.extend([
                     "dungeon day) roll the advancement check; also adds Level-grind progress. map_bonus: +1 hour for 5+ hour sessions with a "
                     "Neighborhood Map. Does not advance time: also call advance_time.",
      "parameters": {"character": "str", "skill": "str", "hours": "int", "map_bonus": "bool?"}},
+    {"name": "craft",
+     "description": "One crafting attempt (CORE 13.1-13.6; BOOK pp. 221-227), declared in full first: nothing is spent unless every "
+                    "material is on hand with an established count. kind common: 1 Misc. Junk, no Check. kind mundane: give size "
+                    "(Table 43: tiny 1 junk/1h, small 4/4h, petite 16/9h, medium 32/16h, large 64/25h...) or project (a declared project "
+                    "quest; its design supplies skill, Difficulty, hours, junk, lead and Advantage). Materials are consumed on the attempt, the "
+                    "clock advances (advance_clock false if a parallel task already covers the time), the lead crafter rolls Fabricate (or "
+                    "Engineering with moving_parts) with help [{helper, dice}]; Success adds the item (and completes the project), Failure "
+                    "salvages by the margin (Table 47). Magical crafting is refused below Floor 4.",
+     "parameters": {"crafter": "str", "item": "str", "kind": "common|mundane?", "size": "str?", "moving_parts": "bool?", "project": "str?",
+                    "skill": "str?", "dc": "int?", "hours": "int?", "junk": "int?", "materials": "[{name, quantity, owner?, salvageable?}]?",
+                    "help": "[{helper, dice}]?", "advantage": "int?", "disadvantage": "int?", "modifiers": "[{source, value}]?",
+                    "owner": "str?", "description": "str?", "advance_clock": "bool?", "reason": "str?"}},
     {"name": "resolve_floor_end",
      "description": "At floor end: roll advancement for every marked Rank 5+ Skill (1d20 vs Rank). advantage: [{character, skill}] for "
                     "benefits such as the Human race's one eligible Rank 9-or-lower check with Advantage.",
@@ -225,6 +237,21 @@ class ToolRunner:
                     bool(a.get("map_bonus")))
         self._card_new_rolls()
         self.effects.changes.extend(out["lines"][:-1])
+        return out
+
+    def t_craft(self, a: dict) -> dict:
+        from ..rules.crafting import CraftRequest, craft
+        req = CraftRequest.model_validate(a)
+        self.conn.execute("SAVEPOINT craft")  # one attempt is atomic: an invalid step spends nothing
+        try:
+            out = craft(self.conn, self.roller, self.cid, self.turn_id, req)
+        except Exception:
+            self.conn.execute("ROLLBACK TO craft")
+            self.conn.execute("RELEASE craft")
+            raise
+        self.conn.execute("RELEASE craft")
+        self._card_new_rolls()
+        self.effects.changes.extend(l for l in out["lines"] if l != (out.get("check") or {}).get("summary"))  # the roll has its own card
         return out
 
     def t_resolve_floor_end(self, a: dict) -> dict:

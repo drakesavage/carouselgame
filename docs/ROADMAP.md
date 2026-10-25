@@ -6,7 +6,7 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 |---|---|---|---|---|---|---|---|
 | M0 Safe upgrade workflow | P0 | Done | none | 385d7dd | 155 backend; typecheck/build; isolation probe PASS | Settings passcode masked | ledger behind by 2 (see below) |
 | M1 Canonical-state reconciliation | P0 | Exit gate met | M0 | (pending) | 166 backend; consistency 21/21 | HUD roster + objectives | 7 uncounted-gear items stay open for owner counts; 44 house rules move to M2/M7 |
-| M2 Mechanics reliability & GM gates | P0 | In progress | M1 | | 168 backend | n/a | coverage matrix done; P1 order awaiting owner |
+| M2 Mechanics reliability & GM gates | P0 | In progress | M1 | | 171 backend | n/a | coverage matrix done; crafting done; next P1: party checks, combat completion, traps |
 | M3 Main story HUD | P1 | Backlog | M1 underway | | | | |
 | M4 Characters, party, people | P1 | Backlog | M3 | | | | |
 | M5 Inventory, crafting, economy | P1 | Backlog | M3 | | | | |
@@ -185,3 +185,14 @@ partial, 9 GM rulings, 2 reference only, and 8 missing.
 consumed and salvage, 13.6 assistance) for tonight's Gold Siphon; party Skill Checks (7.8) and off-screen group
 resolution (15.2) for the recon team; ammunition spent by attacks (10.8), Call a Play (10.9) and Catcher/class
 Interrupts (10.7) for the prison assault; traps (13.7). P2 and P3 are listed in the matrix.
+
+**Crafting (13.1, 13.2, 13.5, 13.6).** New GM tool `craft` (`backend/app/rules/crafting.py`), from Core Rulebook pp.
+221-227. One call is one attempt, declared in full first: the item, Skill, materials, time and Difficulty come from
+Table 43 by size or from a declared project's design (the Gold Siphon's: Cliff leads, Engineering 16, 8h, 8 Misc. Junk,
+Advantage from Margit). Nothing is spent unless every material is on hand with a known count. Then the materials are
+consumed, the clock advances size x size hours, the lead crafter rolls Fabricate (Engineering with moving parts) with
+Help, and Success adds the item and completes the project, while Failure salvages by the margin (Table 47). Common
+household items cost 1 Misc. Junk; magical crafting is refused below Floor 4. Tests on the disposable campaign copy
+cover the Siphon build, a wrong lead, a second build, half salvage, a natural 1, a short stash (nothing spent, no time
+passes), and a full GM turn that crafts once with one set of rolls. Live campaign state was not touched. Coverage:
+42 tested, 5 missing; P1 now 6.

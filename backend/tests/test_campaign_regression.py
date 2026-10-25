@@ -427,7 +427,12 @@ def test_immediate_objective_is_its_linked_quests_and_drops_finished_ones(conn, 
 
 
 def test_every_imported_house_rule_is_classified_with_existing_tests(conn, denton):
+    import ast
+    from app.rules import coverage
     from app.rules.coverage import MATRIX, STATUSES, key_for
+    tree = ast.parse(Path(coverage.__file__).read_text(encoding="utf-8"))
+    keys = [k.value for n in ast.walk(tree) if isinstance(n, ast.AnnAssign) and getattr(n.target, "id", "") == "MATRIX" for k in n.value.keys]
+    assert len(keys) == len(set(keys)), "a rule appears twice in MATRIX (the later entry silently wins)"
     rules = rows(conn, "SELECT section, title FROM house_rules WHERE campaign_id = ?", (denton,))
     assert len(rules) == 104
     assert [key_for(r) for r in rules if key_for(r) not in MATRIX] == []
@@ -448,3 +453,67 @@ def test_rule_labels_come_from_the_matrix(conn, denton):
     assert label["Mending"] == "implemented" and label["Rest"] == "implemented"      # import labelled both pending
     assert label["Party Skill Checks"] == "pending" and label["Call a Play"] == "pending"
     assert classify({"section": "7.9", "title": "Crazy Dungeon critical flourish"})["status"] == "gm_ruling"
+
+
+def _craft(conn, cid, dice, **a):
+    from app.gm.tools import ToolRunner
+    from app.rules.dice import DiceRoller
+    from tests.conftest import scripted
+    run = ToolRunner(conn, None, DiceRoller(source=scripted(dice)), cid, 0)
+    return run.run("craft", a), run
+
+
+def test_gold_siphon_is_built_from_its_declared_design(conn, denton):
+    junk = lambda: one(conn, "SELECT quantity FROM items WHERE campaign_id = ? AND owner_character_id IS NULL AND name = 'Miscellaneous Junk'", (denton,))["quantity"]
+    t0, j0 = one(conn, "SELECT game_time_minutes FROM campaigns WHERE id = ?", (denton,))["game_time_minutes"], junk()
+    bad, _ = _craft(conn, denton, [10], crafter="Nate", item="Pass-Pulse Gold Siphon", project="Pass-Pulse Gold Siphon")
+    assert not bad["ok"] and "led by Cliff" in bad["result"]["error"] and junk() == j0            # wrong lead: nothing spent
+    res, run = _craft(conn, denton, [10, 4, 4], crafter="Cliff", item="Pass-Pulse Gold Siphon", project="Pass-Pulse Gold Siphon",
+                      help=[{"helper": "Margit Winchgrinder", "dice": "1d6"}])
+    out = res["result"]
+    assert res["ok"] and out["success"] and out["skill"] == "Engineering" and out["check"]["dc"] == 16
+    assert "keep 10" in out["check"]["summary"]                                                     # Margit's Advantage from the design
+    assert junk() == j0 - 8 and one(conn, "SELECT game_time_minutes FROM campaigns WHERE id = ?", (denton,))["game_time_minutes"] == t0 + 480
+    assert one(conn, "SELECT quantity FROM items WHERE campaign_id = ? AND name = 'Pass-Pulse Gold Siphon'", (denton,))["quantity"] == 1
+    q = one(conn, "SELECT status, details_json FROM quests WHERE campaign_id = ? AND title LIKE 'Build the Margit%'", (denton,))
+    assert q["status"] == "completed" and q["details"]["status"] == "built" and run.effects.rolls
+    again, _ = _craft(conn, denton, [10], crafter="Cliff", item="Pass-Pulse Gold Siphon", project="Pass-Pulse Gold Siphon")
+    assert not again["ok"] and "already" in again["result"]["error"] and junk() == j0 - 8           # cannot be built twice
+
+
+def test_failed_crafting_consumes_then_salvages_by_margin_and_nothing_is_spent_when_short(conn, denton):
+    junk = lambda: one(conn, "SELECT quantity FROM items WHERE campaign_id = ? AND owner_character_id IS NULL AND name = 'Miscellaneous Junk'", (denton,))["quantity"]
+    j0 = junk()
+    res, _ = _craft(conn, denton, [3], crafter="Cliff", item="Pulley Rig", size="small", moving_parts=True, dc=25)
+    out = res["result"]                                                                           # 3 + 8 + 5 = 16 vs 25: missed by 9
+    assert res["ok"] and not out["success"] and out["salvaged"] == ["2x Miscellaneous Junk"] and junk() == j0 - 4 + 2
+    assert not one(conn, "SELECT 1 FROM items WHERE campaign_id = ? AND name = 'Pulley Rig'", (denton,))
+    res, _ = _craft(conn, denton, [1], crafter="Cliff", item="Desk Barricade", size="medium", dc=16)  # nat 1: 1+2+5 = 8, missed by 8 -> half
+    assert res["ok"] and res["result"]["salvaged"] == ["16x Miscellaneous Junk"] and res["result"]["skill"] == "Fabricate"
+    j1, t1 = junk(), one(conn, "SELECT game_time_minutes FROM campaigns WHERE id = ?", (denton,))["game_time_minutes"]
+    short, _ = _craft(conn, denton, [20], crafter="Cliff", item="Barn", size="colossal")
+    assert not short["ok"] and "nothing was spent" in short["result"]["error"]
+    assert junk() == j1 and one(conn, "SELECT game_time_minutes FROM campaigns WHERE id = ?", (denton,))["game_time_minutes"] == t1
+    magic, _ = _craft(conn, denton, [20], crafter="Cliff", item="+2 Dexterity Dagger", kind="magical")
+    assert not magic["ok"] and "Fourth Floor" in magic["result"]["error"]
+    common, _ = _craft(conn, denton, [20], crafter="Cliff", item="Roll of Tape", kind="common")
+    assert common["ok"] and junk() == j1 - 1 and one(conn, "SELECT quantity FROM items WHERE campaign_id = ? AND name = 'Roll of Tape'", (denton,))["quantity"] == 1
+
+
+def test_gm_turn_crafts_the_siphon_once_with_one_set_of_rolls(client, conn, denton, settings):
+    class Build(MockProvider):
+        def complete(self, system, steps, tools, *, job_label):
+            if not any(s["kind"] == "tool_results" for s in steps):
+                return ProviderResponse([ToolCall("craft", {"crafter": "Cliff", "item": "Pass-Pulse Gold Siphon", "project": "Pass-Pulse Gold Siphon",
+                                                            "help": [{"helper": "Margit Winchgrinder", "dice": "1d6"}]})], "")
+            return ProviderResponse([], "Through the night, Cliff and Margit work on the siphon.")
+    client.app_state.turns = TurnService(settings, Build, run_async=False)
+    j0 = one(conn, "SELECT quantity FROM items WHERE campaign_id = ? AND owner_character_id IS NULL AND name = 'Miscellaneous Junk'", (denton,))["quantity"]
+    t0 = state(conn, denton)[0]
+    r = client.post(f"/api/campaigns/{denton}/turns", json={"text": "After nightfall Cliff and Margit build the Pass-Pulse Gold Siphon.",
+                                                            "idempotency_key": uuid.uuid4().hex})
+    assert r.status_code == 200, r.text
+    assert state(conn, denton)[0] == t0 + 480
+    assert one(conn, "SELECT quantity FROM items WHERE campaign_id = ? AND owner_character_id IS NULL AND name = 'Miscellaneous Junk'", (denton,))["quantity"] == j0 - 8
+    rolls = rows(conn, "SELECT reason FROM dice_rolls WHERE campaign_id = ? AND reason LIKE 'Craft %' AND rolled_back = 0", (denton,))
+    assert len(rolls) == 1  # dice drawn once and reused by the staged replay, never re-rolled
