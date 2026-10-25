@@ -145,17 +145,23 @@ def _reference_brief(ref: dict, vis: dict, others: list[str]) -> dict:
         noun = re.sub(r"\bmale\b", "man", re.sub(r"\bfemale\b", "woman", noun))
         lead = f"{age}-year-old {noun}" if age.isdigit() else (f"{noun} in their {age.lower()}" if age else noun)
         lead = re.sub(r"\btheir\b", "his" if re.search(r"\bman\b", noun) else "her" if re.search(r"\bwoman\b", noun) else "their", lead)
-        subject = f"(portrait of a {lead}:1.3)"
+        subject = f"(portrait of {'an' if lead[:1].lower() in 'aeiou' else 'a'} {lead}:1.3)"
         negative = "man, male, beard, mustache, stubble" if re.search(r"\bwoman\b", noun) else "woman, female" if re.search(r"\bman\b", noun) else ""
 
     def keep(sentence: str) -> bool:  # drop instructions to the illustrator and comparisons with other characters
-        return not re.search(r"\b(should|must|reference photo|portrait-reference)\b", sentence, re.I) \
+        return not re.search(r"\b(should|must|reference photo|portrait-reference|likeness|LoRA)\b", sentence, re.I) \
             and not any(re.search(rf"\b{re.escape(n)}\b", sentence) for n in others if len(n) > 2)
+
+    negations: list[str] = []
 
     avoid: list[str] = []
     parts = []
     for label, text in (("", ref.get("physique")), ("", ref.get("outfit")), ("signature: ", ref.get("signature")), ("expression: ", ref.get("expression"))):
         sentences = [s for s in re.split(r"(?<=[.!?])\s+", _clean(text)) if s and keep(s)]
+        # "No X, Y." / "Do not ..." / "Never ..." sentences: SDXL would draw X and Y, so they become negatives
+        for s in [s for s in sentences if re.match(r"(no|not|do not|don't|never)\b", s, re.I)]:
+            negations.append(re.sub(r"^(no|not|do not|don't|never)\s+(an?\s+|the\s+)?", "", s, flags=re.I).rstrip("."))
+        sentences = [s for s in sentences if not re.match(r"(no|not|do not|don't|never)\b", s, re.I)]
         body = " ".join(sentences)
         avoid += [m.strip(" .") for m in AVOID.findall(body)]
         body = AVOID.sub("", body).strip()
@@ -163,7 +169,7 @@ def _reference_brief(ref: dict, vis: dict, others: list[str]) -> dict:
             parts.append(label + body)
     if not animal and not re.search(r"\b(armor|armour|guard|harness|plate|mail)\b", _clean(ref.get("outfit")), re.I):
         negative += ", (plate armor, pauldrons, shoulder armor, chainmail, metal shoulder guards, breastplate:1.5)"  # modern clothes: keep fantasy armor out
-    negative = ", ".join(x for x in [negative, *[a for a in avoid if len(a.split()) >= 2][:4]] if x)
+    negative = ", ".join(x for x in [negative, *[a for a in avoid if len(a.split()) >= 2][:4], *[n[:120] for n in negations[:3]]] if x)
     return {"subject": subject, "description": "; ".join(parts), "negative": negative,
             "unestablished": [str(x) for x in _list(vis.get("unestablished"))]}
 
@@ -184,7 +190,11 @@ def subject_negative(conn: sqlite3.Connection, cid: int, kind: str, subject_id: 
     if kind != "character" or not subject_id:
         return ""
     c = one(conn, "SELECT * FROM characters WHERE campaign_id = ? AND id = ?", (cid, subject_id))
-    return character_brief(conn, cid, c)["negative"] if c else ""
+    if not c:
+        return ""
+    from ..importer.visual_reference import bible_guide
+    guard = bible_guide(conn, cid).get("negative_guard") if ((c.get("sheet") or {}).get("visual") or {}).get("reference") else None
+    return ", ".join(x for x in (character_brief(conn, cid, c)["negative"], (guard or "")[:400]) if x)
 
 
 def subject_text(conn: sqlite3.Connection, cid: int, kind: str, subject_id: int | None, subject_name: str | None) -> tuple[str, str]:
@@ -286,8 +296,10 @@ def codex_prompt(conn: sqlite3.Connection, settings: Settings, cid: int, char_id
     brief = character_brief(conn, cid, c)
     style, (w, h) = subject_layout(conn, cid, "character", char_id)
     look = "; ".join(x for x in (appearance(conn, cid, "character", str(char_id)), _clean(extra)) if x)
+    from ..importer.visual_reference import bible_guide
+    guide = bible_guide(conn, cid) if ref.get("source", "").startswith("state/characters/VISUAL_BIBLE") else {}
     return portrait_prompt(c["name"], ref, brief, look, animal=style != KIND_STYLE["character"], wide=w > h,
-                           has_refs=bool(list_refs(settings, cid, char_id)))
+                           has_refs=bool(list_refs(settings, cid, char_id)), guide=guide)
 
 
 # ------------------------------------------------------------------ jobs

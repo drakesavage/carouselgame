@@ -5,7 +5,7 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 | Milestone | Priority | Status | Dependencies | Commit | Tests | Screenshot review | Open blockers |
 |---|---|---|---|---|---|---|---|
 | M0 Safe upgrade workflow | P0 | Done | none | 385d7dd | 155 backend; typecheck/build; isolation probe PASS | Settings passcode masked | ledger behind by 2 (see below) |
-| M1 Canonical-state reconciliation | P0 | Ready | M0 | | | | needs owner decisions on conflicts |
+| M1 Canonical-state reconciliation | P0 | In progress | M0 | (pending) | 156 backend | n/a | remaining conflicts need owner decisions (Silver Earth Box, import report) |
 | M2 Mechanics reliability & GM gates | P0 | Backlog | M1 | | | | |
 | M3 Main story HUD | P1 | Backlog | M1 underway | | | | |
 | M4 Characters, party, people | P1 | Backlog | M3 | | | | |
@@ -49,3 +49,43 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 * Not pulled: pulling is the owner's call (Ledger view → Pull).
 
 **Passcode**: if the Settings screenshot with the passcode was shared, rotate it (Settings → New passcode).
+
+## M1 progress (2026-10-25)
+
+**Decision 1: ledger pull.** Owner chose: pull, and make the bible the visual source.
+* Ledger fast-forwarded through the app's pull (`f1a5680` → `353576c`); no local changes existed.
+* `state/characters/VISUAL_BIBLE.md` is now loaded into each crawler's `visual.reference` at import, after every pull,
+  and at startup (skipped when unchanged). Its negative-continuity guard and global art rules feed portrait prompts.
+* Write-back no longer copies visual references into character YAMLs (the 20 pending visual edits are gone).
+
+**Decision 2: Gold and Personal Stabber.** Owner chose: paid, 4,016 Gold.
+* Evidence: `shared_inventory.yaml` (4,046, "no payment") was written at 13:04 CDT on Sept 25 (`98e66e4`); the market
+  sweep recorded "gold_before 4046, personal_stabber_paid 30, gold_after 4016" at 18:11 (`4067fa1`, `f1a5680`) and never
+  touched `shared_inventory.yaml`, so its values were stale.
+* Applied as correction #1 (`app/reconcile.py`): owner-approved, evidence recorded, save point #13 taken first, applied
+  through the validated rule engine. Shared Gold 4,016; the reservation is paid and held by Secondhand Saviors, not
+  owned until Scout claims it.
+* Pending reviewed write-back (Ledger view): 2 clean changes to `state/shared_inventory.yaml` (Gold quantity and the
+  stale note). Not written yet: that commit is the owner's.
+
+**Decision 3: floor clock.** Owner chose: 214h41m (70 minutes passed after the checkpoint).
+* Evidence: `campaign.yaml` says 215h51m remaining / 1,449 elapsed at the 13:04 checkpoint (`98e66e4`). Two
+  Negotiations followed (`c2d22c3`, `11d4b24`) with no clock entry. The market sweep's own clock runs 215h41m → 214h41m
+  (`4067fa1`, `f1a5680`); its 10-minute gap before the sweep matches two Negotiations at its 5-minute rate.
+* Applied as correction #2 (save point #14): `advance_time` 70 minutes, no mending, no day rollover. Elapsed 1,519,
+  daily reset in 4h41m, collapse in 214h41m.
+
+**Decision 4: location and saferoom.** Owner chose: where Cliff is.
+* Evidence: the checkpoint placed all twelve at The Molting Pigeon (saferoom). The roster then split the party
+  (prison-recon, training-market, saferoom), and the market sweep happened at Gilded Feathers, Heavensworth. Nothing
+  after the split updated `campaign.yaml`.
+* Applied as correction #3 (save point #15): `set_location` Gilded Feathers, Heavensworth, not a saferoom. The Molting
+  Pigeon stays the saferoom group's location; the recon group's position stays unknown. The GM context no longer
+  carries the "records disagree" location note.
+
+**Pending reviewed write-back (Ledger view)**: 15 clean changes, no blockers. `state/campaign.yaml`: clock, dungeon
+time, location, saferoom. `state/roster.yaml`: clock mirror. `state/shared_inventory.yaml`: Gold and Stabber note. Not
+written: that commit is the owner's.
+
+**Still open in M1**: Silver Earth Box status per character, and the importer's 16 conflicts / 18 review items / 44
+unimplemented house rules.

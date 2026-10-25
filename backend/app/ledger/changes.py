@@ -249,7 +249,7 @@ class Builder:
         d = c.get("derived") or {}
         if "unallocated_stat_points" in d and "unallocated_stat_points" in m and _int(m.get("unallocated_stat_points")) != d["unallocated_stat_points"]:
             self.set(f, ["mechanics", "unallocated_stat_points"], d["unallocated_stat_points"], f"Unallocated Stat points → {d['unallocated_stat_points']}", g)
-        self._visual(f, B, c, g)
+        # Visual references are not written back: state/characters/VISUAL_BIBLE.md is the canonical visual source.
         self._skills(f, m, c, g)
         self._statuses(f, m, c, g)
         self._items(f, B, c, g)
@@ -532,7 +532,15 @@ class Builder:
         self.advancement()
         self.rolls()
         self.gm_notes()
+        self.corrections()
         return self.changes, self.warnings
+
+    def corrections(self) -> None:
+        """Owner-approved corrections (reconcile.py) carry their ledger edits into the reviewed write-back."""
+        from ..reconcile import corrections
+        for cor in corrections(self.conn, self.cid):
+            for e in cor.get("ledger_edits") or []:
+                self.set(e["file"], list(e["path"]), e["value"], f"Correction #{cor['id']}: {cor['subject']}", "Corrections")
 
 
 def files_needed(conn: sqlite3.Connection, cid: int) -> list[str]:

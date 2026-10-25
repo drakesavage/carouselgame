@@ -213,26 +213,18 @@ def test_real_ledger_round_trip_passes_its_own_validator(conn, real_repo):
     assert "Crawler Console roll #" in (real_repo / "rolls/public.jsonl").read_text(encoding="utf-8")
 
 
-def test_visual_reference_is_written_back_to_the_character_yaml(conn, real_repo):
-    from pathlib import Path
-    from app.importer.visual_reference import apply as apply_reference
-    ref_doc = Path(__file__).resolve().parents[2] / "data" / "visual_reference" / "denton-crawlers.md"
-    if not ref_doc.exists():
-        pytest.skip("Denton visual reference not present")
-    cid, _ = import_ledger(conn, real_repo)
+def test_visual_bible_is_the_visual_source_and_nothing_visual_is_written_back(conn, real_repo):
+    from app.importer.visual_reference import apply as apply_reference, bible_guide
+    if not (real_repo / "state/characters/VISUAL_BIBLE.md").exists():
+        pytest.skip("ledger has no visual bible")
+    cid, rep = import_ledger(conn, real_repo)
+    assert any("Visual bible loaded for 12" in n for n in rep["notes"])
+    terri = next(r for r in conn.execute("SELECT sheet_json FROM characters WHERE campaign_id = ? AND slug = 'terri-campion'", (cid,)))
+    ref = json.loads(terri[0])["visual"]["reference"]
+    assert (ref["demographic"], ref["age"]) == ("Black American woman", "37") and ref["source"].startswith("state/characters/VISUAL_BIBLE.md")
+    assert "negative_guard" in bible_guide(conn, cid)
+    # even with a different reference imported on top, write-back proposes no visual edits
     with transaction(conn):
-        res = apply_reference(conn, cid, ref_doc.read_text(encoding="utf-8"), "visual reference test")
-    assert len(res["updated"]) == 12
+        apply_reference(conn, cid, "## Terri Campion\n**Black American woman | 37 | Paladin**\n\nSomething else.\n", "test")
     pv = sync.preview(conn, cid, fetch=False)
-    vis = [c for c in pv["changes"] if c["summary"].startswith("Visual reference")]
-    assert len(vis) == 12 and all(c["status"] == "clean" for c in pv["changes"]) and pv["blockers"] == []
-    out = _apply(conn, cid, pv)
-    terri = yaml.safe_load((real_repo / "state/characters/terri-campion.yaml").read_text(encoding="utf-8"))
-    assert terri["visual"]["reference"]["demographic"] == "Black American woman" and terri["visual"]["reference"]["age"] == "37"
-    assert "imported_at" not in terri["visual"]["reference"] and terri["visual"]["unestablished"] == []
-    assert terri["mechanics"]["level_progress"] is not None  # the rest of the sheet is untouched
-    changed = [l for l in git(real_repo, "show", "--format=", out["commit"], "--", "state/characters/terri-campion.yaml").splitlines()
-               if l[:1] in "+-" and not l.startswith(("+++", "---"))]
-    assert all(not l.startswith("-") or "unestablished" in l or l.strip("- ").startswith(("Exact", "Facial", "Hair", "Ethnicity", "Height"))
-               for l in changed), changed
-    assert sync.preview(conn, cid, fetch=False)["changes"] == []  # idempotent once written
+    assert not [c for c in pv["changes"] if "visual" in json.dumps(c.get("path") or c.get("summary") or "").lower()]

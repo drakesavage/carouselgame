@@ -104,7 +104,8 @@ def paint(settings: Settings, prompt: str, refs: list[Path], label: str) -> byte
         shutil.rmtree(job, ignore_errors=True)
 
 
-def portrait_prompt(name: str, ref: dict, brief: dict, appearance: str, animal: bool, wide: bool, has_refs: bool) -> str:
+def portrait_prompt(name: str, ref: dict, brief: dict, appearance: str, animal: bool, wide: bool, has_refs: bool,
+                    guide: dict | None = None) -> str:
     """A plain-language brief for the image model (it reads full sentences well, unlike SDXL)."""
     lines = [f"Paint one portrait of {name}."]
     if ref:
@@ -126,6 +127,11 @@ def portrait_prompt(name: str, ref: dict, brief: dict, appearance: str, animal: 
              "Waist-up, facing the viewer, portrait orientation (2:3), with the head and shoulders in the upper third so a "
              "square crop of the top shows the face; large gear may be partly cut off at the edges.")
     lines.append("Composition: " + frame)
+    guide = guide or {}
+    if guide.get("global_rules"):
+        lines.append("Campaign art rules: " + " ".join(guide["global_rules"][:6]))
+    if guide.get("negative_guard"):
+        lines.append("Never: " + guide["negative_guard"])
     lines.append("Style: gritty painted fantasy illustration for a tabletop RPG sourcebook; visible oil-paint brushwork, dramatic "
                  "chiaroscuro lighting, grimy dungeon background, a darkly humorous tone. Keep every listed detail of clothing and gear "
                  "(colors included) and nothing that contradicts them. No text, letters, logos, borders or watermarks.")

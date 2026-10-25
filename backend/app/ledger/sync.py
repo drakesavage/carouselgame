@@ -371,7 +371,19 @@ def pull(conn: sqlite3.Connection, cid: int) -> dict:
     if st["dirty_files"]:
         raise LedgerError("The ledger has uncommitted changes; cannot pull.")
     git(root, "pull", "--ff-only", "--quiet", timeout=90)
+    load_visual_bible(conn, cid, root)
     return repo_status(root, fetch=False)
+
+
+def load_visual_bible(conn: sqlite3.Connection, cid: int, root: Path | None = None) -> dict:
+    """The ledger's VISUAL_BIBLE.md is the canonical visual source; keep the console's copy current."""
+    from ..importer.visual_reference import sync_bible
+    try:
+        root = root or link(conn, cid)["root"]
+    except LedgerError:
+        return {"skipped": "not a ledger campaign"}
+    head = git(root, "rev-parse", "HEAD", check=False).strip() or None
+    return sync_bible(conn, cid, root, head)
 
 
 def push(conn: sqlite3.Connection, cid: int) -> dict:

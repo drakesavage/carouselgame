@@ -104,3 +104,95 @@ def reference_line(sheet: dict | None) -> str:
     first = (ref.get("physique") or "").split(". ")[0]
     outfit = (ref.get("outfit") or "").split(". ")[0]
     return "looks: " + "; ".join(x for x in (head, first, outfit) if x)[:420]
+
+
+# ------------------------------------------------------------------ the ledger's visual bible (canonical)
+BIBLE = "state/characters/VISUAL_BIBLE.md"
+FIELD = re.compile(r"^\*\*(Demographics / body|Fixed visual identity|Outfit / signature|Outfit|Signature|Portrait cues):\*\*\s*(.+)$", re.M)
+
+
+def _split_demographics(text: str) -> dict:
+    """'Black American woman, 37, about 5'8", ...' -> demographic, age; 'Male Yorkshire terrier, ~6 lb, ...' -> size."""
+    first = text.split(";")[0]
+    parts = [p.strip() for p in first.split(",")]
+    out: dict = {"demographic": parts[0]}
+    for p in parts[1:]:
+        if re.fullmatch(r"\d{1,3}", p) and "age" not in out:
+            out["age"] = p
+        elif re.search(r"\b(lb|lbs|pounds?|feet|foot|ft)\b", p, re.I) and "size" not in out:
+            out["size"] = p
+        elif re.search(r"\b(\d0s|teens|twenties|thirties|forties|fifties)\b", p, re.I) and "age" not in out:
+            out["age"] = re.sub(r"^(presented|appearing|looking)\s+in\s+(his|her|their)\s+", "", p, flags=re.I)
+    if "size" not in out:  # e.g. 'about 13 feet snout to tail' sits in the first clause
+        m = re.search(r"\b(?:about|approximately|~)\s*[\d.–-]+\s*(?:lb|lbs|pounds|feet|ft)\b[^,;]*", text, re.I)
+        if m and re.search(r"\b(terrier|retriever|dog|alligator|crocodile|cat)\b", parts[0], re.I):
+            out["size"] = m.group(0).strip()
+    return out
+
+
+def parse_bible(markdown: str) -> tuple[list[dict], dict]:
+    """(per-character entries in the reference shape, campaign-wide guidance)."""
+    entries, guide = [], {}
+    for block in re.split(r"^##\s+", markdown, flags=re.M)[1:]:
+        head, _, body = block.partition("\n")
+        parts = [p.strip() for p in head.split("·")]
+        fields = {k: " ".join(v.split()) for k, v in FIELD.findall(body)}
+        if "Demographics / body" in fields:
+            e = {"name": parts[0].title() if parts[0].isupper() else parts[0], "class_title": parts[2] if len(parts) > 2 else None,
+                 **_split_demographics(fields["Demographics / body"])}
+            e["physique"] = " ".join(x for x in (fields["Demographics / body"], fields.get("Fixed visual identity")) if x)
+            e["outfit"] = fields.get("Outfit") or fields.get("Outfit / signature")
+            if fields.get("Signature"):
+                e["signature"] = fields["Signature"]
+            e["expression"] = fields.get("Portrait cues")
+            entries.append({k: v for k, v in e.items() if v})
+        elif head.lower().startswith("global"):
+            guide["global_rules"] = [ln.lstrip("- ").strip() for ln in body.splitlines() if ln.strip().startswith("-")]
+        elif head.lower().startswith("prompt assembly"):
+            m = re.search(r"\*\*Negative continuity guard:\*\*\s*\"?(.+?)\"?\s*$", body, re.M)
+            if m:
+                guide["negative_guard"] = m.group(1).strip().strip('"')
+        elif "murder drum" in head.lower():
+            guide["shared_hardware"] = {"name": head.split(":")[-1].strip(), "description": " ".join(body.split())}
+    return entries, guide
+
+
+def sync_bible(conn: sqlite3.Connection, cid: int, ledger_root, commit: str | None = None) -> dict:
+    """Load the ledger's VISUAL_BIBLE.md into each crawler's visual.reference (it is the canonical visual source) and the
+    campaign-wide guidance into meta. Idempotent: skipped when the file is unchanged since the last sync."""
+    import hashlib
+    from pathlib import Path
+    path = Path(ledger_root) / BIBLE
+    if not path.is_file():
+        return {"skipped": "no visual bible in the ledger"}
+    text = path.read_text(encoding="utf-8")
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    key = f"visual_bible:{cid}"
+    prev = one(conn, "SELECT value FROM meta WHERE key = ?", (key,))
+    if prev and json.loads(prev["value"]).get("sha256") == digest:
+        return {"skipped": "unchanged"}
+    entries, guide = parse_bible(text)
+    source = BIBLE + (f" @ {commit[:7]}" if commit else "")
+    chars = rows(conn, "SELECT id, name, sheet_json FROM characters WHERE campaign_id = ?", (cid,))
+    done, unmatched = [], []
+    for e in entries:
+        c = _match(chars, e["name"])
+        if not c:
+            unmatched.append(e["name"])
+            continue
+        sheet = c.get("sheet") or {}
+        vis = dict(sheet.get("visual") or {})
+        vis["reference"] = {k: v for k, v in e.items() if k != "name"} | {"source": source, "imported_at": now_iso()}
+        sheet["visual"] = vis
+        conn.execute("UPDATE characters SET sheet_json = ? WHERE id = ?", (json.dumps(sheet, ensure_ascii=False), c["id"]))
+        done.append(c["name"])
+    conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, json.dumps({"sha256": digest, "source": source, **guide})))
+    if done:
+        conn.execute("INSERT INTO events (campaign_id, type, summary, visibility, created_at) VALUES (?,?,?,?,?)",
+                     (cid, "visual_reference", f"Visual bible loaded for {len(done)} characters ({source})", "player", now_iso()))
+    return {"updated": done, "unmatched": unmatched, "source": source}
+
+
+def bible_guide(conn: sqlite3.Connection, cid: int) -> dict:
+    r = one(conn, "SELECT value FROM meta WHERE key = ?", (f"visual_bible:{cid}",))
+    return json.loads(r["value"]) if r else {}

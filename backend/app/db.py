@@ -284,6 +284,19 @@ CREATE TABLE IF NOT EXISTS art_jobs (       -- campaign artwork rendered by the 
   started_at TEXT,
   finished_at TEXT
 );
+CREATE TABLE IF NOT EXISTS corrections (    -- owner-approved corrections of canonical state, with evidence (reconcile.py)
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  subject TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  evidence_json TEXT NOT NULL DEFAULT '[]',
+  ops_json TEXT NOT NULL DEFAULT '[]',
+  results_json TEXT NOT NULL DEFAULT '[]',
+  ledger_edits_json TEXT NOT NULL DEFAULT '[]',
+  decided_by TEXT NOT NULL,
+  save_point_id INTEGER,
+  created_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_art_subject ON art_jobs(campaign_id, kind, subject_id);
 CREATE TABLE IF NOT EXISTS art_subjects (   -- the player's appearance notes per subject (art only; not campaign canon)
   campaign_id INTEGER NOT NULL REFERENCES campaigns(id),

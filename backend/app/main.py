@@ -163,6 +163,13 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         refresh_mechanical_status(c)
         if (n := recover_interrupted_turns(c)):
             print(f"[startup] marked {n} interrupted turn(s) as failed")
+        for camp in rows(c, "SELECT id FROM campaigns WHERE is_demo = 0"):
+            try:
+                vb = ledger_sync.load_visual_bible(c, camp["id"])
+                if vb.get("updated"):
+                    print(f"[startup] visual bible loaded for {len(vb['updated'])} characters ({vb['source']})")
+            except Exception as exc:  # never block startup on art metadata
+                print(f"[startup] visual bible not loaded: {exc}")
         secure_dir(settings.codex_jobs_dir)
         prune_jobs(settings)  # temporary GM job folders (full prompts) never outlive a run unless capture is on
         from .importer.organization import backfill
@@ -379,6 +386,13 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
             sp = snapshots.create_save_point(c, cid, "Before visual reference import", kind="manual")
             result = apply_reference(c, cid, body.markdown, body.source)
         return {**result, "save_point_id": sp}
+
+    @app.get("/api/campaigns/{cid}/corrections")
+    def campaign_corrections(cid: int, c=Depends(db)):
+        """Owner-approved record corrections, with their evidence (player-visible: they change visible state)."""
+        from .reconcile import corrections
+        campaign_or_404(c, cid)
+        return corrections(c, cid)
 
     @app.get("/api/gemini/quota")
     def gemini_quota():

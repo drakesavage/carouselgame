@@ -561,6 +561,10 @@ def import_ledger(conn: sqlite3.Connection, root: Path, *, name_suffix: str = ""
         state_docs = {rel: src.yaml(rel) for rel in src.glob("state/*.yaml")}
         latest_md = src.text("checkpoints/latest.md") if src.exists("checkpoints/latest.md") else None
         rep.notes.extend(seed_play_state(conn, cid, state_docs, latest_md))
+        from .visual_reference import sync_bible
+        vb = sync_bible(conn, cid, src.root, rep.source.get("git_head"))
+        if vb.get("updated"):
+            rep.notes.append(f"Visual bible loaded for {len(vb['updated'])} characters")
         create_save_point(conn, cid, "Imported from campaign ledger", kind="import")
     changed = src.verify_unchanged()
     rep.source["files_read"] = len(src.hashes)

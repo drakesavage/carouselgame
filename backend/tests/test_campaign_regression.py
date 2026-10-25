@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+import yaml
 
 from app.db import one, rows, transaction
 from app.gm.integrity import check
@@ -248,3 +249,57 @@ def test_every_party_dossier_builds_without_gm_material(client, conn, denton):
         # no long run of GM-only text appears in any dossier
         sample = [s for s in re.split(r"(?<=[.!?])\s+", secrets_text) if len(s) > 60][:400]
         assert not any(s in body for s in sample), ch["name"]
+
+
+def test_gold_stabber_correction_is_evidenced_reversible_and_reaches_the_ledger(conn, denton):
+    from app.ledger import sync
+    from app.reconcile import STABBER_NOTE_NEW, corrections, gold_stabber_correction
+    root = sync.link(conn, denton)["root"]
+    res = gold_stabber_correction(conn, denton, root, decided_by="owner (test)")
+    gold = one(conn, "SELECT quantity FROM items WHERE campaign_id = ? AND owner_character_id IS NULL AND name = 'Gold'", (denton,))
+    assert gold["quantity"] == 4016
+    q = one(conn, "SELECT progress, details_json FROM quests WHERE campaign_id = ? AND title = 'Reserved: Personal Stabber'", (denton,))
+    assert q["details"]["payment"] == "paid" and q["details"]["owned"] is False and "Secondhand Saviors" in q["progress"]
+    assert not one(conn, "SELECT id FROM items WHERE campaign_id = ? AND lower(name) LIKE '%stabber%'", (denton,))  # not owned
+    cor = corrections(conn, denton)[0]
+    assert len(cor["evidence"]) == 4 and cor["decided_by"] == "owner (test)" and cor["save_point_id"] == res["save_point_id"]
+    ctx = build_context(conn, denton, "How much gold do we have?")["text"]
+    assert "Gold ×4016" in ctx and "Paid 30 Gold" in ctx
+    with pytest.raises(ValueError, match="not the 4,046"):  # can't be applied twice
+        gold_stabber_correction(conn, denton, root, decided_by="owner (test)")
+    pv = sync.preview(conn, denton, fetch=False)
+    mine = [c for c in pv["changes"] if c["file"] == "state/shared_inventory.yaml"]
+    assert mine and all(c["status"] == "clean" for c in pv["changes"]) and pv["blockers"] == []
+    out = sync.apply(conn, denton, fingerprint=pv["fingerprint"], selected=None, message="Correct Gold and Stabber",
+                     author_name="Test", author_email="test@example.com")
+    ledger = yaml.safe_load((root / "state/shared_inventory.yaml").read_text(encoding="utf-8"))
+    assert next(i for i in ledger["items"] if i["id"] == "gold")["quantity"] == 4016 and STABBER_NOTE_NEW in ledger["notes"]
+    diff = subprocess.run(["git", "-C", str(root), "show", "--format=", out["commit"], "--", "state/shared_inventory.yaml"],
+                          capture_output=True, text=True, encoding="utf-8").stdout
+    changed = [l for l in diff.splitlines() if l[:1] in "+-" and not l.startswith(("+++", "---"))]
+    assert len(changed) <= 8, changed  # quantity line and the one note, nothing else reformatted
+
+
+def test_clock_and_location_corrections_reach_hud_context_and_ledger(conn, denton):
+    from app.ledger import sync
+    from app.memory.views import campaign_summary
+    from app.reconcile import clock_correction, location_correction
+    clock_correction(conn, denton, decided_by="owner (test)")
+    location_correction(conn, denton, decided_by="owner (test)")
+    camp = campaign_summary(conn, denton)
+    assert camp["game_time_minutes"] == 1519 and camp["floor_clock"]["remaining_minutes"] == 12881
+    assert camp["current_location"].startswith("Gilded Feathers") and not camp["safe_room"]
+    ctx = build_context(conn, denton, "Where are we?")["text"]
+    assert "[NOT a saferoom]" in ctx and "but the current scene is at" not in ctx and "FLOOR COLLAPSE in 214h41m" in ctx
+    groups = {g["key"]: g["location"] for g in camp["groups"]}
+    assert groups["saferoom"].startswith("The Molting Pigeon") and groups["prison-recon"] is None  # unknown stays unknown
+    with pytest.raises(ValueError):
+        clock_correction(conn, denton, decided_by="owner (test)")
+    with pytest.raises(ValueError):
+        location_correction(conn, denton, decided_by="owner (test)")
+    pv = sync.preview(conn, denton, fetch=False)
+    assert pv["blockers"] == [] and all(c["status"] == "clean" for c in pv["changes"])
+    sync.apply(conn, denton, fingerprint=pv["fingerprint"], selected=None, message="Clock and location", author_name="Test", author_email="t@example.com")
+    root = sync.link(conn, denton)["root"]
+    cy = yaml.safe_load((root / "state/campaign.yaml").read_text(encoding="utf-8"))
+    assert cy["floor_clock"]["remaining_minutes"] == 12881 and cy["safe_room_status"] is False and cy["current_location"].startswith("Gilded Feathers")
