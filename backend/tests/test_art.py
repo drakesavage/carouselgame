@@ -242,3 +242,12 @@ def test_portrait_crop_is_saved_shown_on_cards_and_reset_by_a_new_portrait(clien
     assert next(p for p in client.get(f"/api/campaigns/{demo_id}").json()["party"] if p["id"] == jid)["portrait_crop"] is None
     client.put(f"/api/campaigns/{demo_id}/characters/{jid}/portrait-crop", json=crop)
     assert client.put(f"/api/campaigns/{demo_id}/characters/{jid}/portrait-crop", json={}).json()["portrait_crop"] is None
+
+
+def test_bible_rules_are_trimmed_to_the_subject():
+    guide = {"global_rules": ["Earth survivors, not a guild.",
+                              "Casting notes below are choices. For Cliff, **his LoRA outranks styling**. Do not replace his likeness."],
+             "negative_guard": "No medieval costume, humanoid Ghost, size inflation of Scout, or extra limbs. No future gear."}
+    g = art.guide_for_subject(guide, ["Cliff", "Scout"])
+    assert g["global_rules"] == ["Earth survivors, not a guild."]
+    assert g["negative_guard"] == "No medieval costume, humanoid Ghost or extra limbs. No future gear."

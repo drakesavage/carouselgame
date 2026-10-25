@@ -58,7 +58,7 @@ class ArtIn(BaseModel):
     engine: str | None = None  # codex | comfy (character portraits; others always comfy)
     subject_id: int | None = None
     subject_name: str | None = None
-    prompt: str | None = Field(default=None, max_length=1200)
+    prompt: str | None = Field(default=None, max_length=6000)  # Codex portrait briefs carry the visual bible's rules
     extra: str | None = Field(default=None, max_length=500)
 
 

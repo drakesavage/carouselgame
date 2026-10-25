@@ -89,7 +89,13 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     let msg = res.statusText;
-    try { const j = await res.json(); msg = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail ?? j); } catch { /* not json */ }
+    try {
+      const j = await res.json();
+      msg = typeof j.detail === "string" ? j.detail
+        // validation errors: "prompt: String should have at most 4000 characters" rather than the raw list
+        : Array.isArray(j.detail) ? j.detail.map((e: { loc?: unknown[]; msg?: string }) => `${String(e.loc?.[e.loc.length - 1] ?? "request")}: ${e.msg}`).join("; ")
+        : JSON.stringify(j.detail ?? j);
+    } catch { /* not json */ }
     throw new ApiError(res.status, msg);
   }
   return res.json() as Promise<T>;

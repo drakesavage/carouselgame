@@ -287,6 +287,30 @@ def engine_for(settings: Settings, kind: str, requested: str | None) -> str:
     return "codex" if resolve_codex_bin() else "comfy"
 
 
+def guide_for_subject(guide: dict, others: list[str]) -> dict:
+    """The visual bible's campaign-wide rules, minus what is about someone else: sentences naming another character,
+    instructions about reference photos or LoRAs (the brief has its own photo line), sentences about one person (he/his/
+    she/her), and 'Never' items naming others."""
+    def other(text: str) -> bool:
+        return any(re.search(rf"\b{re.escape(n)}\b", text) for n in others if len(n) > 2)
+
+    def keep(sentence: str) -> bool:
+        return not other(sentence) and not re.search(r"\b(LoRA|reference photo|below|he|his|him|she|her)\b",
+                                                     sentence, re.I)
+
+    rules = []
+    for rule in guide.get("global_rules") or []:
+        text = " ".join(s for s in re.split(r"(?<=[.!?])\s+", rule.replace("**", "")) if s and keep(s))
+        if text:
+            rules.append(text)
+    neg = []
+    for sentence in re.split(r"(?<=[.!?])\s+", guide.get("negative_guard") or ""):
+        items = [i for i in re.split(r",\s+(?:or\s+)?|\s+or\s+", sentence.rstrip(".")) if i and not other(i)]
+        if items:
+            neg.append((", ".join(items[:-1]) + " or " + items[-1] if len(items) > 2 else " or ".join(items)) + ".")
+    return {**guide, "global_rules": rules, "negative_guard": " ".join(neg)}
+
+
 def codex_prompt(conn: sqlite3.Connection, settings: Settings, cid: int, char_id: int, extra: str | None = None) -> str:
     from .codex_image import portrait_prompt
     c = one(conn, "SELECT * FROM characters WHERE campaign_id = ? AND id = ?", (cid, char_id))
@@ -298,6 +322,8 @@ def codex_prompt(conn: sqlite3.Connection, settings: Settings, cid: int, char_id
     look = "; ".join(x for x in (appearance(conn, cid, "character", str(char_id)), _clean(extra)) if x)
     from ..importer.visual_reference import bible_guide
     guide = bible_guide(conn, cid) if ref.get("source", "").startswith("state/characters/VISUAL_BIBLE") else {}
+    others = [o["name"].split()[0] for o in rows(conn, "SELECT name FROM characters WHERE campaign_id = ? AND id != ?", (cid, char_id))]
+    guide = guide_for_subject(guide, others)
     return portrait_prompt(c["name"], ref, brief, look, animal=style != KIND_STYLE["character"], wide=w > h,
                            has_refs=bool(list_refs(settings, cid, char_id)), guide=guide)
 
