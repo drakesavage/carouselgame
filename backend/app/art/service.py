@@ -31,13 +31,16 @@ STYLE = ("(gritty painted fantasy illustration:1.3), (oil painting:1.2), painter
 KIND_STYLE = {
     "character": "waist-up character portrait, facing the viewer, detailed expressive face, plain dark background",
     "mob": "monster illustration, full body, menacing pose, dungeon background",
-    "item": "single item illustration, centered object on a worn dark wooden table, no people",
+    "item": "single isolated object, centered, alone on a bare worn dark wooden surface, simple uncluttered background, nothing else in "
+            "the frame, no people",
     "scene": "environment illustration, wide establishing shot, no people, no characters",
 }
 NEGATIVE = ("(photo, photograph, photorealistic:1.3), realistic skin texture, studio portrait, 3d render, anime, manga, cartoon, chibi, blurry, lowres, jpeg artifacts, watermark, "
             "(text, letters, words, writing:1.2), name tag, signature, logo, frame, border, extra limbs, extra fingers, deformed hands, disfigured face, cropped head, "
             "nsfw, nude")
-KIND_NEGATIVE = {"scene": "people, person, man, woman, figures, crowd, portrait", "item": "people, person, hands, face"}
+KIND_NEGATIVE = {"scene": "people, person, man, woman, figures, crowd, portrait",
+                 "item": "people, person, hands, face, (clutter, multiple objects, still life:1.2), candles, bottles, coins, books, scattered props"}
+FIRE_WORDS = re.compile(r"\b(flames?|flaming|burning|ablaze|on fire|lit|smok\w*|embers?|sparks?)\b", re.I)
 MAX_PROMPT = 1700  # SDXL reads long prompts in 77-token chunks; the style tail must survive
 
 
@@ -187,6 +190,9 @@ def set_appearance(conn: sqlite3.Connection, cid: int, kind: str, key: str, text
 
 
 def subject_negative(conn: sqlite3.Connection, cid: int, kind: str, subject_id: int | None) -> str:
+    if kind == "item" and subject_id:
+        # only the look counts: names like "Heavy Fire Blanket" are what made SDXL set it alight
+        return "" if FIRE_WORDS.search(appearance(conn, cid, "item", str(subject_id))) else "fire, flames, burning, smoke"
     if kind != "character" or not subject_id:
         return ""
     c = one(conn, "SELECT * FROM characters WHERE campaign_id = ? AND id = ?", (cid, subject_id))
@@ -211,9 +217,9 @@ def subject_text(conn: sqlite3.Connection, cid: int, kind: str, subject_id: int 
             one(conn, "SELECT * FROM items WHERE campaign_id = ? AND lower(name) = lower(?)", (cid, subject_name or ""))
         if not i:
             raise ValueError("unknown item")
-        props = i.get("properties") or {}
-        bits = [i["name"], _clean(i.get("description"))] + [str(e) for e in _list(props.get("effects"))[:2]]
-        return i["name"], "; ".join(b for b in bits if b)
+        # Name and look only: notes, effects and status lines are inventory bookkeeping (counts, provenance, rules) that
+        # an image model draws literally or not at all. Looks come from the Appearance notes (draft_item_looks).
+        return i["name"], "; ".join(b for b in (i["name"], appearance(conn, cid, "item", str(i["id"]))) if b)
     if kind == "scene":
         s = one(conn, "SELECT * FROM scenes WHERE campaign_id = ? AND id = ?", (cid, subject_id)) if subject_id else \
             one(conn, "SELECT * FROM scenes WHERE campaign_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1", (cid,))
@@ -251,6 +257,73 @@ def subject_layout(conn: sqlite3.Connection, cid: int, kind: str, subject_id: in
             if ANIMALS.search(what):
                 return ANIMAL_STYLE, (896, 1152)
     return KIND_STYLE[kind], SIZES[kind]
+
+
+ITEM_LOOK_SYSTEM = """You write short visual descriptions for item illustrations in a Dungeon Crawler Carl tabletop campaign. The
+crawlers are contemporary Earth survivors in a magical dungeon: much of their gear is ordinary modern equipment, scavenged junk,
+or something they built from it, and some items are System-made or enchanted. For each item, write one or two plain sentences
+(under 40 words) saying what it physically looks like: shape, material, colours, size, condition, and container for a bundle or
+cache. Real-world objects look like their real-world counterparts (a fire blanket is a folded grey fibreglass sheet in a red
+pouch with pull tabs). Use any condition the record gives (scorched, repaired, makeshift). Do not invent glows, magical effects,
+text, labels or logos unless the record says so. No numbers of uses, rules, owners, backstory or people. Return every item id
+you were given."""
+
+
+def _item_record(i: dict) -> dict:
+    props = {k: v for k, v in (i.get("properties") or {}).items()
+             if not re.search(r"gm|secret|owner|mechanical|reference|quantity|count|stock", k, re.I)}
+    rec = {"id": i["id"], "name": i["name"], "rarity": i.get("rarity"), "slot": i.get("slot"), "note": _clean(i.get("description")), **props}
+    text = json.dumps({k: v for k, v in rec.items() if v not in (None, "", [], {})}, ensure_ascii=False, default=str)
+    return json.loads(text) if len(text) <= 900 else {"id": i["id"], "name": i["name"], "summary": text[:900]}
+
+
+def draft_item_looks(conn: sqlite3.Connection, settings: Settings, cid: int, item_ids: list[int] | None = None,
+                     overwrite: bool = False, batch: int = 20) -> dict:
+    """Ask Gemini Flash Lite for a physical look per item, saved as the item's Appearance notes (art only, not canon; the
+    owner reviews and edits them). Existing notes are kept unless overwrite. Batches keep the quota use to a few calls."""
+    from ..gm.providers import GeminiProvider, ProviderError
+    from ..gm.router import GeminiQuota
+    from ..importer.visual_reference import bible_guide
+    sql, args = "SELECT * FROM items WHERE campaign_id = ? AND (quantity IS NULL OR quantity > 0)", [cid]
+    if item_ids:
+        sql += f" AND id IN ({','.join('?' * len(item_ids))})"
+        args += list(item_ids)
+    items = [i for i in rows(conn, sql + " ORDER BY id", args)
+             if i["name"].lower() != "gold" and (overwrite or not appearance(conn, cid, "item", str(i["id"])))]
+    if not items:
+        return {"drafted": [], "skipped": 0, "remaining": 0}
+    chunks = [items[k:k + batch] for k in range(0, len(items), batch)]
+    model = "gemini-3.5-flash-lite"
+    if not settings.gemini_api_key() or GeminiQuota(settings).remaining(model) < len(chunks):
+        raise ValueError(f"Needs {len(chunks)} Gemini Flash Lite request(s); no key or not enough quota left today")
+    canon = bible_guide(conn, cid).get("shared_hardware")
+    system = ITEM_LOOK_SYSTEM + (f"\nEstablished look of a shared item: {json.dumps(canon, ensure_ascii=False)}" if canon else "")
+    schema = {"type": "object", "additionalProperties": False, "required": ["items"], "properties": {"items": {"type": "array", "items": {
+        "type": "object", "additionalProperties": False, "required": ["id", "look"],
+        "properties": {"id": {"type": "integer"}, "look": {"type": "string"}}}}}}
+    drafted, skipped = [], 0
+    for chunk in chunks:
+        record = json.dumps([_item_record(i) for i in chunk], ensure_ascii=False)
+        try:
+            raw, _ = GeminiProvider(settings, model=model, effort="low")._generate(system, record, schema, "item-looks")
+        except ProviderError as exc:
+            if drafted:
+                break  # keep what was drafted; report the rest as remaining
+            raise ValueError(str(exc)) from None
+        names = {i["id"]: i["name"] for i in chunk}
+        for d in json.loads(raw).get("items") or []:
+            look = _clean(d.get("look"))[:600]
+            if d.get("id") not in names or not look or leaks_secret(conn, cid, look):
+                skipped += 1
+                continue
+            set_appearance(conn, cid, "item", str(d["id"]), look)
+            drafted.append({"id": d["id"], "name": names[d["id"]], "appearance": look})
+    return {"drafted": drafted, "skipped": skipped, "remaining": len(items) - len(drafted) - skipped}
+
+
+def appearances(conn: sqlite3.Connection, cid: int, kind: str) -> dict[str, str]:
+    return {r["subject_key"]: r["appearance"] for r in rows(conn, "SELECT subject_key, appearance FROM art_subjects WHERE campaign_id = ? AND kind = ? "
+                                                                   "AND appearance != ''", (cid, kind))}
 
 
 def build_prompt(kind: str, description: str, extra: str | None = None, style: str | None = None) -> str:

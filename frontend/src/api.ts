@@ -152,6 +152,9 @@ export const api = {
     req<{ updated: string[]; unmatched: string[]; save_point_id: number }>(`api/campaigns/${cid}/visual-reference`, { method: "POST", body: JSON.stringify({ markdown, source }) }),
   artDraftAppearance: (cid: number, subjectId: number) =>
     req<{ appearance: string }>(`api/campaigns/${cid}/art/draft-appearance`, { method: "POST", body: JSON.stringify({ kind: "character", subject_id: subjectId }) }),
+  artDraftItemLooks: (cid: number, body: { item_ids?: number[]; overwrite?: boolean } = {}) =>
+    post<{ drafted: { id: number; name: string; appearance: string }[]; skipped: number; remaining: number }>(`api/campaigns/${cid}/art/draft-item-looks`, body),
+  artAppearances: (cid: number, kind: ArtKind) => req<Record<string, string>>(`api/campaigns/${cid}/art/appearances?kind=${kind}`),
   artList: (cid: number, p: { kind?: ArtKind; subject_id?: number | null; subject_name?: string }) => {
     const q = new URLSearchParams(Object.entries(p).filter(([, v]) => v != null && v !== "").map(([k, v]) => [k, String(v)]));
     return req<ArtJob[]>(`api/campaigns/${cid}/art?${q}`);

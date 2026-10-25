@@ -118,10 +118,16 @@ function ArtDialog({ cid, kind, subjectId, subjectName, onClose }:
                 <div className="h2" style={{ marginTop: 10 }}>Appearance</div>
                 <textarea className="input" rows={3} value={look} onChange={(e) => setLook(e.target.value)} onBlur={saveLook}
                   placeholder={kind === "character" ? "e.g. woman in her forties, short grey-streaked hair, broad shoulders, tired eyes" : "what it looks like"} />
-                {kind === "character" && subjectId != null && (
+                {(kind === "character" || kind === "item") && subjectId != null && (
                   <button className="btn small ghost" style={{ justifySelf: "start", marginTop: 4 }} disabled={drafting} onClick={async () => {
                     setDrafting(true); setErr(null);
-                    try { setLook((await api.artDraftAppearance(cid, subjectId)).appearance); } catch (e) { setErr(String(e)); } finally { setDrafting(false); }
+                    try {
+                      if (kind === "character") setLook((await api.artDraftAppearance(cid, subjectId)).appearance);
+                      else {  // items: the draft is saved like the batch on the Inventory page, so refresh the prompt too
+                        const d = (await api.artDraftItemLooks(cid, { item_ids: [subjectId], overwrite: true })).drafted[0];
+                        if (d) { setLook(d.appearance); setSavedLook(d.appearance); setPrompt((await api.artPreview(cid, kind, subjectId, subjectName, engine)).prompt); }
+                      }
+                    } catch (e) { setErr(String(e)); } finally { setDrafting(false); }
                   }}>{drafting ? <Loader2 size={11} className="spin" /> : <Sparkles size={11} />} Draft with Gemini</button>)}
                 <div className="sub">{open.length ? <>The ledger leaves these open: {open.join(", ").toLowerCase()}. </> : null}
                   Saved for every future picture of {subjectName}, so they stay consistent. Art only; not campaign canon.</div>

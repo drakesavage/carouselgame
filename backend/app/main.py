@@ -69,6 +69,11 @@ class AppearanceIn(BaseModel):
     appearance: str = Field(default="", max_length=600)
 
 
+class ItemLooksIn(BaseModel):
+    item_ids: list[int] | None = None
+    overwrite: bool = False
+
+
 class VisualReferenceIn(BaseModel):
     markdown: str = Field(min_length=10, max_length=200_000)
     source: str = Field(default="visual reference", max_length=120)
@@ -424,6 +429,20 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         except ProviderError as exc:
             raise HTTPException(502, str(exc))
         return {"appearance": json.loads(raw)["appearance"].strip()}
+
+    @app.post("/api/campaigns/{cid}/art/draft-item-looks")
+    def art_draft_item_looks(cid: int, body: ItemLooksIn, c=Depends(db)):
+        """Gemini drafts a physical look for items without one; saved as their Appearance notes (art only) for review."""
+        campaign_or_404(c, cid)
+        try:
+            return art.draft_item_looks(c, settings, cid, body.item_ids, body.overwrite)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+
+    @app.get("/api/campaigns/{cid}/art/appearances")
+    def art_appearances(cid: int, kind: str, c=Depends(db)):
+        campaign_or_404(c, cid)
+        return art.appearances(c, cid, kind)
 
     @app.get("/api/art/status")
     def art_status():

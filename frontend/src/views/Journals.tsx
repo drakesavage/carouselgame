@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Award, Backpack, Clock3, Coins, Flag, Footprints, Heart, Scroll, Search, Sparkles, Swords, Zap } from "lucide-react";
+import { Award, Backpack, Clock3, Coins, Flag, Footprints, Heart, Loader2, Scroll, Search, Sparkles, Swords, Zap } from "lucide-react";
 import { ArtButton } from "./Art";
 import { api, CharacterCard, EventRow, fmtMinutes, Item, Quest } from "../api";
 import { Bar, Chip, Empty, humanize, Portrait } from "../ui";
@@ -51,6 +51,18 @@ export function InventoryView({ cid, version }: { cid: number; version: number }
   const [artTick, setArtTick] = useState(0);
   const { data: itemArt } = useLoad(() => api.artList(cid, { kind: "item" }), [cid, version, artTick]);
   const artFor = (id: number) => itemArt?.find((j) => j.subject_id === id && j.is_current && j.url)?.url ?? undefined;
+  const { data: looks } = useLoad(() => api.artAppearances(cid, "item"), [cid, version, artTick]);
+  const [drafting, setDrafting] = useState(false);
+  const [draftMsg, setDraftMsg] = useState<string | null>(null);
+  const draftLooks = async () => {
+    setDrafting(true); setDraftMsg(null);
+    try {
+      const r = await api.artDraftItemLooks(cid);
+      setDraftMsg(r.drafted.length ? `Drafted ${r.drafted.length} looks${r.remaining ? `; ${r.remaining} left (run again)` : ""}. Review them on the cards; edit any in its Paint dialog.`
+        : "Every item already has a look.");
+      setArtTick((t) => t + 1);
+    } catch (e) { setDraftMsg(String(e)); } finally { setDrafting(false); }
+  };
   const [q, setQ] = useState("");
   const match = (i: Item) => !q || `${i.name} ${i.owner_name ?? ""} ${i.description ?? ""}`.toLowerCase().includes(q.toLowerCase());
   const byOwner = useMemo(() => {
@@ -83,6 +95,7 @@ export function InventoryView({ cid, version }: { cid: number; version: number }
           </div>
           {effects.length > 0 && <div>{effects.join("; ")}</div>}
           {note && <div className="sub">{note}</div>}
+          {looks?.[String(i.id)] && <div className="sub" title="Appearance notes for pictures (art only, not canon)"><Sparkles size={10} /> <i>{looks[String(i.id)]}</i></div>}
           {prov && <div className="sub">From: {prov}</div>}
           <div className="sub mono" style={{ fontSize: 10.5 }}>#{i.id}</div>
         </div>
@@ -91,7 +104,11 @@ export function InventoryView({ cid, version }: { cid: number; version: number }
   );
   return (
     <div className="view-inner">
-      <div className="row"><div className="h1 grow">Inventory</div>{gold && <Chip tone="amber"><Coins size={13} /> {gold.quantity ?? "?"} Gold</Chip>}</div>
+      <div className="row"><div className="h1 grow">Inventory</div>
+        <button className="btn small ghost" disabled={drafting} onClick={draftLooks} title="Gemini Flash Lite writes a physical description for every item without one, for item pictures (art only)">
+          {drafting ? <Loader2 size={12} className="spin" /> : <Sparkles size={12} />} Draft item looks</button>
+        {gold && <Chip tone="amber"><Coins size={13} /> {gold.quantity ?? "?"} Gold</Chip>}</div>
+      {draftMsg && <div className="sub" style={{ marginTop: 6 }}>{draftMsg}</div>}
       <div className="row" style={{ margin: "12px 0" }}><Search size={16} color="var(--muted)" /><input className="input" placeholder="Filter items or owners…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
       <div className="h2"><Backpack size={14} /> Shared stash</div>
       {shared.length ? table(shared) : <Empty>Nothing in the shared stash.</Empty>}

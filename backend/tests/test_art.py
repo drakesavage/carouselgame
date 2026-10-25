@@ -5,7 +5,7 @@ import uuid
 
 from app.art import service as art
 from app.art.service import ArtWorker
-from app.db import connect, one, rows
+from app.db import connect, one, rows, transaction
 from app.gm.orchestrator import WRITE_LOCK, TurnService
 from app.gm.providers import MockProvider, ProviderResponse, ToolCall
 
@@ -251,3 +251,36 @@ def test_bible_rules_are_trimmed_to_the_subject():
     g = art.guide_for_subject(guide, ["Cliff", "Scout"])
     assert g["global_rules"] == ["Earth survivors, not a guild."]
     assert g["negative_guard"] == "No medieval costume, humanoid Ghost or extra limbs. No future gear."
+
+
+def test_item_looks_are_drafted_in_batches_and_replace_bookkeeping_in_prompts(conn, settings, demo_id, monkeypatch):
+    import json as _json
+    from app.gm import providers, router
+    calls = []
+
+    def fake_generate(self, system, prompt, schema, label):
+        items = _json.loads(prompt)
+        calls.append(len(items))
+        return _json.dumps({"items": [{"id": i["id"], "look": f"a plain {i['name'].lower()}"} for i in items]}), {}
+    monkeypatch.setattr(providers.GeminiProvider, "_generate", fake_generate)
+    monkeypatch.setattr(type(settings), "gemini_api_key", lambda self: "test-key")
+    monkeypatch.setattr(router.GeminiQuota, "remaining", lambda self, model: 50)
+    with transaction(conn):
+        iid = conn.execute("INSERT INTO items (campaign_id, name, quantity, description, properties_json) VALUES (?,?,?,?,?)",
+                           (demo_id, "Heavy Fire Blanket", 1, "Three previously held; see state/x.yaml.", '{"status": "scorched"}')).lastrowid
+    n = one(conn, "SELECT count(*) AS n FROM items WHERE campaign_id = ? AND (quantity IS NULL OR quantity > 0) AND lower(name) != 'gold'", (demo_id,))["n"]
+    out = art.draft_item_looks(conn, settings, demo_id, batch=3)
+    assert len(out["drafted"]) == n and calls and max(calls) <= 3 and len(calls) == -(-n // 3)
+    name, desc = art.subject_text(conn, demo_id, "item", iid, None)
+    assert desc == "Heavy Fire Blanket; a plain heavy fire blanket" and ".yaml" not in desc
+    assert "fire, flames" in art.subject_negative(conn, demo_id, "item", iid)
+    again = art.draft_item_looks(conn, settings, demo_id)  # existing looks are kept
+    assert again["drafted"] == [] and len(calls) == -(-n // 3)
+
+
+def test_draft_item_looks_endpoint_takes_a_json_body(client, demo_id, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(art, "draft_item_looks", lambda conn, settings, cid, ids, overwrite: seen.update(ids=ids, overwrite=overwrite) or
+                        {"drafted": [], "skipped": 0, "remaining": 0})
+    r = client.post(f"/api/campaigns/{demo_id}/art/draft-item-looks", json={"item_ids": [3], "overwrite": True})
+    assert r.status_code == 200 and seen == {"ids": [3], "overwrite": True}
