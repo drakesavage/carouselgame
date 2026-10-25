@@ -4,7 +4,7 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 
 | Milestone | Priority | Status | Dependencies | Commit | Tests | Screenshot review | Open blockers |
 |---|---|---|---|---|---|---|---|
-| M0 Safe upgrade workflow | P0 | In review | none | (pending) | 155 backend; typecheck/build; isolation probe PASS | Settings passcode masked | ledger behind by 2 (see below) |
+| M0 Safe upgrade workflow | P0 | Done | none | 385d7dd | 155 backend; typecheck/build; isolation probe PASS | Settings passcode masked | ledger behind by 2 (see below) |
 | M1 Canonical-state reconciliation | P0 | Ready | M0 | | | | needs owner decisions on conflicts |
 | M2 Mechanics reliability & GM gates | P0 | Backlog | M1 | | | | |
 | M3 Main story HUD | P1 | Backlog | M1 underway | | | | |
