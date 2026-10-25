@@ -600,10 +600,10 @@ def report_markdown(report: dict) -> str:
 
 
 def refresh_mechanical_status(conn: sqlite3.Connection) -> None:
-    """Re-label imported constitution sections as the app gains mechanics (called at startup)."""
-    for r in conn.execute("SELECT id, section FROM house_rules WHERE source = 'CORE_MECHANICS.md'").fetchall():
-        num = r["section"] or ""
-        top = num.split(".")[0]
-        status = ("implemented" if num in IMPLEMENTED_SECTIONS else "partial" if num in PARTIAL_SECTIONS
-                  else "narrative_only" if (top in NARRATIVE_SECTIONS_PREFIX or num.startswith(("8.", "15"))) else "pending")
-        conn.execute("UPDATE house_rules SET mechanical_status = ? WHERE id = ?", (status, r["id"]))
+    """Re-label imported house rules from the coverage matrix (rules/coverage.py) as the app gains mechanics (startup)."""
+    from ..rules.coverage import MATRIX, classify, key_for, mechanical_label
+    for r in conn.execute("SELECT id, section, title FROM house_rules").fetchall():
+        rule = {"section": r["section"], "title": r["title"]}
+        if key_for(rule) not in MATRIX:
+            continue  # a rule the matrix does not know (another campaign's): keep its import label
+        conn.execute("UPDATE house_rules SET mechanical_status = ? WHERE id = ?", (mechanical_label(classify(rule)), r["id"]))

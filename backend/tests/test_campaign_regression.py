@@ -424,3 +424,27 @@ def test_immediate_objective_is_its_linked_quests_and_drops_finished_ones(conn, 
     assert now[-1] == "Claim the Personal Stabber" and not now[0].startswith("Use current daylight")
     with pytest.raises(ValueError):
         objective_correction(conn, denton, decided_by="owner (test)")
+
+
+def test_every_imported_house_rule_is_classified_with_existing_tests(conn, denton):
+    from app.rules.coverage import MATRIX, STATUSES, key_for
+    rules = rows(conn, "SELECT section, title FROM house_rules WHERE campaign_id = ?", (denton,))
+    assert len(rules) == 104
+    assert [key_for(r) for r in rules if key_for(r) not in MATRIX] == []
+    assert len({key_for(r) for r in rules}) == len(rules)  # no two rules share an entry
+    defined = set(re.findall(r"^def (test_\w+)", "\n".join(p.read_text(encoding="utf-8") for p in Path(__file__).parent.glob("test_*.py")), re.M))
+    for k, e in MATRIX.items():
+        assert e["status"] in STATUSES, k
+        assert not set(e["tests"]) - defined, (k, set(e["tests"]) - defined)
+        assert e["status"] != "tested" or e["tests"], f"{k} is 'tested' but cites no test"
+        assert e["status"] not in ("missing", "partial", "untested") or (e["gap"] and e["priority"]), f"{k} needs a gap and a priority"
+
+
+def test_rule_labels_come_from_the_matrix(conn, denton):
+    from app.importer.ledger import refresh_mechanical_status
+    from app.rules.coverage import classify
+    refresh_mechanical_status(conn)
+    label = {r["title"]: r["mechanical_status"] for r in rows(conn, "SELECT title, mechanical_status FROM house_rules WHERE campaign_id = ?", (denton,))}
+    assert label["Mending"] == "implemented" and label["Rest"] == "implemented"      # import labelled both pending
+    assert label["Party Skill Checks"] == "pending" and label["Call a Play"] == "pending"
+    assert classify({"section": "7.9", "title": "Crazy Dungeon critical flourish"})["status"] == "gm_ruling"

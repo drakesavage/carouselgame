@@ -6,7 +6,7 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 |---|---|---|---|---|---|---|---|
 | M0 Safe upgrade workflow | P0 | Done | none | 385d7dd | 155 backend; typecheck/build; isolation probe PASS | Settings passcode masked | ledger behind by 2 (see below) |
 | M1 Canonical-state reconciliation | P0 | Exit gate met | M0 | (pending) | 166 backend; consistency 21/21 | HUD roster + objectives | 7 uncounted-gear items stay open for owner counts; 44 house rules move to M2/M7 |
-| M2 Mechanics reliability & GM gates | P0 | Backlog | M1 | | | | |
+| M2 Mechanics reliability & GM gates | P0 | In progress | M1 | | 168 backend | n/a | coverage matrix done; P1 order awaiting owner |
 | M3 Main story HUD | P1 | Backlog | M1 underway | | | | |
 | M4 Characters, party, people | P1 | Backlog | M3 | | | | |
 | M5 Inventory, crafting, economy | P1 | Backlog | M3 | | | | |
@@ -160,3 +160,28 @@ by party group ("With Cliff", "Elsewhere: <group> @ <place or position not recor
 **Still open in M1** (visible in Settings): counts for the uncounted gear (Cliff's basic carried gear, Eli's converted
 needle-spear javelins, Nate's personal maintenance tools, recovered electrical cabling, better-quality liquor). The
 Passive-Skills flag and the 44 unimplemented house rules belong to M2 (mechanics) and M7 (rules center).
+
+## M2 progress (2026-10-25)
+
+**Coverage matrix.** `backend/app/rules/coverage.py` classifies every one of the 104 imported house rules (93 from
+CORE_MECHANICS.md, 11 campaign rulings) against today's code and tests; `docs/RULES_COVERAGE.md` is generated from it.
+A regression test fails if a rule has no entry, if an entry cites a test that does not exist, if a "tested" rule cites
+none, or if a gap has no priority. The house-rule labels the GM briefing shows now come from the matrix (they were a
+hand-kept list of section numbers, and stale: Mending and Rest said "pending").
+
+| Status | Rules |
+|---|---|
+| implemented and tested | 38 |
+| implemented, untested | 2 |
+| partly implemented | 12 |
+| GM ruling | 37 |
+| reference only | 7 |
+| missing | 8 |
+
+Of the import report's 44 "awaiting implementation": 14 are implemented and tested, 1 implemented but untested, 10
+partial, 9 GM rulings, 2 reference only, and 8 missing.
+
+**P1 gaps (what the next Floor 3 sessions need)**: crafting (13.1 declare, 13.2 mundane crafting Check, 13.5 materials
+consumed and salvage, 13.6 assistance) for tonight's Gold Siphon; party Skill Checks (7.8) and off-screen group
+resolution (15.2) for the recon team; ammunition spent by attacks (10.8), Call a Play (10.9) and Catcher/class
+Interrupts (10.7) for the prison assault; traps (13.7). P2 and P3 are listed in the matrix.
