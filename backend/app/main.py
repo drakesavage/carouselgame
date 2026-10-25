@@ -55,6 +55,7 @@ class PrefsIn(BaseModel):
 
 class ArtIn(BaseModel):
     kind: str
+    engine: str | None = None  # codex | comfy (character portraits; others always comfy)
     subject_id: int | None = None
     subject_name: str | None = None
     prompt: str | None = Field(default=None, max_length=1200)
@@ -402,7 +403,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         return [art.job_view(j) for j in rows(c, sql + " ORDER BY id DESC LIMIT 200", tuple(args))]
 
     @app.get("/api/campaigns/{cid}/art/preview")
-    def art_preview(cid: int, kind: str, subject_id: int | None = None, subject_name: str | None = None, c=Depends(db)):
+    def art_preview(cid: int, kind: str, subject_id: int | None = None, subject_name: str | None = None, engine: str | None = None, c=Depends(db)):
         campaign_or_404(c, cid)
         try:
             name, desc = art.subject_text(c, cid, kind, subject_id, subject_name)
@@ -414,7 +415,9 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
             ch = one(c, "SELECT * FROM characters WHERE campaign_id = ? AND (id = ? OR lower(name) = lower(?))", (cid, subject_id or -1, subject_name or ""))
             key, unestablished = str(ch["id"]), art.character_brief(c, cid, ch)["unestablished"]
         style, size = art.subject_layout(c, cid, kind, int(key) if kind == "character" and key.isdigit() else None)
-        return {"subject_name": name, "prompt": art.build_prompt(kind, desc, style=style), "negative": art.NEGATIVE, "size": size,
+        eng = art.engine_for(settings, kind, engine)
+        prompt = art.codex_prompt(c, settings, cid, int(key)) if eng == "codex" else art.build_prompt(kind, desc, style=style)
+        return {"subject_name": name, "prompt": prompt, "engine": eng, "negative": art.NEGATIVE, "size": size,
                 "appearance": art.appearance(c, cid, kind, key) if key else "", "unestablished": unestablished}
 
     @app.put("/api/campaigns/{cid}/art/appearance")
@@ -433,7 +436,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         campaign_or_404(c, cid)
         try:
             job = art.create_job(c, settings, cid, body.kind, subject_id=body.subject_id, subject_name=body.subject_name,
-                                 prompt=body.prompt, extra=body.extra)
+                                 prompt=body.prompt, extra=body.extra, engine=body.engine)
         except ValueError as exc:
             raise HTTPException(422, str(exc))
         state.art.poke()
@@ -465,6 +468,47 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
             raise HTTPException(422, f"can't {action} a picture that is {j['status']}")
         state.art.poke()
         return art.job_view(one(c, "SELECT * FROM art_jobs WHERE id = ?", (job_id,)))
+
+    # reference photos for Codex portraits (a real person's face); kept under data/art/c<cid>/refs/, never sent to ComfyUI
+    @app.get("/api/campaigns/{cid}/characters/{char_id}/art-refs")
+    def art_refs(cid: int, char_id: int, c=Depends(db)):
+        campaign_or_404(c, cid)
+        return [{"name": p.name, "url": f"media/art-refs/{cid}/{char_id}/{p.name}"} for p in art.list_refs(settings, cid, char_id)]
+
+    @app.post("/api/campaigns/{cid}/characters/{char_id}/art-refs")
+    async def art_ref_upload(cid: int, char_id: int, file: UploadFile = File(...), c=Depends(db)):
+        campaign_or_404(c, cid)
+        if not one(c, "SELECT id FROM characters WHERE campaign_id = ? AND id = ?", (cid, char_id)):
+            raise HTTPException(404, "unknown character")
+        ext = Path(file.filename or "").suffix.lower()
+        if ext not in (".png", ".jpg", ".jpeg", ".webp"):
+            raise HTTPException(422, "reference photos must be png, jpg or webp")
+        data = await file.read()
+        if len(data) > 15 * 1024 * 1024:
+            raise HTTPException(413, "photo too large (15 MB max)")
+        if len(art.list_refs(settings, cid, char_id)) >= 4:
+            raise HTTPException(409, "at most 4 reference photos per character")
+        folder = art.refs_dir(settings, cid, char_id)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{uuid.uuid4().hex[:12]}{ext}").write_bytes(data)
+        return art_refs(cid, char_id, c)
+
+    @app.delete("/api/campaigns/{cid}/characters/{char_id}/art-refs/{name}")
+    def art_ref_delete(cid: int, char_id: int, name: str, c=Depends(db)):
+        folder = art.refs_dir(settings, cid, char_id).resolve()
+        path = (folder / name).resolve()
+        if path.parent != folder or not path.is_file():
+            raise HTTPException(404, "no such photo")
+        path.unlink()
+        return art_refs(cid, char_id, c)
+
+    @app.get("/media/art-refs/{cid}/{char_id}/{name}")
+    def art_ref_file(cid: int, char_id: int, name: str):
+        folder = art.refs_dir(settings, cid, char_id).resolve()
+        path = (folder / name).resolve()
+        if path.parent != folder or not path.is_file():
+            raise HTTPException(404, "no such photo")
+        return FileResponse(path)
 
     @app.get("/media/art/{cid}/{name}")
     def art_file(cid: int, name: str):

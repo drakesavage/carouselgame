@@ -259,10 +259,41 @@ def leaks_secret(conn: sqlite3.Connection, cid: int, text: str) -> bool:
     return bool(_shingles(text) & _shingles(secrets))
 
 
+# ------------------------------------------------------------------ portraits by Codex, reference photos
+def refs_dir(settings: Settings, cid: int, char_id: int) -> Path:
+    return art_dir(settings, cid) / "refs" / f"character-{char_id}"
+
+
+def list_refs(settings: Settings, cid: int, char_id: int) -> list[Path]:
+    d = refs_dir(settings, cid, char_id)
+    return sorted(p for p in d.glob("*") if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")) if d.exists() else []
+
+
+def engine_for(settings: Settings, kind: str, requested: str | None) -> str:
+    """Character portraits go to Codex's image tool unless asked otherwise; everything else to ComfyUI."""
+    from ..config import resolve_codex_bin
+    if kind != "character" or (requested or settings.portrait_engine) != "codex":
+        return "comfy"
+    return "codex" if resolve_codex_bin() else "comfy"
+
+
+def codex_prompt(conn: sqlite3.Connection, settings: Settings, cid: int, char_id: int, extra: str | None = None) -> str:
+    from .codex_image import portrait_prompt
+    c = one(conn, "SELECT * FROM characters WHERE campaign_id = ? AND id = ?", (cid, char_id))
+    if not c:
+        raise ValueError("unknown character")
+    ref = ((c.get("sheet") or {}).get("visual") or {}).get("reference") or {}
+    brief = character_brief(conn, cid, c)
+    style, (w, h) = subject_layout(conn, cid, "character", char_id)
+    look = "; ".join(x for x in (appearance(conn, cid, "character", str(char_id)), _clean(extra)) if x)
+    return portrait_prompt(c["name"], ref, brief, look, animal=style != KIND_STYLE["character"], wide=w > h,
+                           has_refs=bool(list_refs(settings, cid, char_id)))
+
+
 # ------------------------------------------------------------------ jobs
 def create_job(conn: sqlite3.Connection, settings: Settings, cid: int, kind: str, *, subject_id: int | None = None,
                subject_name: str | None = None, prompt: str | None = None, extra: str | None = None, source: str = "player",
-               status: str = "queued", reason: str | None = None, turn_id: int | None = None) -> dict:
+               status: str = "queued", reason: str | None = None, turn_id: int | None = None, engine: str | None = None) -> dict:
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {', '.join(KINDS)}")
     name, desc = subject_text(conn, cid, kind, subject_id, subject_name)
@@ -276,17 +307,21 @@ def create_job(conn: sqlite3.Connection, settings: Settings, cid: int, kind: str
     if source == "gm" and extra and leaks_secret(conn, cid, extra):
         extra, note = None, "GM description dropped: it repeated wording from a GM-only record"
     style, (w, h) = subject_layout(conn, cid, kind, subject_id)
-    final = (prompt or "").strip()[:MAX_PROMPT] or build_prompt(kind, desc, extra, style)
+    eng = engine_for(settings, kind, engine)
+    if eng == "codex":
+        final = (prompt or "").strip()[:4000] or codex_prompt(conn, settings, cid, subject_id, extra)
+    else:
+        final = (prompt or "").strip()[:MAX_PROMPT] or build_prompt(kind, desc, extra, style)
     jid = conn.execute("""INSERT INTO art_jobs (campaign_id, kind, subject_id, subject_name, prompt, negative, width, height, seed, status,
-                          source, reason, note, turn_id, checkpoint, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                          source, reason, note, turn_id, checkpoint, created_at, engine) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                        (cid, kind, subject_id, name, final, ", ".join(x for x in (NEGATIVE, KIND_NEGATIVE.get(kind), subject_negative(conn, cid, kind, subject_id)) if x), w, h, random.randint(1, 2**31 - 1), status, source, reason, note,
-                        turn_id, checkpoint_name(settings), now_iso())).lastrowid
+                        turn_id, checkpoint_name(settings) if eng == "comfy" else "codex image tool", now_iso(), eng)).lastrowid
     return job_view(one(conn, "SELECT * FROM art_jobs WHERE id = ?", (jid,)))
 
 
 def job_view(j: dict) -> dict:
     out = {k: j[k] for k in ("id", "campaign_id", "kind", "subject_id", "subject_name", "prompt", "width", "height", "seed", "status",
-                             "source", "reason", "note", "error", "is_current", "created_at", "finished_at", "checkpoint")}
+                             "source", "reason", "note", "error", "is_current", "created_at", "finished_at", "checkpoint", "engine")}
     out["url"] = f"media/art/{j['campaign_id']}/{j['file']}" if j.get("file") else None
     return out
 
@@ -390,7 +425,7 @@ class ArtWorker:
                 conn.execute("UPDATE art_jobs SET status = 'running', started_at = ?, error = NULL WHERE id = ?", (now_iso(), j["id"]))
                 self.current = j["id"]
                 try:
-                    png = self._render(j)
+                    png = self._render(conn, j)
                     folder = art_dir(self.settings, j["campaign_id"])
                     folder.mkdir(parents=True, exist_ok=True)
                     fname = f"{j['kind']}-{j['id']}.png"
@@ -409,7 +444,19 @@ class ArtWorker:
             finally:
                 conn.close()
 
-    def _render(self, j: dict) -> bytes:
+    def _render(self, conn: sqlite3.Connection, j: dict) -> bytes:
+        if j.get("engine") == "codex":
+            from .codex_image import CodexImageError, paint
+            try:
+                return paint(self.settings, j["prompt"], list_refs(self.settings, j["campaign_id"], j["subject_id"]), f"art{j['id']}")
+            except CodexImageError as exc:
+                # Codex unavailable, over its image limit or stopped by the watcher: paint it locally instead.
+                name, desc = subject_text(conn, j["campaign_id"], j["kind"], j["subject_id"], j["subject_name"])
+                style, (w, h) = subject_layout(conn, j["campaign_id"], j["kind"], j["subject_id"])
+                j = {**j, "engine": "comfy", "prompt": build_prompt(j["kind"], desc, None, style), "width": w, "height": h,
+                     "checkpoint": self.settings.comfy_checkpoint}
+                conn.execute("UPDATE art_jobs SET engine = 'comfy', prompt = ?, checkpoint = ?, note = ? WHERE id = ?",
+                             (j["prompt"], j["checkpoint"], f"Codex couldn't paint it ({str(exc)[:200]}); painted by ComfyUI instead", j["id"]))
         self.client.ensure_running()
         ckpt = j.get("checkpoint") or self.settings.comfy_checkpoint
         s = sampler_settings(ckpt)

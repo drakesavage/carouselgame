@@ -200,3 +200,32 @@ def test_visual_reference_parses_and_imports_with_a_save_point(client, settings,
     assert "looks: Black American woman, 37" in build_context(c, demo_id, "hello")["text"]
     sheet = client.get(f"/api/campaigns/{demo_id}/characters/{jid}").json()["sheet"]
     assert sheet["visual"]["reference"]["expression"] == "Watchful and wry."
+
+
+def test_codex_paints_portraits_with_reference_photos_and_falls_back_to_comfy(client, settings, demo_id, monkeypatch):
+    from app.art import codex_image
+    monkeypatch.setattr(art, "engine_for", lambda s, kind, req: "codex" if kind == "character" and req != "comfy" else "comfy")
+    jid = one(connect(settings.campaign_db), "SELECT id FROM characters WHERE campaign_id = ? AND slug = 'juniper'", (demo_id,))["id"]
+    up = client.post(f"/api/campaigns/{demo_id}/characters/{jid}/art-refs", files={"file": ("me.png", PNG, "image/png")})
+    assert up.status_code == 200 and client.get(f"/api/campaigns/{demo_id}/characters/{jid}/art-refs").json()[0]["url"]
+    seen = {}
+
+    def fake_paint(s, prompt, refs, label):
+        seen.update(prompt=prompt, refs=refs)
+        return PNG
+    monkeypatch.setattr(codex_image, "paint", fake_paint)
+    job = client.post(f"/api/campaigns/{demo_id}/art", json={"kind": "character", "subject_id": jid}).json()
+    assert job["engine"] == "codex" and job["prompt"].startswith("Paint one portrait of Juniper")
+    w = _worker(settings)
+    assert w._drain() == 1 and len(seen["refs"]) == 1 and "Reference photos are attached" in seen["prompt"]
+    assert not w.client.workflows  # ComfyUI not used
+
+    def broken(s, prompt, refs, label):
+        raise codex_image.CodexImageError("image limit reached")
+    monkeypatch.setattr(codex_image, "paint", broken)
+    job2 = client.post(f"/api/campaigns/{demo_id}/art", json={"kind": "character", "subject_id": jid}).json()
+    assert w._drain() == 1
+    done = next(j for j in client.get(f"/api/campaigns/{demo_id}/art").json() if j["id"] == job2["id"])
+    assert done["status"] == "done" and done["engine"] == "comfy" and "image limit" in done["note"] and w.client.workflows
+    name = client.get(f"/api/campaigns/{demo_id}/characters/{jid}/art-refs").json()[0]["name"]
+    assert client.delete(f"/api/campaigns/{demo_id}/characters/{jid}/art-refs/{name}").status_code == 200

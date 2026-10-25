@@ -196,7 +196,7 @@ class TurnService:
         dice = ReplayDice(self.roller.source)
         roller = DiceRoller(source=dice)
         staged: list[dict] = []  # executed tool calls: {name, arguments, ok}
-        runner = ToolRunner(conn, rule_conn, roller, cid, turn_id)
+        runner = ToolRunner(conn, rule_conn, roller, cid, turn_id, settings=self.settings)
         steps: list[dict] = []
         usage: list[dict] = []
         t_before = None
@@ -321,7 +321,7 @@ class TurnService:
             raise StateConflict("The campaign changed while the GM was working (another write, restore or import). "
                                 "Nothing from this turn was applied; retry it.")
         dice.rewind()
-        runner = ToolRunner(conn, rule_conn, roller, cid, turn_id)
+        runner = ToolRunner(conn, rule_conn, roller, cid, turn_id, settings=self.settings)
         for call in staged:
             if runner.run(call["name"], call["arguments"])["ok"] != call["ok"]:
                 raise StateConflict(f"Replaying {call['name']} gave a different outcome; nothing from this turn was applied.")

@@ -192,3 +192,6 @@ body::before {
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
 
 .appearance p { margin: 8px 0 0; font-size: 13.5px; line-height: 1.5; }
+.art-thumb.ref { position: relative; cursor: default; }
+.art-thumb.ref button { position: absolute; top: 2px; right: 2px; padding: 2px; background: rgba(0,0,0,0.6); }
+.art-thumb.add { display: grid; place-items: center; border: 1px dashed var(--line-2); color: var(--muted); }

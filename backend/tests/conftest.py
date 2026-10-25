@@ -28,7 +28,7 @@ def scripted(values):
 
 @pytest.fixture
 def settings(tmp_path) -> Settings:
-    s = Settings(data_dir=tmp_path / "data", gm_provider="mock")
+    s = Settings(data_dir=tmp_path / "data", gm_provider="mock", portrait_engine="comfy")
     s.ensure_dirs()
     return s
 

@@ -42,7 +42,7 @@ export type ArtMap = Record<ArtKind, Record<string, string>>;
 export type ArtJob = { id: number; campaign_id: number; kind: ArtKind; subject_id: number | null; subject_name: string; prompt: string;
   width: number; height: number; seed: number; status: "suggested" | "queued" | "running" | "done" | "failed" | "dismissed";
   source: "player" | "gm"; reason: string | null; note: string | null; error: string | null; is_current: number; url: string | null;
-  created_at: string; finished_at: string | null; checkpoint: string | null };
+  created_at: string; finished_at: string | null; checkpoint: string | null; engine?: string };
 export type Combatant = { id: string; name: string; side: "party" | "foe"; defeated?: boolean; hb_percent?: number; actions_left?: number;
   evading?: boolean; hp_current?: number | null; hp_max?: number | null; dead?: boolean; dying?: string | null };
 export type Encounter = { id: number; name: string; round: number; phase?: string; summary?: string | null; combatants: Combatant[] };
@@ -146,13 +146,20 @@ export const api = {
     const q = new URLSearchParams(Object.entries(p).filter(([, v]) => v != null && v !== "").map(([k, v]) => [k, String(v)]));
     return req<ArtJob[]>(`api/campaigns/${cid}/art?${q}`);
   },
-  artPreview: (cid: number, kind: ArtKind, subjectId?: number | null, subjectName?: string) => {
-    const q = new URLSearchParams({ kind, ...(subjectId != null ? { subject_id: String(subjectId) } : {}), ...(subjectName ? { subject_name: subjectName } : {}) });
-    return req<{ subject_name: string; prompt: string; negative: string; size: [number, number]; appearance: string; unestablished: string[] }>(`api/campaigns/${cid}/art/preview?${q}`);
+  artPreview: (cid: number, kind: ArtKind, subjectId?: number | null, subjectName?: string, engine?: string) => {
+    const q = new URLSearchParams({ kind, ...(subjectId != null ? { subject_id: String(subjectId) } : {}), ...(subjectName ? { subject_name: subjectName } : {}), ...(engine ? { engine } : {}) });
+    return req<{ subject_name: string; prompt: string; engine: string; negative: string; size: [number, number]; appearance: string; unestablished: string[] }>(`api/campaigns/${cid}/art/preview?${q}`);
   },
   artAppearance: (cid: number, body: { kind: ArtKind; subject_id?: number | null; subject_name?: string; appearance: string }) =>
     req<{ ok: boolean }>(`api/campaigns/${cid}/art/appearance`, { method: "PUT", body: JSON.stringify(body) }),
-  artCreate: (cid: number, body: { kind: ArtKind; subject_id?: number; subject_name?: string; prompt?: string }) =>
+  artRefs: (cid: number, charId: number) => req<{ name: string; url: string }[]>(`api/campaigns/${cid}/characters/${charId}/art-refs`),
+  artRefUpload: (cid: number, charId: number, file: File) => {
+    const fd = new FormData(); fd.append("file", file);
+    return req<{ name: string; url: string }[]>(`api/campaigns/${cid}/characters/${charId}/art-refs`, { method: "POST", body: fd });
+  },
+  artRefDelete: (cid: number, charId: number, name: string) =>
+    req<{ name: string; url: string }[]>(`api/campaigns/${cid}/characters/${charId}/art-refs/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  artCreate: (cid: number, body: { kind: ArtKind; subject_id?: number; subject_name?: string; prompt?: string; engine?: string }) =>
     req<ArtJob>(`api/campaigns/${cid}/art`, { method: "POST", body: JSON.stringify(body) }),
   artAction: (id: number, action: "approve" | "dismiss" | "retry" | "use") => req<ArtJob>(`api/art/${id}/${action}`, { method: "POST" }),
   gmRuntime: (token: string) => req<Record<string, any>>("api/gm/runtime", { headers: { "X-GM-Token": token } }),

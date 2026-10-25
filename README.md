@@ -150,6 +150,15 @@ painted-fantasy style. A character's picture becomes their portrait. The GM can 
 (`suggest_image`) when something notable appears; suggestions wait in the HUD's **Art** panel until you click Paint.
 Settings: `COMFYUI_URL`, `COMFYUI_ROOT`, `COMFY_CHECKPOINT`, `COMFY_TIMEOUT_S`. Pictures live in `data/art/`.
 
+**Character portraits by Codex.** Character portraits are painted by Codex's built-in image tool (your ChatGPT plan, no
+API billing; about a minute each) because it follows long descriptions far better than SDXL: in the comparison, ComfyUI
+matched about 2 of 8 of Cliff's described details and Codex all 8. Add up to four **reference photos** per character in
+the Paint dialog and the face follows them (they are sent to OpenAI with the request and stored only in `data/art`).
+The Painter switch in the dialog picks ComfyUI instead; if Codex fails or hits its image limit, the picture is painted
+by ComfyUI automatically. Mobs, items and scenes stay on ComfyUI. Image jobs run as isolated as GM jobs except for the
+image tool itself (no shell, files, network or sub-agents; checked with escape probes; see docs/GM_RUNTIME.md).
+`PORTRAIT_ENGINE=comfy` turns Codex portraits off.
+
 **Visual references.** *Saves & Settings → Import visual reference* takes a document with one `## Name` section per
 character (`**demographic | age | class**`, a physique paragraph, an outfit paragraph, `**Signature:**`,
 `**Expression:**`) and stores it in each character's sheet (`visual.reference`, with a save point first). Sheets show it

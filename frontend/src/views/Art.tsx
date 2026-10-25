@@ -1,6 +1,6 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { Check, ImagePlus, Loader2, Paintbrush, RefreshCw, Sparkles, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ArtJob, ArtKind } from "../api";
 import { Chip, Panel } from "../ui";
 
@@ -39,13 +39,21 @@ function ArtDialog({ cid, kind, subjectId, subjectName, onClose }:
   const [savedLook, setSavedLook] = useState("");
   const [open, setOpen] = useState<string[]>([]);
   const [drafting, setDrafting] = useState(false);
+  const [engine, setEngine] = useState<string>(kind === "character" ? "codex" : "comfy");
+  const [refs, setRefs] = useState<{ name: string; url: string }[]>([]);
+  const refInput = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (kind === "character" && subjectId != null) api.artRefs(cid, subjectId).then(setRefs).catch(() => {}); }, [cid, kind, subjectId]);
   const [err, setErr] = useState<string | null>(null);
   const [status, setStatus] = useState<Record<string, any> | null>(null);
   useEffect(() => {
-    api.artPreview(cid, kind, subjectId, subjectName).then((p) => { setPrompt(p.prompt); setLook(p.appearance ?? ""); setSavedLook(p.appearance ?? ""); setOpen(p.unestablished ?? []); })
+    api.artPreview(cid, kind, subjectId, subjectName, engine).then((p) => { setPrompt(p.prompt); if (p.engine) setEngine(p.engine); setLook(p.appearance ?? ""); setSavedLook(p.appearance ?? ""); setOpen(p.unestablished ?? []); })
       .catch((e) => setErr(String(e)));
     api.artStatus().then(setStatus).catch(() => {});
-  }, [cid, kind, subjectId, subjectName]);
+  }, [cid, kind, subjectId, subjectName]); // eslint-disable-line react-hooks/exhaustive-deps
+  const switchEngine = async (e: string) => {
+    setEngine(e);
+    try { setPrompt((await api.artPreview(cid, kind, subjectId, subjectName, e)).prompt); } catch (x) { setErr(String(x)); }
+  };
   const done = jobs.filter((j) => j.status === "done");
   const current = done.find((j) => j.is_current) ?? done[0];
   const saveLook = async () => {
@@ -53,12 +61,12 @@ function ArtDialog({ cid, kind, subjectId, subjectName, onClose }:
     try {
       await api.artAppearance(cid, { kind, subject_id: subjectId ?? undefined, subject_name: subjectName, appearance: look });
       setSavedLook(look);
-      setPrompt((await api.artPreview(cid, kind, subjectId, subjectName)).prompt);
+      setPrompt((await api.artPreview(cid, kind, subjectId, subjectName, engine)).prompt);
     } catch (e) { setErr(String(e)); }
   };
   const render = async () => {
     setErr(null);
-    try { await api.artCreate(cid, { kind, subject_id: subjectId ?? undefined, subject_name: subjectName, prompt }); await load(); }
+    try { await api.artCreate(cid, { kind, subject_id: subjectId ?? undefined, subject_name: subjectName, prompt, engine }); await load(); }
     catch (e) { setErr(String(e)); }
   };
   const act = async (j: ArtJob, action: "use" | "dismiss" | "approve" | "retry") => {
@@ -79,7 +87,35 @@ function ArtDialog({ cid, kind, subjectId, subjectName, onClose }:
               {busy && <div className="art-busy"><Loader2 size={14} className="spin" /> {jobs.find((j) => j.status === "running") ? "Painting… (about a minute; the first picture after a restart takes a few)" : "Waiting in the queue…"}</div>}
             </div>
             <div className="art-side">
-                <div className="h2">Appearance</div>
+                {kind === "character" && (
+                  <>
+                    <div className="h2">Painter</div>
+                    <div className="row">
+                      <select className="select input" value={engine} onChange={(e) => switchEngine(e.target.value)}>
+                        <option value="codex">Codex image tool (best likeness; uses your ChatGPT image allowance)</option>
+                        <option value="comfy">ComfyUI on this PC (fast, unlimited)</option>
+                      </select>
+                    </div>
+                    {engine === "codex" && subjectId != null && (
+                      <>
+                        <div className="h2" style={{ marginTop: 10 }}>Reference photos <span className="sub">(optional; the face follows them)</span></div>
+                        <div className="art-thumbs">
+                          {refs.map((r) => (
+                            <div key={r.name} className="art-thumb ref"><img src={r.url} alt="" />
+                              <button className="btn small ghost" title="Remove" onClick={async () => setRefs(await api.artRefDelete(cid, subjectId, r.name))}><X size={10} /></button></div>))}
+                          {refs.length < 4 && <button className="art-thumb add" onClick={() => refInput.current?.click()}><ImagePlus size={18} /></button>}
+                        </div>
+                        <input ref={refInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={async (e) => {
+                          const f = e.target.files?.[0]; if (!f) return;
+                          try { setRefs(await api.artRefUpload(cid, subjectId, f)); setPrompt((await api.artPreview(cid, kind, subjectId, subjectName, engine)).prompt); }
+                          catch (x) { setErr(String(x)); } finally { e.target.value = ""; }
+                        }} />
+                        <div className="sub">Photos are sent to OpenAI with the request. Stored only on this PC (datart).</div>
+                      </>
+                    )}
+                  </>
+                )}
+                <div className="h2" style={{ marginTop: 10 }}>Appearance</div>
                 <textarea className="input" rows={3} value={look} onChange={(e) => setLook(e.target.value)} onBlur={saveLook}
                   placeholder={kind === "character" ? "e.g. woman in her forties, short grey-streaked hair, broad shoulders, tired eyes" : "what it looks like"} />
                 {kind === "character" && subjectId != null && (

@@ -162,8 +162,9 @@ class TurnEffects:
 
 class ToolRunner:
     def __init__(self, conn: sqlite3.Connection, rule_conn: sqlite3.Connection | None, roller: DiceRoller,
-                 campaign_id: int, turn_id: int):
+                 campaign_id: int, turn_id: int, settings=None):
         self.conn, self.rule_conn, self.roller = conn, rule_conn, roller
+        self.settings = settings  # the app's Settings (art suggestions pick their painter from it); None = from the environment
         self.cid, self.turn_id = campaign_id, turn_id
         self.effects = TurnEffects()
 
@@ -436,7 +437,7 @@ class ToolRunner:
         if one(self.conn, f"""SELECT id FROM art_jobs WHERE campaign_id = ? AND kind = ? AND status IN ('suggested','queued','running','done')
                                AND {'lower(subject_name) = lower(?)' if kind == 'mob' else 'subject_id = ?'}""", (self.cid, kind, name if kind == "mob" else sid)):
             return {"skipped": "that subject already has a picture or a pending suggestion"}
-        job = create_job(self.conn, Settings(), self.cid, kind, subject_id=sid, subject_name=name or subject,
+        job = create_job(self.conn, self.settings or Settings(), self.cid, kind, subject_id=sid, subject_name=name or subject,
                          extra=str(a.get("description") or "")[:500], source="gm", status="suggested", reason=a.get("reason"), turn_id=self.turn_id)
         self.effects.changes.append(f"Picture suggested: {job['subject_name']} ({kind}) — approve it in the Art queue")
         return {"suggestion_id": job["id"], "note": job["note"]}

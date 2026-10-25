@@ -163,3 +163,17 @@ applied) and the turn is re-run by Codex. A quota error mid-turn re-routes inste
 open obligations); Vada roleplay on 3.8 (in character, no mechanics); a scent search that 3.8 couldn't take (daily
 quota), 3.6 escalated ("requires a Perception or Tracking check") and Codex rolled and committed; a purchase straight
 to Codex (−2 Gold, item added).
+
+## 8. Codex image jobs (`art/codex_image.py`)
+
+Character portraits use Codex's image tool. The tool needs part of code mode, so image jobs differ from GM jobs in two
+switches: `image_generation` on, and `code_mode_host` on with `code_mode` itself off. Escape probes (2026-10-25):
+
+| Setup | Result |
+|---|---|
+| Gateway off (GM settings) | no image: "image tool is unavailable" |
+| `code_mode_host` + `code_mode` on | image works, but a built-in `node_repl` came back (ran `whoami` as the sandbox user and fetched example.com; file writes and the canary read were refused by the sandbox). `mcp_servers.node_repl.enabled=false` did not remove it |
+| `code_mode_host` on, `code_mode` off (**used**) | image works; tools are only the image tool, `apply_patch` (refused: read-only sandbox), an empty MCP resource list and a clock. No shell, file reads, network or sub-agents |
+
+The live watcher kills an image job at any tool event other than the image itself (the image produces none), and the
+picture is then painted by ComfyUI. The PNG is copied from `$CODEX_HOME/generated_images/<thread id>/`.
