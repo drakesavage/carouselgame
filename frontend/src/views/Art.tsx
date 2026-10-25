@@ -1,8 +1,8 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { Check, ImagePlus, Loader2, Paintbrush, RefreshCw, Sparkles, X } from "lucide-react";
+import { Check, Crop, ImagePlus, Loader2, Paintbrush, RefreshCw, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ArtJob, ArtKind } from "../api";
-import { Chip, Panel } from "../ui";
+import { Chip, Panel, Portrait, PortraitCrop } from "../ui";
 
 const KIND_LABEL: Record<ArtKind, string> = { character: "portrait", item: "item", mob: "Mob", scene: "scene" };
 
@@ -184,5 +184,74 @@ export function ArtQueue({ cid, onChanged }: { cid: number; onChanged?: () => vo
         </div>))}
       {active.map((j) => <div key={j.id} className="sub"><Loader2 size={11} className="spin" /> {j.status === "running" ? "Painting" : "Queued"}: {j.subject_name}</div>)}
     </Panel>
+  );
+}
+
+/** Adjust which square of a portrait shows in every portrait tile: drag the square, zoom with the slider. */
+export function CropButton({ cid, c, onSaved }: { cid: number; c: { id: number; name: string; portrait_path?: string | null; portrait_crop?: PortraitCrop | null }; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button className="btn small ghost" style={{ marginTop: 4, width: "100%" }} onClick={() => setOpen(true)}><Crop size={12} /> Adjust crop</button>
+      {open && c.portrait_path && <CropDialog cid={cid} c={c} url={`media/portraits/${encodeURIComponent(c.portrait_path)}`} onClose={(saved) => { setOpen(false); if (saved) onSaved(); }} />}
+    </>
+  );
+}
+
+const CROP_W = 360;
+
+function CropDialog({ cid, c, url, onClose }: { cid: number; c: { id: number; name: string; portrait_crop?: PortraitCrop | null }; url: string; onClose: (saved: boolean) => void }) {
+  const [ar, setAr] = useState<number | null>(null);
+  const [crop, setCrop] = useState<{ cx: number; cy: number; k: number } | null>(c.portrait_crop ?? null);
+  const drag = useRef<{ x: number; y: number; cx: number; cy: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    const img = new Image();
+    img.onload = () => {
+      const a = img.naturalWidth / img.naturalHeight;
+      setAr(a);
+      // start from the saved crop, else the default framing (a full-width square near the top of tall pictures)
+      setCrop((cur) => cur ?? { cx: 0.5, cy: a < 1 ? Math.min(0.5, a / 2 + 0.12 * (1 - a)) : 0.5, k: 1 });
+    };
+    img.src = url;
+  }, [url]);
+  if (ar == null || !crop) return null;
+  const dispW = CROP_W, dispH = CROP_W / ar;
+  const side = crop.k * Math.min(dispW, dispH);
+  const clamp = (v: number, half: number, full: number) => Math.min(1 - half / full, Math.max(half / full, v));
+  const set = (cx: number, cy: number, k: number) => {
+    const s = k * Math.min(dispW, dispH);
+    setCrop({ k, cx: clamp(cx, s / 2, dispW), cy: clamp(cy, s / 2, dispH) });
+  };
+  const save = async (value: PortraitCrop | null) => {
+    try { await api.portraitCrop(cid, c.id, value); onClose(true); } catch (e) { setErr(String(e)); }
+  };
+  return (
+    <Dialog.Root open onOpenChange={(o) => !o && onClose(false)}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="overlay" />
+        <Dialog.Content className="modal crop-dialog" aria-describedby={undefined}>
+          <Dialog.Title className="h2">Portrait crop: {c.name}</Dialog.Title>
+          <div className="crop-stage" style={{ width: dispW, height: dispH, backgroundImage: `url("${url}")` }}
+            onPointerMove={(e) => { const d = drag.current; if (d) set(d.cx + (e.clientX - d.x) / dispW, d.cy + (e.clientY - d.y) / dispH, crop.k); }}
+            onPointerUp={() => { drag.current = null; }} onPointerLeave={() => { drag.current = null; }}>
+            <div className="crop-box" style={{ width: side, height: side, left: crop.cx * dispW - side / 2, top: crop.cy * dispH - side / 2 }}
+              onPointerDown={(e) => { (e.target as HTMLElement).setPointerCapture?.(e.pointerId); drag.current = { x: e.clientX, y: e.clientY, cx: crop.cx, cy: crop.cy }; }} />
+          </div>
+          <div className="row" style={{ marginTop: 10, gap: 12 }}>
+            <label className="grow">Zoom
+              <input type="range" min={0.2} max={1} step={0.01} value={1.2 - crop.k} onChange={(e) => set(crop.cx, crop.cy, 1.2 - Number(e.target.value))} style={{ width: "100%" }} />
+            </label>
+            <Portrait name={c.name} src={url} crop={{ ...crop, ar }} size={72} />
+          </div>
+          {err && <div className="error-box">{err}</div>}
+          <div className="row" style={{ marginTop: 10, justifyContent: "flex-end" }}>
+            <button className="btn small ghost" onClick={() => save(null)}>Reset</button>
+            <button className="btn small ghost" onClick={() => onClose(false)}>Cancel</button>
+            <button className="btn small" onClick={() => save({ ...crop, ar })}><Check size={12} /> Save</button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

@@ -6,6 +6,7 @@ export type CharacterCard = {
   id: number; slug: string; name: string; kind: string; roster_category?: string | null; crawler_number?: string | null; species?: string | null; race?: string | null;
   class_name?: string | null; level?: number | null; status: string; location?: string | null; in_party: number; party_order: number;
   hp_current?: number | null; hp_max?: number | null; mana_current?: number | null; mana_max?: number | null; ai_favor?: number | null;
+  portrait_crop?: { cx: number; cy: number; k: number; ar: number } | null;
   stats: Stats; derived: Record<string, unknown>; portrait_path?: string | null; statuses: Status[]; equipped: { id: number; name: string; slot?: string }[];
   personality?: string | null; known_motivation?: string | null; attitude?: number | null; voice?: string | null; assignment?: string | null;
 };
@@ -137,6 +138,8 @@ export const api = {
   gmDiagnosticsList: (id: number, token: string) => req<DiagnosticsRow[]>(`api/gm/campaigns/${id}/diagnostics`, { headers: { "X-GM-Token": token } }),
   gmDiagnostics: (turnId: number, token: string) => req<Record<string, any>>(`api/gm/turns/${turnId}/diagnostics`, { headers: { "X-GM-Token": token } }),
   artStatus: () => req<Record<string, any>>("api/art/status"),
+  portraitCrop: (cid: number, charId: number, crop: { cx: number; cy: number; k: number; ar: number } | null) =>
+    req<{ portrait_crop: unknown }>(`api/campaigns/${cid}/characters/${charId}/portrait-crop`, { method: "PUT", body: JSON.stringify(crop ?? {}) }),
   geminiQuota: () => req<Record<string, any>>("api/gemini/quota"),
   importVisualReference: (cid: number, markdown: string, source: string) =>
     req<{ updated: string[]; unmatched: string[]; save_point_id: number }>(`api/campaigns/${cid}/visual-reference`, { method: "POST", body: JSON.stringify({ markdown, source }) }),

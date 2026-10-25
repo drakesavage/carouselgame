@@ -74,6 +74,15 @@ class VisualReferenceIn(BaseModel):
     source: str = Field(default="visual reference", max_length=120)
 
 
+class CropIn(BaseModel):
+    """Square crop of a portrait: centre (cx, cy) as fractions of the image's width and height, side k as a fraction of
+    the image's shorter side, ar = image width / height. null fields reset to the default framing."""
+    cx: float | None = Field(default=None, ge=0, le=1)
+    cy: float | None = Field(default=None, ge=0, le=1)
+    k: float | None = Field(default=None, ge=0.05, le=1)
+    ar: float | None = Field(default=None, gt=0.1, lt=10)
+
+
 class TurnIn(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
     idempotency_key: str = Field(min_length=8, max_length=80)
@@ -294,6 +303,14 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     def make_demo(c=Depends(db), _=Depends(write_lock)):
         return {"campaign_id": seed_demo(c)}
 
+    @app.put("/api/campaigns/{cid}/characters/{char_id}/portrait-crop")
+    def portrait_crop(cid: int, char_id: int, body: CropIn, c=Depends(db), _=Depends(write_lock)):
+        if not one(c, "SELECT id FROM characters WHERE campaign_id = ? AND id = ?", (cid, char_id)):
+            raise HTTPException(404, "unknown character")
+        crop = body.model_dump() if None not in body.model_dump().values() else None
+        c.execute("UPDATE characters SET portrait_crop_json = ? WHERE id = ?", (json.dumps(crop) if crop else None, char_id))
+        return {"portrait_crop": crop}
+
     @app.get("/api/campaigns/{cid}/characters")
     def characters(cid: int, c=Depends(db)):
         campaign_or_404(c, cid)
@@ -319,7 +336,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
             raise HTTPException(413, "portrait too large (15 MB max)")
         name = f"c{cid}-{ch['slug']}-{uuid.uuid4().hex[:6]}{ext}"
         (settings.portraits_dir / name).write_bytes(data)
-        c.execute("UPDATE characters SET portrait_path = ? WHERE id = ?", (name, char_id))
+        c.execute("UPDATE characters SET portrait_path = ?, portrait_crop_json = NULL WHERE id = ?", (name, char_id))
         return {"portrait_path": name}
 
     @app.get("/api/assets/manifest")

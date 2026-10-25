@@ -350,7 +350,7 @@ def make_current(conn: sqlite3.Connection, settings: Settings, job_id: int) -> d
         settings.portraits_dir.mkdir(parents=True, exist_ok=True)
         name = f"art-{j['id']}.png"
         shutil.copyfile(art_dir(settings, j["campaign_id"]) / j["file"], settings.portraits_dir / name)
-        conn.execute("UPDATE characters SET portrait_path = ? WHERE id = ?", (name, j["subject_id"]))
+        conn.execute("UPDATE characters SET portrait_path = ?, portrait_crop_json = NULL WHERE id = ?", (name, j["subject_id"]))
     return job_view(one(conn, "SELECT * FROM art_jobs WHERE id = ?", (job_id,)))
 
 

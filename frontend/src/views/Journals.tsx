@@ -25,7 +25,7 @@ export function CharactersView({ cid, version, openCharacter }: { cid: number; v
             {list.map((c) => (
               <div key={c.id} className="card clickable" onClick={() => openCharacter(c.id)}>
                 <div className="row" style={{ alignItems: "flex-start" }}>
-                  <Portrait name={c.name} path={c.portrait_path} size={64} />
+                  <Portrait name={c.name} path={c.portrait_path} crop={c.portrait_crop} size={64} />
                   <div className="grow">
                     <div className="pname">{c.name}</div>
                     <div className="pclass">{[c.level != null ? `L${c.level}` : null, c.race ?? c.species, c.class_name].filter(Boolean).join(" · ")}</div>
@@ -140,7 +140,7 @@ export function NpcView({ cid, version, openCharacter }: { cid: number; version:
         {data.map((n) => (
           <div key={n.id} className="card clickable" onClick={() => openCharacter(n.id)}>
             <div className="row" style={{ alignItems: "flex-start" }}>
-              <Portrait name={n.name} path={n.portrait_path} size={56} />
+              <Portrait name={n.name} path={n.portrait_path} crop={n.portrait_crop} size={56} />
               <div className="grow">
                 <div className="pname">{n.name}</div>
                 <div className="pclass">{humanize(n.roster_category ?? n.kind)} · {n.status}</div>

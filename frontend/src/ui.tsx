@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { CSSProperties, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -29,10 +29,24 @@ function hash(s: string) {
 }
 
 /** Local artwork from /media/portraits when present; otherwise a generated HUD placeholder (never a network image). */
-export function Portrait({ name, path, src, size = 52 }: { name: string; path?: string | null; src?: string | null; size?: number }) {
+export type PortraitCrop = { cx: number; cy: number; k: number; ar: number };
+
+/** CSS background placement that shows `crop` (a square of the image) filling a square box. */
+export function cropStyle(url: string, crop: PortraitCrop): CSSProperties {
+  // Image height = 1, width = ar; the crop side is k x the shorter side. Background size is the image in box units.
+  const side = crop.k * Math.min(crop.ar, 1);
+  const wF = crop.ar / side, hF = 1 / side;
+  const pos = (c: number, f: number) => (f <= 1 ? 50 : Math.min(100, Math.max(0, ((c * f - 0.5) / (f - 1)) * 100)));
+  return { backgroundImage: `url("${url}")`, backgroundSize: `${wF * 100}% ${hF * 100}%`,
+    backgroundPosition: `${pos(crop.cx, wF)}% ${pos(crop.cy, hF)}%`, backgroundRepeat: "no-repeat" };
+}
+
+export function Portrait({ name, path, src, size = 52, crop }: { name: string; path?: string | null; src?: string | null; size?: number; crop?: PortraitCrop | null }) {
   const style = { width: size, height: size };
   const url = src ?? (path ? `media/portraits/${encodeURIComponent(path)}` : null);
-  if (url) return <div className="portrait" style={style}><img src={url} alt={name} /></div>;
+  if (url && crop) return <div className="portrait" role="img" aria-label={name} style={{ ...style, ...cropStyle(url, crop) }} />;
+  // Default framing: tall pictures show their top (where the face usually is), not the middle.
+  if (url) return <div className="portrait" style={style}><img src={url} alt={name} style={{ objectPosition: "50% 12%" }} /></div>;
   const h = hash(name);
   const hue = h % 360;
   const initials = name.replace(/\(.*?\)/g, "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("");

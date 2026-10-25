@@ -3,7 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Upload, X } from "lucide-react";
 import { api, CharacterSheet } from "../api";
 import { Bar, Chip, humanize, Portrait, STAT_ABBR, STAT_KEYS, Tree } from "../ui";
-import { ArtButton } from "./Art";
+import { ArtButton, CropButton } from "./Art";
 
 const DERIVED_ORDER = ["evade", "damage_resistance", "move", "step", "unallocated_stat_points", "size", "health_bar", "level_progress"];
 const HIDDEN_SHEET_KEYS = new Set(["attacks", "narrative", "visual", "hotlist"]);
@@ -36,12 +36,13 @@ export function CharacterSheetDialog({ cid, charId, onClose, onChanged }: { cid:
             <>
               <div className="sheet-head">
                 <div>
-                  <Portrait name={c.name} path={c.portrait_path} size={132} />
+                  <Portrait name={c.name} path={c.portrait_path} crop={c.portrait_crop} size={132} />
                   <input ref={file} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
                   <div className="row" style={{ marginTop: 6, gap: 4 }}>
                     <button className="btn small ghost grow" onClick={() => file.current?.click()}><Upload size={12} /> Upload</button>
                     <ArtButton cid={cid} kind="character" subjectId={c.id} subjectName={c.name} onChanged={async () => { setC(await api.character(cid, charId!)); onChanged(); }} />
                   </div>
+                  {c.portrait_path && <CropButton cid={cid} c={c} onSaved={async () => { setC(await api.character(cid, charId!)); onChanged(); }} />}
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <Dialog.Title className="h1">{c.name}</Dialog.Title>

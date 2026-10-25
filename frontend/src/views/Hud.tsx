@@ -118,7 +118,7 @@ export function StoryText({ text, roster }: { text: string; roster: CharacterCar
               const kids = Array.isArray(children) ? children.slice(1) : [];
               return (
                 <div className="dialogue">
-                  <Portrait name={who?.name ?? label.replace(/:\s*$/, "")} src={portraitSrc(who, m)} size={34} />
+                  <Portrait name={who?.name ?? label.replace(/:\s*$/, "")} src={portraitSrc(who, m)} crop={who?.portrait_crop} size={34} />
                   <div><span className="speaker">{who?.name ?? label.replace(/:\s*$/, "")}</span><p>{kids}</p></div>
                 </div>
               );
@@ -193,7 +193,7 @@ function Tile({ c, pc, openCharacter }: { c: CharacterCard; pc: boolean; openCha
   return (
     <div className={`tile ${pc ? "pc" : ""} ${open ? "open" : ""}`}>
       <button className="tile-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        <Portrait name={c.name} src={portraitSrc(c, m)} size={40} />
+        <Portrait name={c.name} src={portraitSrc(c, m)} crop={c.portrait_crop} size={40} />
         <div className="tile-main">
           <div className="row" style={{ gap: 6 }}>
             <span className="pname grow" title={c.name}>{c.name.split(" ")[0]}</span>

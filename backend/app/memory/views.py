@@ -12,7 +12,7 @@ from ..db import one, rows
 
 PUBLIC_CHAR_COLUMNS = """id, campaign_id, slug, name, kind, roster_category, crawler_number, species, race, class_name, level,
     status, location, in_party, party_order, hp_current, hp_max, mana_current, mana_max, ai_favor, stats_json,
-    derived_json, portrait_path, provenance, assignment"""
+    derived_json, portrait_path, portrait_crop_json, provenance, assignment"""
 
 
 def floor_clock(camp: dict) -> dict:

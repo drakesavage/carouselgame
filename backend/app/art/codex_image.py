@@ -123,7 +123,8 @@ def portrait_prompt(name: str, ref: dict, brief: dict, appearance: str, animal: 
         lines.append("Reference photos are attached: the face, features and coloring must match the person in them.")
     frame = ("Full-body view of the animal in a natural pose, wide landscape frame." if wide else
              "Full-body view of the animal in a natural pose, portrait frame." if animal else
-             "Waist-up, facing the viewer, portrait orientation (2:3).")
+             "Waist-up, facing the viewer, portrait orientation (2:3), with the head and shoulders in the upper third so a "
+             "square crop of the top shows the face; large gear may be partly cut off at the edges.")
     lines.append("Composition: " + frame)
     lines.append("Style: gritty painted fantasy illustration for a tabletop RPG sourcebook; visible oil-paint brushwork, dramatic "
                  "chiaroscuro lighting, grimy dungeon background, a darkly humorous tone. Keep every listed detail of clothing and gear "

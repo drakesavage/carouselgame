@@ -195,3 +195,7 @@ body::before {
 .art-thumb.ref { position: relative; cursor: default; }
 .art-thumb.ref button { position: absolute; top: 2px; right: 2px; padding: 2px; background: rgba(0,0,0,0.6); }
 .art-thumb.add { display: grid; place-items: center; border: 1px dashed var(--line-2); color: var(--muted); }
+.crop-dialog { width: auto; max-width: calc(100vw - 32px); }
+.crop-stage { position: relative; background-size: 100% 100%; border-radius: 4px; touch-action: none; margin-top: 10px; }
+.crop-box { position: absolute; border: 2px solid var(--cyan); box-shadow: 0 0 0 9999px rgba(0,0,0,0.55); cursor: move; border-radius: 2px; }
+.crop-stage { overflow: hidden; }

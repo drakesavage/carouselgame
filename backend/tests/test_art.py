@@ -229,3 +229,16 @@ def test_codex_paints_portraits_with_reference_photos_and_falls_back_to_comfy(cl
     assert done["status"] == "done" and done["engine"] == "comfy" and "image limit" in done["note"] and w.client.workflows
     name = client.get(f"/api/campaigns/{demo_id}/characters/{jid}/art-refs").json()[0]["name"]
     assert client.delete(f"/api/campaigns/{demo_id}/characters/{jid}/art-refs/{name}").status_code == 200
+
+
+def test_portrait_crop_is_saved_shown_on_cards_and_reset_by_a_new_portrait(client, settings, demo_id):
+    jid = next(p["id"] for p in client.get(f"/api/campaigns/{demo_id}").json()["party"] if p["slug"] == "juniper")
+    crop = {"cx": 0.5, "cy": 0.3, "k": 0.6, "ar": 0.684}
+    assert client.put(f"/api/campaigns/{demo_id}/characters/{jid}/portrait-crop", json=crop).json()["portrait_crop"] == crop
+    card = next(p for p in client.get(f"/api/campaigns/{demo_id}").json()["party"] if p["id"] == jid)
+    assert card["portrait_crop"] == crop
+    assert client.put(f"/api/campaigns/{demo_id}/characters/{jid}/portrait-crop", json={"cx": 2, "cy": 0.3, "k": 0.6, "ar": 1}).status_code == 422
+    client.post(f"/api/campaigns/{demo_id}/characters/{jid}/portrait", files={"file": ("p.png", PNG, "image/png")})
+    assert next(p for p in client.get(f"/api/campaigns/{demo_id}").json()["party"] if p["id"] == jid)["portrait_crop"] is None
+    client.put(f"/api/campaigns/{demo_id}/characters/{jid}/portrait-crop", json=crop)
+    assert client.put(f"/api/campaigns/{demo_id}/characters/{jid}/portrait-crop", json={}).json()["portrait_crop"] is None

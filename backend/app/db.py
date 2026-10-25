@@ -500,7 +500,8 @@ COLUMN_MIGRATIONS = [
     ("quests", "due_at_minutes", "INTEGER"),
     ("quests", "owner_character_id", "INTEGER"),
     ("turns", "stage_json", "TEXT"),
-    ("art_jobs", "engine", "TEXT NOT NULL DEFAULT 'comfy'"),  # comfy | codex (art/codex_image.py)  # staged tool calls and roll records while a turn is in flight
+    ("art_jobs", "engine", "TEXT NOT NULL DEFAULT 'comfy'"),
+    ("characters", "portrait_crop_json", "TEXT"),  # {cx, cy, k, ar}: square crop of the portrait image (null = default)  # comfy | codex (art/codex_image.py)  # staged tool calls and roll records while a turn is in flight
 ]
 
 
@@ -534,6 +535,8 @@ def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     for key in list(out):
         if key.endswith("_json") and isinstance(out[key], str):
             out[key[:-5]] = json.loads(out.pop(key))
+        elif key.endswith("_json") and out[key] is None:  # NULL json column: same decoded name, value None
+            out[key[:-5]] = out.pop(key)
     return out
 
 
