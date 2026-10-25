@@ -26,16 +26,16 @@ from .comfy import ComfyClient, ComfyError, default_root, sdxl_txt2img
 
 KINDS = ("character", "item", "mob", "scene")
 SIZES = {"character": (832, 1216), "mob": (896, 1152), "item": (1024, 1024), "scene": (1344, 768)}
-STYLE = ("gritty painted fantasy illustration, tabletop RPG sourcebook art, oil painting texture, visible brushwork, "
+STYLE = ("(gritty painted fantasy illustration:1.3), (oil painting:1.2), painterly, tabletop RPG sourcebook art, visible brushstrokes, "
          "dramatic chiaroscuro lighting, grimy dungeon atmosphere, darkly humorous, highly detailed")
 KIND_STYLE = {
-    "character": "character portrait, waist-up, facing the viewer, expressive face, plain dark background",
+    "character": "waist-up character portrait, facing the viewer, detailed expressive face, plain dark background",
     "mob": "monster illustration, full body, menacing pose, dungeon background",
     "item": "single item illustration, centered object on a worn dark wooden table, no people",
     "scene": "environment illustration, wide establishing shot, no people, no characters",
 }
-NEGATIVE = ("photo, photograph, photorealistic, 3d render, anime, manga, cartoon, chibi, blurry, lowres, jpeg artifacts, watermark, "
-            "text, letters, signature, logo, frame, border, extra limbs, extra fingers, deformed hands, disfigured face, cropped head, "
+NEGATIVE = ("(photo, photograph, photorealistic:1.3), realistic skin texture, studio portrait, 3d render, anime, manga, cartoon, chibi, blurry, lowres, jpeg artifacts, watermark, "
+            "(text, letters, words, writing:1.2), name tag, signature, logo, frame, border, extra limbs, extra fingers, deformed hands, disfigured face, cropped head, "
             "nsfw, nude")
 KIND_NEGATIVE = {"scene": "people, person, man, woman, figures, crowd, portrait", "item": "people, person, hands, face"}
 MAX_PROMPT = 900
@@ -67,6 +67,83 @@ def _positive_notes(notes: list[str]) -> list[str]:
     return [n for n in notes if not re.match(r"\s*(do not|don't|avoid|never|no )", n, re.I)]
 
 
+ANIMALS = re.compile(r"\b(dog|retriever|terrier|shepherd|hound|cat|kitten|rat|mouse|bird|parrot|crow|horse|pig|goat|ferret|"
+                     r"rabbit|lizard|snake|monkey|beast|animal)\b", re.I)
+SHE = re.compile(r"\b(she|her|hers|herself|woman|girl|female|lady)\b", re.I)
+HE = re.compile(r"\b(he|him|his|himself|man|boy|male|guy)\b", re.I)
+
+
+def character_brief(conn: sqlite3.Connection, cid: int, c: dict) -> dict:
+    """Physical brief for a character portrait, from the record only.
+
+    * subject: what the picture is of, first in the prompt (SDXL weights early words most): species for animals,
+      otherwise woman/man taken from the pronouns the character's own record uses (never guessed from a name);
+      "person" when the record doesn't say.
+    * description: the sheet's `visual` block: summary, established features, signature gear, a couple of
+      illustration notes; record-keeping notes and comparisons with other characters left out.
+    * negative: terms that contradict the subject (e.g. "man, beard" for a woman).
+    * unestablished: traits the ledger explicitly leaves open (age, face, hair...), for the Appearance field.
+    """
+    sheet = c.get("sheet") or {}
+    vis = sheet.get("visual") or {}
+    narrative = sheet.get("narrative") or {}
+    race = c.get("race") or c.get("species") or ""
+    others = [o["name"].split()[0] for o in rows(conn, "SELECT name FROM characters WHERE campaign_id = ? AND id != ?", (cid, c["id"]))]
+
+    def drawable(line: str) -> bool:
+        return not re.search(r"\b(recorded|currently|current condition|no current|uninjured|rested|canonically)\b", line, re.I) \
+            and not any(re.search(rf"\b{re.escape(n)}\b", line) for n in others if len(n) > 2) \
+            and line.strip(" .").lower() not in (race.lower(), "human")
+
+    own_text = json.dumps(vis, ensure_ascii=False) + " " + str(narrative.get("personality_summary") or "") + " " + str(narrative.get("current_role") or "")
+    she, he = len(SHE.findall(own_text)), len(HE.findall(own_text))
+    if ANIMALS.search(race):
+        noun = re.sub(r"(?i)\bearth-born\b", "", race).strip()
+        subject, negative = f"(portrait of a {noun}:1.3), realistic animal anatomy", "human, person, anthropomorphic, humanoid, standing upright"
+    elif she > he:
+        subject, negative = f"(portrait of a {race.lower() + ' ' if race and race.lower() != 'human' else ''}woman:1.3)", "man, male, beard, mustache, stubble"
+    elif he > she:
+        subject, negative = f"(portrait of a {race.lower() + ' ' if race and race.lower() != 'human' else ''}man:1.3)", "woman, female"
+    else:
+        subject, negative = f"(portrait of a {race.lower() or 'person'}:1.2)", ""
+    bits = [_clean(vis.get("summary"))]
+    bits += [f for f in _list(vis.get("established_features")) if drawable(f)][:3]
+    gear = _list(vis.get("signature_gear"))
+    if gear:
+        bits.append("carrying " + ", ".join(gear[:3]))
+    bits += [n for n in _positive_notes(_list(vis.get("illustration_notes"))) if drawable(n)][:2]
+    if not vis:
+        bits.append(_clean(narrative.get("current_role")))
+    # Class names ("Bodycam Paladin") are game titles, not looks, and pull toward fantasy armor: left out.
+    # "X rather than Y" in the record: SDXL would draw Y, so Y moves to the negative prompt.
+    avoid = []
+    for i, b in enumerate(bits):
+        avoid += [m.strip(" .") for m in re.findall(r"rather than (?:replacing it with |being |looking like )?(?:an? |the )?([^.;,]+)", b, re.I)]
+        bits[i] = re.sub(r",?\s*rather than [^.;]+", "", b, flags=re.I).strip()
+    negative = ", ".join(x for x in [negative, *[a for a in avoid if len(a.split()) >= 2][:4]] if x)
+    return {"subject": subject, "description": "; ".join(b for b in bits if b), "negative": negative,
+            "unestablished": [str(x) for x in _list(vis.get("unestablished"))]}
+
+
+def appearance(conn: sqlite3.Connection, cid: int, kind: str, key: str) -> str:
+    """The player's own appearance notes for a subject (kept with the art, not campaign canon)."""
+    r = one(conn, "SELECT appearance FROM art_subjects WHERE campaign_id = ? AND kind = ? AND subject_key = ?", (cid, kind, key.lower()))
+    return _clean(r["appearance"]) if r else ""
+
+
+def set_appearance(conn: sqlite3.Connection, cid: int, kind: str, key: str, text: str) -> None:
+    conn.execute("""INSERT INTO art_subjects (campaign_id, kind, subject_key, appearance, updated_at) VALUES (?,?,?,?,?)
+                    ON CONFLICT(campaign_id, kind, subject_key) DO UPDATE SET appearance = excluded.appearance, updated_at = excluded.updated_at""",
+                 (cid, kind, key.lower(), text.strip()[:600], now_iso()))
+
+
+def subject_negative(conn: sqlite3.Connection, cid: int, kind: str, subject_id: int | None) -> str:
+    if kind != "character" or not subject_id:
+        return ""
+    c = one(conn, "SELECT * FROM characters WHERE campaign_id = ? AND id = ?", (cid, subject_id))
+    return character_brief(conn, cid, c)["negative"] if c else ""
+
+
 def subject_text(conn: sqlite3.Connection, cid: int, kind: str, subject_id: int | None, subject_name: str | None) -> tuple[str, str]:
     """(display name, visual description) from player-visible records only."""
     if kind == "character":
@@ -74,24 +151,8 @@ def subject_text(conn: sqlite3.Connection, cid: int, kind: str, subject_id: int 
             one(conn, "SELECT * FROM characters WHERE campaign_id = ? AND lower(name) = lower(?)", (cid, subject_name or ""))
         if not c:
             raise ValueError("unknown character")
-        sheet = c.get("sheet") or {}
-        vis = sheet.get("visual") or {}
-        others = [o["name"].split()[0] for o in rows(conn, "SELECT name FROM characters WHERE campaign_id = ? AND id != ?", (cid, c["id"]))]
-
-        def drawable(line: str) -> bool:  # record-keeping notes and comparisons with other characters confuse the model
-            return not re.search(r"\b(recorded|currently|current condition|no current|uninjured|rested)\b", line, re.I) \
-                and not any(re.search(rf"\b{re.escape(n)}\b", line) for n in others if len(n) > 2)
-        bits = [" ".join(x for x in (c.get("race") or c.get("species"), c.get("class_name")) if x)]
-        bits.append(_clean(vis.get("summary")))
-        bits += [f for f in _list(vis.get("established_features")) if drawable(f)][:4]
-        gear = _list(vis.get("signature_gear"))
-        if gear:
-            bits.append("signature gear: " + ", ".join(gear[:4]))
-        bits += [n for n in _positive_notes(_list(vis.get("illustration_notes"))) if drawable(n)][:3]
-        if not vis:
-            narrative = sheet.get("narrative") or {}
-            bits.append(_clean(narrative.get("current_role")))
-        return c["name"], "; ".join(b for b in bits if b)
+        d = character_brief(conn, cid, c)
+        return c["name"], "; ".join(b for b in (d["subject"], appearance(conn, cid, "character", str(c["id"])), d["description"]) if b)
     if kind == "item":
         i = one(conn, "SELECT * FROM items WHERE campaign_id = ? AND id = ?", (cid, subject_id)) if subject_id else \
             one(conn, "SELECT * FROM items WHERE campaign_id = ? AND lower(name) = lower(?)", (cid, subject_name or ""))
@@ -115,13 +176,14 @@ def subject_text(conn: sqlite3.Connection, cid: int, kind: str, subject_id: int 
         name = _clean(subject_name)
         if not name:
             raise ValueError("a mob needs a name")
-        return name, name
+        return name, "; ".join(x for x in (name, appearance(conn, cid, "mob", name)) if x)
     raise ValueError(f"kind must be one of {', '.join(KINDS)}")
 
 
 def build_prompt(kind: str, description: str, extra: str | None = None) -> str:
-    body = "; ".join(x for x in (_clean(extra), description) if x)
-    return f"{STYLE}, {KIND_STYLE[kind]}, {body}"[:MAX_PROMPT]
+    """Subject first (SDXL weights the start of a prompt most), then the GM's or player's extra words, then style."""
+    body = "; ".join(x for x in (description, _clean(extra)) if x)
+    return f"{body}, {KIND_STYLE[kind]}, {STYLE}"[:MAX_PROMPT]
 
 
 def _shingles(text: str, n: int = 6) -> set[str]:
@@ -154,7 +216,7 @@ def create_job(conn: sqlite3.Connection, settings: Settings, cid: int, kind: str
     final = (prompt or "").strip()[:MAX_PROMPT] or build_prompt(kind, desc, extra)
     jid = conn.execute("""INSERT INTO art_jobs (campaign_id, kind, subject_id, subject_name, prompt, negative, width, height, seed, status,
                           source, reason, note, turn_id, checkpoint, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                       (cid, kind, subject_id, name, final, ", ".join(x for x in (NEGATIVE, KIND_NEGATIVE.get(kind)) if x), w, h, random.randint(1, 2**31 - 1), status, source, reason, note,
+                       (cid, kind, subject_id, name, final, ", ".join(x for x in (NEGATIVE, KIND_NEGATIVE.get(kind), subject_negative(conn, cid, kind, subject_id)) if x), w, h, random.randint(1, 2**31 - 1), status, source, reason, note,
                         turn_id, checkpoint_name(settings), now_iso())).lastrowid
     return job_view(one(conn, "SELECT * FROM art_jobs WHERE id = ?", (jid,)))
 

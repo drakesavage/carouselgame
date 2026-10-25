@@ -285,6 +285,14 @@ CREATE TABLE IF NOT EXISTS art_jobs (       -- campaign artwork rendered by the 
   finished_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_art_subject ON art_jobs(campaign_id, kind, subject_id);
+CREATE TABLE IF NOT EXISTS art_subjects (   -- the player's appearance notes per subject (art only; not campaign canon)
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  kind TEXT NOT NULL,
+  subject_key TEXT NOT NULL,              -- characters.id / items.id / scenes.id as text, or a Mob's lower-case name
+  appearance TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (campaign_id, kind, subject_key)
+);
 
 CREATE TABLE IF NOT EXISTS turns (
   id INTEGER PRIMARY KEY,

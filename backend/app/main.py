@@ -59,6 +59,13 @@ class ArtIn(BaseModel):
     extra: str | None = Field(default=None, max_length=500)
 
 
+class AppearanceIn(BaseModel):
+    kind: str
+    subject_id: int | None = None
+    subject_name: str | None = None
+    appearance: str = Field(default="", max_length=600)
+
+
 class TurnIn(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
     idempotency_key: str = Field(min_length=8, max_length=80)
@@ -347,7 +354,24 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
             name, desc = art.subject_text(c, cid, kind, subject_id, subject_name)
         except ValueError as exc:
             raise HTTPException(422, str(exc))
-        return {"subject_name": name, "prompt": art.build_prompt(kind, desc), "negative": art.NEGATIVE, "size": art.SIZES[kind]}
+        key = (subject_name or name).lower() if kind == "mob" else str(subject_id or "")
+        unestablished = []
+        if kind == "character":
+            ch = one(c, "SELECT * FROM characters WHERE campaign_id = ? AND (id = ? OR lower(name) = lower(?))", (cid, subject_id or -1, subject_name or ""))
+            key, unestablished = str(ch["id"]), art.character_brief(c, cid, ch)["unestablished"]
+        return {"subject_name": name, "prompt": art.build_prompt(kind, desc), "negative": art.NEGATIVE, "size": art.SIZES[kind],
+                "appearance": art.appearance(c, cid, kind, key) if key else "", "unestablished": unestablished}
+
+    @app.put("/api/campaigns/{cid}/art/appearance")
+    def art_set_appearance(cid: int, body: AppearanceIn, c=Depends(db)):
+        campaign_or_404(c, cid)
+        if body.kind not in art.KINDS:
+            raise HTTPException(422, "unknown kind")
+        key = (body.subject_name or "").lower() if body.kind == "mob" else str(body.subject_id or "")
+        if not key:
+            raise HTTPException(422, "subject_id (or subject_name for a Mob) is required")
+        art.set_appearance(c, cid, body.kind, key, body.appearance)
+        return {"ok": True}
 
     @app.post("/api/campaigns/{cid}/art")
     def art_create(cid: int, body: ArtIn, c=Depends(db)):

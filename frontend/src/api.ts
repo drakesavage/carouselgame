@@ -143,8 +143,10 @@ export const api = {
   },
   artPreview: (cid: number, kind: ArtKind, subjectId?: number | null, subjectName?: string) => {
     const q = new URLSearchParams({ kind, ...(subjectId != null ? { subject_id: String(subjectId) } : {}), ...(subjectName ? { subject_name: subjectName } : {}) });
-    return req<{ subject_name: string; prompt: string; negative: string; size: [number, number] }>(`api/campaigns/${cid}/art/preview?${q}`);
+    return req<{ subject_name: string; prompt: string; negative: string; size: [number, number]; appearance: string; unestablished: string[] }>(`api/campaigns/${cid}/art/preview?${q}`);
   },
+  artAppearance: (cid: number, body: { kind: ArtKind; subject_id?: number | null; subject_name?: string; appearance: string }) =>
+    req<{ ok: boolean }>(`api/campaigns/${cid}/art/appearance`, { method: "PUT", body: JSON.stringify(body) }),
   artCreate: (cid: number, body: { kind: ArtKind; subject_id?: number; subject_name?: string; prompt?: string }) =>
     req<ArtJob>(`api/campaigns/${cid}/art`, { method: "POST", body: JSON.stringify(body) }),
   artAction: (id: number, action: "approve" | "dismiss" | "retry" | "use") => req<ArtJob>(`api/art/${id}/${action}`, { method: "POST" }),

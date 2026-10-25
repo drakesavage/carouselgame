@@ -47,7 +47,7 @@ def test_character_prompt_uses_visual_block_and_skips_negations(conn, demo_id):
     name, desc = art.subject_text(conn, demo_id, "character", c["id"], None)
     prompt = art.build_prompt("character", desc)
     assert "patched raincoat" in prompt and "Shopping cart shield" in prompt and "bright yellow" in prompt
-    assert "Do not show" not in prompt and prompt.startswith(art.STYLE)
+    assert "Do not show" not in prompt and prompt.endswith(art.STYLE)
 
 
 def test_gm_description_that_repeats_a_secret_is_dropped(conn, settings, demo_id):
@@ -121,3 +121,30 @@ def test_comfy_unavailable_fails_the_job_and_stops(client, settings, demo_id):
     assert w._drain() == 0
     st = [j["status"] for j in client.get(f"/api/campaigns/{demo_id}/art").json()]
     assert st == ["queued", "failed"]  # the second waits instead of failing too
+
+
+def test_portrait_subject_comes_first_with_gender_from_the_records_own_pronouns(conn, settings, demo_id):
+    c = one(conn, "SELECT id FROM characters WHERE campaign_id = ? AND slug = 'juniper'", (demo_id,))
+    conn.execute("UPDATE characters SET race = 'Human', sheet_json = json_set(sheet_json, '$.visual', json(?)) WHERE id = ?",
+                 ('{"summary": "Former courier; she keeps her raincoat on", "established_features": ["Human."], '
+                  '"unestablished": ["Exact age", "Hair"]}', c["id"]))
+    job = art.create_job(conn, settings, demo_id, "character", subject_id=c["id"])
+    assert job["prompt"].startswith("(portrait of a woman:1.3)") and job["prompt"].index("Former courier") < job["prompt"].index(art.STYLE)
+    assert "beard" in one(conn, "SELECT negative FROM art_jobs WHERE id = ?", (job["id"],))["negative"]
+    art.set_appearance(conn, demo_id, "character", str(c["id"]), "woman in her forties, short grey-streaked hair")
+    again = art.create_job(conn, settings, demo_id, "character", subject_id=c["id"])
+    assert "short grey-streaked hair" in again["prompt"].split(";")[1]
+
+
+def test_animal_companions_get_their_species_not_a_person(conn, demo_id):
+    c = one(conn, "SELECT * FROM characters WHERE campaign_id = ? AND slug = 'bix'", (demo_id,))
+    c["race"] = "Earth-born Golden Retriever"
+    brief = art.character_brief(conn, demo_id, c)
+    assert brief["subject"].startswith("(portrait of a Golden Retriever") and "human" in brief["negative"]
+
+
+def test_appearance_endpoint_and_preview(client, demo_id):
+    cid = next(p["id"] for p in client.get(f"/api/campaigns/{demo_id}").json()["party"] if p["slug"] == "juniper")
+    assert client.put(f"/api/campaigns/{demo_id}/art/appearance", json={"kind": "character", "subject_id": cid, "appearance": "freckles"}).status_code == 200
+    p = client.get(f"/api/campaigns/{demo_id}/art/preview", params={"kind": "character", "subject_id": cid}).json()
+    assert p["appearance"] == "freckles" and "freckles" in p["prompt"]

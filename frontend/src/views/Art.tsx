@@ -35,14 +35,26 @@ function ArtDialog({ cid, kind, subjectId, subjectName, onClose }:
   const params = kind === "mob" ? { kind, subject_name: subjectName } : { kind, subject_id: subjectId ?? undefined };
   const { jobs, load, busy } = useJobs(cid, params);
   const [prompt, setPrompt] = useState("");
+  const [look, setLook] = useState("");
+  const [savedLook, setSavedLook] = useState("");
+  const [open, setOpen] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [status, setStatus] = useState<Record<string, any> | null>(null);
   useEffect(() => {
-    api.artPreview(cid, kind, subjectId, subjectName).then((p) => setPrompt(p.prompt)).catch((e) => setErr(String(e)));
+    api.artPreview(cid, kind, subjectId, subjectName).then((p) => { setPrompt(p.prompt); setLook(p.appearance ?? ""); setSavedLook(p.appearance ?? ""); setOpen(p.unestablished ?? []); })
+      .catch((e) => setErr(String(e)));
     api.artStatus().then(setStatus).catch(() => {});
   }, [cid, kind, subjectId, subjectName]);
   const done = jobs.filter((j) => j.status === "done");
   const current = done.find((j) => j.is_current) ?? done[0];
+  const saveLook = async () => {
+    if (look === savedLook) return;
+    try {
+      await api.artAppearance(cid, { kind, subject_id: subjectId ?? undefined, subject_name: subjectName, appearance: look });
+      setSavedLook(look);
+      setPrompt((await api.artPreview(cid, kind, subjectId, subjectName)).prompt);
+    } catch (e) { setErr(String(e)); }
+  };
   const render = async () => {
     setErr(null);
     try { await api.artCreate(cid, { kind, subject_id: subjectId ?? undefined, subject_name: subjectName, prompt }); await load(); }
@@ -66,7 +78,12 @@ function ArtDialog({ cid, kind, subjectId, subjectName, onClose }:
               {busy && <div className="art-busy"><Loader2 size={14} className="spin" /> {jobs.find((j) => j.status === "running") ? "Painting… (about a minute; the first picture after a restart takes a few)" : "Waiting in the queue…"}</div>}
             </div>
             <div className="art-side">
-              <div className="h2">Prompt</div>
+                <div className="h2">Appearance</div>
+                <textarea className="input" rows={3} value={look} onChange={(e) => setLook(e.target.value)} onBlur={saveLook}
+                  placeholder={kind === "character" ? "e.g. woman in her forties, short grey-streaked hair, broad shoulders, tired eyes" : "what it looks like"} />
+                <div className="sub">{open.length ? <>The ledger leaves these open: {open.join(", ").toLowerCase()}. </> : null}
+                  Saved for every future picture of {subjectName}, so they stay consistent. Art only; not campaign canon.</div>
+              <div className="h2" style={{ marginTop: 10 }}>Prompt</div>
               <textarea className="input" rows={8} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
               <div className="sub">Built from what the party knows. Edit freely; nothing GM-only goes in.</div>
               <div className="row" style={{ marginTop: 8 }}>
