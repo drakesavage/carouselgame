@@ -138,6 +138,8 @@ export const api = {
   gmDiagnostics: (turnId: number, token: string) => req<Record<string, any>>(`api/gm/turns/${turnId}/diagnostics`, { headers: { "X-GM-Token": token } }),
   artStatus: () => req<Record<string, any>>("api/art/status"),
   geminiQuota: () => req<Record<string, any>>("api/gemini/quota"),
+  importVisualReference: (cid: number, markdown: string, source: string) =>
+    req<{ updated: string[]; unmatched: string[]; save_point_id: number }>(`api/campaigns/${cid}/visual-reference`, { method: "POST", body: JSON.stringify({ markdown, source }) }),
   artDraftAppearance: (cid: number, subjectId: number) =>
     req<{ appearance: string }>(`api/campaigns/${cid}/art/draft-appearance`, { method: "POST", body: JSON.stringify({ kind: "character", subject_id: subjectId }) }),
   artList: (cid: number, p: { kind?: ArtKind; subject_id?: number | null; subject_name?: string }) => {

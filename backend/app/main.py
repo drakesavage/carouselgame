@@ -68,6 +68,11 @@ class AppearanceIn(BaseModel):
     appearance: str = Field(default="", max_length=600)
 
 
+class VisualReferenceIn(BaseModel):
+    markdown: str = Field(min_length=10, max_length=200_000)
+    source: str = Field(default="visual reference", max_length=120)
+
+
 class TurnIn(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
     idempotency_key: str = Field(min_length=8, max_length=80)
@@ -338,6 +343,17 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         return FileResponse(path)
 
     # ------------------------------------------------------------------ art (local ComfyUI)
+    @app.post("/api/campaigns/{cid}/visual-reference")
+    def import_visual_reference(cid: int, body: VisualReferenceIn, c=Depends(db), _=Depends(write_lock)):
+        """Import physical descriptions (## Name / **demographic | age | class** / paragraphs / Signature / Expression) into
+        the characters' visual blocks. A save point is taken first, so the import can be undone from Saves."""
+        from .importer.visual_reference import apply as apply_reference
+        campaign_or_404(c, cid)
+        with transaction(c):
+            sp = snapshots.create_save_point(c, cid, "Before visual reference import", kind="manual")
+            result = apply_reference(c, cid, body.markdown, body.source)
+        return {**result, "save_point_id": sp}
+
     @app.get("/api/gemini/quota")
     def gemini_quota():
         from .gm.router import GeminiQuota
@@ -397,7 +413,8 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         if kind == "character":
             ch = one(c, "SELECT * FROM characters WHERE campaign_id = ? AND (id = ? OR lower(name) = lower(?))", (cid, subject_id or -1, subject_name or ""))
             key, unestablished = str(ch["id"]), art.character_brief(c, cid, ch)["unestablished"]
-        return {"subject_name": name, "prompt": art.build_prompt(kind, desc), "negative": art.NEGATIVE, "size": art.SIZES[kind],
+        style, size = art.subject_layout(c, cid, kind, int(key) if kind == "character" and key.isdigit() else None)
+        return {"subject_name": name, "prompt": art.build_prompt(kind, desc, style=style), "negative": art.NEGATIVE, "size": size,
                 "appearance": art.appearance(c, cid, kind, key) if key else "", "unestablished": unestablished}
 
     @app.put("/api/campaigns/{cid}/art/appearance")

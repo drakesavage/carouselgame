@@ -249,6 +249,7 @@ class Builder:
         d = c.get("derived") or {}
         if "unallocated_stat_points" in d and "unallocated_stat_points" in m and _int(m.get("unallocated_stat_points")) != d["unallocated_stat_points"]:
             self.set(f, ["mechanics", "unallocated_stat_points"], d["unallocated_stat_points"], f"Unallocated Stat points → {d['unallocated_stat_points']}", g)
+        self._visual(f, B, c, g)
         self._skills(f, m, c, g)
         self._statuses(f, m, c, g)
         self._items(f, B, c, g)
@@ -256,6 +257,23 @@ class Builder:
                       (self.cid, c["id"], self.hw.get("achievement", 0))):
             self.append(f, ["achievements"], {"title": a["title"], "description": a["description"], "date": self.today, "source": "Crawler Console"},
                         f"Achievement: {a['title']}", g, cat="achievement")
+
+    def _visual(self, f: str, B: dict, c: dict, g: str) -> None:
+        """Imported visual references (importer/visual_reference.py) go to the character file's `visual.reference`, and
+        the traits they settle leave `visual.unestablished`. Inverse of the importer copying `visual` into the sheet."""
+        vis = (c.get("sheet") or {}).get("visual") or {}
+        ref = vis.get("reference")
+        if not ref:
+            return
+        bvis = B.get("visual")
+        if not isinstance(bvis, dict):
+            self.warnings.append(f"{c['name']}: {f} has no visual block; the visual reference stays in the console.")
+            return
+        clean = {k: v for k, v in ref.items() if k != "imported_at"}  # the import time is console bookkeeping
+        self.set(f, ["visual", "reference"], clean, "Visual reference: " + ", ".join(
+            str(x) for x in (ref.get("demographic"), ref.get("age") or ref.get("size")) if x), g)
+        if "unestablished" in bvis and (vis.get("unestablished") or []) != (bvis.get("unestablished") or []):
+            self.set(f, ["visual", "unestablished"], vis.get("unestablished") or [], "Unestablished visual traits settled by the reference", g)
 
     def _skills(self, f: str, m: dict, c: dict, g: str) -> None:
         section = {"skill": "skills", "spell": "spells", "equipment_skill": "equipment_granted_skills"}

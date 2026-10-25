@@ -190,3 +190,5 @@ body::before {
 .spin { animation: spin 1.1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+.appearance p { margin: 8px 0 0; font-size: 13.5px; line-height: 1.5; }

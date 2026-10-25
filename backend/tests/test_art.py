@@ -83,7 +83,7 @@ def test_gm_suggestion_waits_for_approval_then_renders_and_installs_the_portrait
     assert bix["portrait_path"] == f"art-{done['id']}.png"
     wf = worker.client.workflows[0]
     assert wf["1"]["inputs"]["ckpt_name"] == settings.comfy_checkpoint and wf["5"]["inputs"]["steps"] == 8  # turbo settings
-    assert (wf["4"]["inputs"]["width"], wf["4"]["inputs"]["height"]) == art.SIZES["character"]
+    assert (wf["4"]["inputs"]["width"], wf["4"]["inputs"]["height"]) in (art.SIZES["character"], (896, 1152))  # Bix is a rat: animal framing
 
 
 def test_one_suggestion_per_turn_and_no_duplicates(conn, settings, demo_id):
@@ -148,3 +148,55 @@ def test_appearance_endpoint_and_preview(client, demo_id):
     assert client.put(f"/api/campaigns/{demo_id}/art/appearance", json={"kind": "character", "subject_id": cid, "appearance": "freckles"}).status_code == 200
     p = client.get(f"/api/campaigns/{demo_id}/art/preview", params={"kind": "character", "subject_id": cid}).json()
     assert p["appearance"] == "freckles" and "freckles" in p["prompt"]
+
+
+REF = """# Visual Reference
+
+## Juniper Vale (demo)
+**Black American woman | 37 | Courier**
+
+Approximately 5'8", athletic. Deep-brown skin, braided hair in a low bun.
+
+Battered yellow raincoat over a navy shirt. Her look should come from reference photos.
+
+**Signature:** Shopping-cart shield, not a fantasy knight in armor.
+
+**Expression:** Watchful and wry.
+
+## Bix (demo)
+**Male brown rat | Approximately 1 pound | Scout**
+
+Glossy brown fur, one torn ear.
+
+**Signature:** Tiny satchel.
+
+**Expression:** Nervous.
+
+## Nobody Here
+**Human | 20 | None**
+
+Nothing.
+"""
+
+
+def test_visual_reference_parses_and_imports_with_a_save_point(client, settings, demo_id):
+    from app.importer.visual_reference import parse
+    es = parse(REF)
+    assert [e["name"] for e in es] == ["Juniper Vale (demo)", "Bix (demo)", "Nobody Here"]
+    assert es[0]["age"] == "37" and es[1]["size"] == "Approximately 1 pound" and "raincoat" in es[0]["outfit"]
+    r = client.post(f"/api/campaigns/{demo_id}/visual-reference", json={"markdown": REF, "source": "test"}).json()
+    assert r["updated"] == ["Juniper Vale (demo)", "Bix (demo)"] and r["unmatched"] == ["Nobody Here"] and r["save_point_id"]
+    c = connect(settings.campaign_db)
+    jid = one(c, "SELECT id FROM characters WHERE campaign_id = ? AND slug = 'juniper'", (demo_id,))["id"]
+    job = art.create_job(c, settings, demo_id, "character", subject_id=jid)
+    p = job["prompt"]
+    assert p.startswith("(portrait of a 37-year-old black american woman:1.3)") and "yellow raincoat" in p and p.endswith(art.STYLE)
+    assert "reference photos" not in p and "fantasy knight" not in p
+    neg = one(c, "SELECT negative FROM art_jobs WHERE id = ?", (job["id"],))["negative"]
+    assert "beard" in neg and "fantasy knight in armor" in neg
+    bix = one(c, "SELECT id FROM characters WHERE campaign_id = ? AND slug = 'bix'", (demo_id,))["id"]
+    assert art.create_job(c, settings, demo_id, "character", subject_id=bix)["prompt"].startswith("(portrait of a male brown rat:1.3)")
+    from app.memory.context import build_context
+    assert "looks: Black American woman, 37" in build_context(c, demo_id, "hello")["text"]
+    sheet = client.get(f"/api/campaigns/{demo_id}/characters/{jid}").json()["sheet"]
+    assert sheet["visual"]["reference"]["expression"] == "Watchful and wry."

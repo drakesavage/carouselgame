@@ -38,7 +38,7 @@ NEGATIVE = ("(photo, photograph, photorealistic:1.3), realistic skin texture, st
             "(text, letters, words, writing:1.2), name tag, signature, logo, frame, border, extra limbs, extra fingers, deformed hands, disfigured face, cropped head, "
             "nsfw, nude")
 KIND_NEGATIVE = {"scene": "people, person, man, woman, figures, crowd, portrait", "item": "people, person, hands, face"}
-MAX_PROMPT = 900
+MAX_PROMPT = 1700  # SDXL reads long prompts in 77-token chunks; the style tail must survive
 
 
 def checkpoint_name(settings: Settings) -> str:
@@ -95,6 +95,9 @@ def character_brief(conn: sqlite3.Connection, cid: int, c: dict) -> dict:
             and not any(re.search(rf"\b{re.escape(n)}\b", line) for n in others if len(n) > 2) \
             and line.strip(" .").lower() not in (race.lower(), "human")
 
+    ref = vis.get("reference") or {}
+    if ref:
+        return _reference_brief(ref, vis, others)
     own_text = json.dumps(vis, ensure_ascii=False) + " " + str(narrative.get("personality_summary") or "") + " " + str(narrative.get("current_role") or "")
     she, he = len(SHE.findall(own_text)), len(HE.findall(own_text))
     if ANIMALS.search(race):
@@ -122,6 +125,46 @@ def character_brief(conn: sqlite3.Connection, cid: int, c: dict) -> dict:
         bits[i] = re.sub(r",?\s*rather than [^.;]+", "", b, flags=re.I).strip()
     negative = ", ".join(x for x in [negative, *[a for a in avoid if len(a.split()) >= 2][:4]] if x)
     return {"subject": subject, "description": "; ".join(b for b in bits if b), "negative": negative,
+            "unestablished": [str(x) for x in _list(vis.get("unestablished"))]}
+
+
+AVOID = re.compile(r"(?:,|—|-|;)?\s*\b(?:rather than|not an?|not the)\s+([^.;,—]+)", re.I)
+
+
+def _reference_brief(ref: dict, vis: dict, others: list[str]) -> dict:
+    """Brief from an imported visual reference (importer/visual_reference.py): its demographics lead the prompt."""
+    demo = _clean(ref.get("demographic"))
+    age, size = _clean(ref.get("age")), _clean(ref.get("size"))
+    animal = bool(ANIMALS.search(demo) or re.search(r"\balligator|crocodile\b", demo, re.I))
+    low = demo.lower()
+    if animal:
+        subject = f"(portrait of a {low}:1.3), realistic animal anatomy" + (f", {size.lower()}" if size else "")
+        negative = "(humanoid, anthropomorphic, standing upright, bipedal, human torso:1.4), human, person, cartoon, clothing on a reptile"
+    else:
+        noun = re.sub(r"\bhuman (male|female)\b", lambda m: "man" if m.group(1).lower() == "male" else "woman", low)
+        noun = re.sub(r"\bmale\b", "man", re.sub(r"\bfemale\b", "woman", noun))
+        lead = f"{age}-year-old {noun}" if age.isdigit() else (f"{noun} in their {age.lower()}" if age else noun)
+        lead = re.sub(r"\btheir\b", "his" if re.search(r"\bman\b", noun) else "her" if re.search(r"\bwoman\b", noun) else "their", lead)
+        subject = f"(portrait of a {lead}:1.3)"
+        negative = "man, male, beard, mustache, stubble" if re.search(r"\bwoman\b", noun) else "woman, female" if re.search(r"\bman\b", noun) else ""
+
+    def keep(sentence: str) -> bool:  # drop instructions to the illustrator and comparisons with other characters
+        return not re.search(r"\b(should|must|reference photo|portrait-reference)\b", sentence, re.I) \
+            and not any(re.search(rf"\b{re.escape(n)}\b", sentence) for n in others if len(n) > 2)
+
+    avoid: list[str] = []
+    parts = []
+    for label, text in (("", ref.get("physique")), ("", ref.get("outfit")), ("signature: ", ref.get("signature")), ("expression: ", ref.get("expression"))):
+        sentences = [s for s in re.split(r"(?<=[.!?])\s+", _clean(text)) if s and keep(s)]
+        body = " ".join(sentences)
+        avoid += [m.strip(" .") for m in AVOID.findall(body)]
+        body = AVOID.sub("", body).strip()
+        if body:
+            parts.append(label + body)
+    if not animal and not re.search(r"\b(armor|armour|guard|harness|plate|mail)\b", _clean(ref.get("outfit")), re.I):
+        negative += ", (plate armor, pauldrons, shoulder armor, chainmail, metal shoulder guards, breastplate:1.5)"  # modern clothes: keep fantasy armor out
+    negative = ", ".join(x for x in [negative, *[a for a in avoid if len(a.split()) >= 2][:4]] if x)
+    return {"subject": subject, "description": "; ".join(parts), "negative": negative,
             "unestablished": [str(x) for x in _list(vis.get("unestablished"))]}
 
 
@@ -180,10 +223,30 @@ def subject_text(conn: sqlite3.Connection, cid: int, kind: str, subject_id: int 
     raise ValueError(f"kind must be one of {', '.join(KINDS)}")
 
 
-def build_prompt(kind: str, description: str, extra: str | None = None) -> str:
+ANIMAL_STYLE = "full-body animal portrait, natural pose, all four feet on the ground, eye level, dark background"
+BIG_ANIMAL_STYLE = "full-body wildlife painting, side view, body low on the ground, natural pose, murky water and mud"
+BIG_ANIMAL = re.compile(r"\b(alligator|crocodile|horse|bear|bull|cow|boar|moose|elk)\b", re.I)
+
+
+def subject_layout(conn: sqlite3.Connection, cid: int, kind: str, subject_id: int | None) -> tuple[str, tuple[int, int]]:
+    """Framing and size: a tall waist-up portrait suits people; animals get a full-body pose (a tall frame makes SDXL
+    stand a quadruped upright like a person), and big low animals a wide frame."""
+    if kind == "character" and subject_id:
+        c = one(conn, "SELECT race, sheet_json FROM characters WHERE campaign_id = ? AND id = ?", (cid, subject_id))
+        if c:
+            ref = ((c.get("sheet") or {}).get("visual") or {}).get("reference") or {}
+            what = f"{ref.get('demographic') or ''} {c.get('race') or ''}"
+            if BIG_ANIMAL.search(what):
+                return BIG_ANIMAL_STYLE, (1216, 832)
+            if ANIMALS.search(what):
+                return ANIMAL_STYLE, (896, 1152)
+    return KIND_STYLE[kind], SIZES[kind]
+
+
+def build_prompt(kind: str, description: str, extra: str | None = None, style: str | None = None) -> str:
     """Subject first (SDXL weights the start of a prompt most), then the GM's or player's extra words, then style."""
     body = "; ".join(x for x in (description, _clean(extra)) if x)
-    return f"{body}, {KIND_STYLE[kind]}, {STYLE}"[:MAX_PROMPT]
+    return f"{body}, {style or KIND_STYLE[kind]}, {STYLE}"[:MAX_PROMPT]
 
 
 def _shingles(text: str, n: int = 6) -> set[str]:
@@ -212,8 +275,8 @@ def create_job(conn: sqlite3.Connection, settings: Settings, cid: int, kind: str
     note = None
     if source == "gm" and extra and leaks_secret(conn, cid, extra):
         extra, note = None, "GM description dropped: it repeated wording from a GM-only record"
-    w, h = SIZES[kind]
-    final = (prompt or "").strip()[:MAX_PROMPT] or build_prompt(kind, desc, extra)
+    style, (w, h) = subject_layout(conn, cid, kind, subject_id)
+    final = (prompt or "").strip()[:MAX_PROMPT] or build_prompt(kind, desc, extra, style)
     jid = conn.execute("""INSERT INTO art_jobs (campaign_id, kind, subject_id, subject_name, prompt, negative, width, height, seed, status,
                           source, reason, note, turn_id, checkpoint, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                        (cid, kind, subject_id, name, final, ", ".join(x for x in (NEGATIVE, KIND_NEGATIVE.get(kind), subject_negative(conn, cid, kind, subject_id)) if x), w, h, random.randint(1, 2**31 - 1), status, source, reason, note,

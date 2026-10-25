@@ -132,6 +132,10 @@ def _full_char(conn: sqlite3.Connection, c: dict, where: str | None = None, budg
     if sheet.get("hotlist"):
         lines.append("hotlist: " + ", ".join(map(str, sheet["hotlist"])))
     narrative = sheet.get("narrative") or {}
+    from ..importer.visual_reference import reference_line
+    looks = reference_line(sheet)
+    if looks:
+        lines.append(looks)
     if narrative.get("personality_summary") or narrative.get("current_role"):
         lines.append(f"public persona: {narrative.get('current_role', '')} — {narrative.get('personality_summary', '')}")
     p = c.get("npc_profile")

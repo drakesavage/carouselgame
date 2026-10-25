@@ -23,6 +23,7 @@ export function CharacterSheetDialog({ cid, charId, onClose, onChanged }: { cid:
   const attacks = c?.sheet?.attacks as Record<string, any> | any[] | undefined;
   const attackList = attacks ? (Array.isArray(attacks) ? attacks : Object.values(attacks)) : [];
   const narrative = c?.sheet?.narrative as Record<string, unknown> | undefined;
+  const ref = ((c?.sheet?.visual as Record<string, any> | undefined)?.reference ?? null) as Record<string, string> | null;
   const skills = c?.skills.filter((s) => s.kind !== "spell") ?? [];
   const spells = c?.skills.filter((s) => s.kind === "spell") ?? [];
 
@@ -145,6 +146,20 @@ export function CharacterSheetDialog({ cid, charId, onClose, onChanged }: { cid:
                   <><div className="h2">What you know</div>
                     <div className="card">{c.npc_profile.personality && <div>{c.npc_profile.personality}</div>}{c.npc_profile.known_motivation && <div className="sub">Role: {c.npc_profile.known_motivation}</div>}
                       <div className="sub">Attitude toward the party: {c.npc_profile.attitude == null ? "not recorded" : c.npc_profile.attitude}</div></div></>
+                )}
+                {ref && (
+                  <>
+                    <div className="h2">Appearance</div>
+                    <div className="card appearance">
+                      <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                        {[ref.demographic, ref.age ?? ref.size, ref.class_title].filter(Boolean).map((x) => <Chip key={String(x)}>{String(x)}</Chip>)}
+                      </div>
+                      {ref.physique && <p>{String(ref.physique)}</p>}
+                      {ref.outfit && <p>{String(ref.outfit)}</p>}
+                      {ref.signature && <p><b>Signature:</b> {String(ref.signature)}</p>}
+                      {ref.expression && <p><b>Expression:</b> {String(ref.expression)}</p>}
+                    </div>
+                  </>
                 )}
                 {narrative && <><div className="h2">Narrative</div><Tree value={narrative} /></>}
                 {c.sheet?.visual ? <><div className="h2">Appearance</div><Tree value={c.sheet.visual} /></> : null}

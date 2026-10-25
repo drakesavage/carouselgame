@@ -150,6 +150,14 @@ painted-fantasy style. A character's picture becomes their portrait. The GM can 
 (`suggest_image`) when something notable appears; suggestions wait in the HUD's **Art** panel until you click Paint.
 Settings: `COMFYUI_URL`, `COMFYUI_ROOT`, `COMFY_CHECKPOINT`, `COMFY_TIMEOUT_S`. Pictures live in `data/art/`.
 
+**Visual references.** *Saves & Settings → Import visual reference* takes a document with one `## Name` section per
+character (`**demographic | age | class**`, a physique paragraph, an outfit paragraph, `**Signature:**`,
+`**Expression:**`) and stores it in each character's sheet (`visual.reference`, with a save point first). Sheets show it
+as **Appearance**, portraits lead with its demographics (animals get full-body framing, big ones a wide frame), and the
+GM briefing gets a one-line "looks:" summary per character. The Denton reference is kept in
+`data/visual_reference/denton-crawlers.md`. Ledger write-back carries them to each character file's `visual.reference`
+(and trims `visual.unestablished`) in the next reviewed commit.
+
 **GM diagnostics** (*Saves & Settings → GM diagnostics*, needs the GM token from `data/gm_token.txt`): each turn's
 full context packet, tool rounds, Codex usage, game time elapsed, and an integrity report that flags rejected changes,
 gold/HP/item/time mentions that don't match the ledger updates, counted cycles on a recap, and leaked GM-only text.

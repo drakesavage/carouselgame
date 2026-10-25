@@ -144,6 +144,11 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
       </div>
 
       <details className="card" style={{ marginTop: 14 }}>
+        <summary style={{ cursor: "pointer" }}><b>Import visual reference</b> <span className="sub">(physical descriptions for sheets and portraits)</span></summary>
+        <div style={{ marginTop: 12 }}><VisualReferenceImport cid={cid} /></div>
+      </details>
+
+      <details className="card" style={{ marginTop: 14 }}>
         <summary style={{ cursor: "pointer" }}><b>GM diagnostics</b> <span className="sub">(development: context packets, tool rounds, dice, integrity checks; GM token required)</span></summary>
         <div style={{ marginTop: 12 }}>{cid ? <Diagnostics cid={cid} /> : <div className="muted">Open a campaign first.</div>}</div>
       </details>
@@ -191,6 +196,29 @@ function AutoInfo({ prefs, update }: { prefs: Prefs; update: (p: Partial<Prefs>)
           </select>
         </label>
       </div>
+    </div>
+  );
+}
+
+
+/** Paste a visual reference (## Name, **demographic | age | class**, paragraphs, Signature, Expression). */
+export function VisualReferenceImport({ cid }: { cid: number }) {
+  const [text, setText] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const run = async () => {
+    setMsg(null);
+    try {
+      const r = await api.importVisualReference(cid, text, "pasted visual reference");
+      setMsg(`Updated ${r.updated.length}: ${r.updated.join(", ")}.${r.unmatched.length ? ` No match for: ${r.unmatched.join(", ")}.` : ""} Undo with save point #${r.save_point_id}.`);
+      setText("");
+    } catch (e) { setMsg(String(e)); }
+  };
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <div className="sub">Physical descriptions for character sheets, portraits and the GM. One <span className="mono">## Name</span> section per character,
+        then <span className="mono">**demographic | age | class**</span>, a physique paragraph, an outfit paragraph, <span className="mono">**Signature:**</span> and <span className="mono">**Expression:**</span>.</div>
+      <textarea className="input" rows={6} value={text} onChange={(e) => setText(e.target.value)} placeholder="## Terri Campion&#10;**Black American woman | 37 | Bodycam Paladin**&#10;..." />
+      <div className="row"><button className="btn" disabled={text.trim().length < 10} onClick={run}>Import</button>{msg && <span className="sub">{msg}</span>}</div>
     </div>
   );
 }
