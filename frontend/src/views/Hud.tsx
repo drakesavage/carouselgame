@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { Campaign, CharacterCard, Encounter, fmtMinutes, Manifest, Quest } from "../api";
 import { Bar, Chip, humanize, Panel, Portrait } from "../ui";
+import { ArtButton, ArtQueue } from "./Art";
 
 // ------------------------------------------------------------------ local artwork
 export const ManifestContext = createContext<Manifest>({ locations: {}, characters: {} });
@@ -69,11 +70,11 @@ function sameplace(a?: string | null, b?: string | null) {
   return first(a) === first(b);
 }
 
-export function SceneBanner({ campaign }: { campaign: Campaign }) {
+export function SceneBanner({ campaign, onArt }: { campaign: Campaign; onArt?: () => void }) {
   const m = useManifest();
   const [open, setOpen] = useState(false);
   const s = campaign.scene;
-  const art = locationArt(m, s?.location, s?.title, campaign.current_location);
+  const art = (s && campaign.art?.scene[String(s.id)]) || locationArt(m, s?.location, s?.title, campaign.current_location);
   const group = campaign.groups.find((g) => g.key === s?.group_key);
   return (
     <header className={`banner ${open ? "open" : ""}`}>
@@ -81,7 +82,7 @@ export function SceneBanner({ campaign }: { campaign: Campaign }) {
       <div className="banner-shade" />
       <div className="banner-body">
         <div className="banner-kicker"><MapPin size={12} /> {s?.location ?? campaign.current_location ?? "Unknown location"}{campaign.safe_room && sameplace(s?.location, campaign.current_location) ? " · saferoom" : ""}</div>
-        <div className="banner-title">{s?.title ?? "No scene recorded"}</div>
+        <div className="banner-title">{s?.title ?? "No scene recorded"}{s && <span className="banner-paint"><ArtButton cid={campaign.id} kind="scene" subjectId={s.id} subjectName={s.title} label="" onChanged={onArt} /></span>}</div>
         <div className="banner-meta">
           <span><Sun size={12} /> Day {campaign.day.day} · reset in {fmtMinutes(campaign.day.minutes_to_reset)}</span>
           {group && <span><Footprints size={12} /> {group.label} ({group.members.length})</span>}
@@ -281,7 +282,7 @@ function Objective({ q, now }: { q: Quest; now: number }) {
   );
 }
 
-export function CampaignSidebar({ campaign }: { campaign: Campaign }) {
+export function CampaignSidebar({ campaign, onArt }: { campaign: Campaign; onArt?: () => void }) {
   const fc = campaign.floor_clock;
   const hours = fc.remaining_minutes != null ? fc.remaining_minutes / 60 : null;
   const tone = hours == null ? "" : hours < 12 ? "danger" : hours > 72 ? "calm" : "";
@@ -304,7 +305,8 @@ export function CampaignSidebar({ campaign }: { campaign: Campaign }) {
           </div>
         )}
       </Panel>
-      {campaign.encounter && <CombatPanel enc={campaign.encounter} />}
+      {campaign.encounter && <CombatPanel enc={campaign.encounter} campaign={campaign} onArt={onArt} />}
+      <ArtQueue cid={campaign.id} onChanged={onArt} />
       {campaign.active_objective && <Panel title="Immediate objective"><div style={{ fontSize: 13.5 }}>{campaign.active_objective}</div></Panel>}
       <Panel title="Objectives" accent={campaign.quests.length || ""}>
         {campaign.quests.length ? campaign.quests.map((q) => <Objective key={q.id} q={q} now={campaign.game_time_minutes} />) : <div className="muted">None active.</div>}
@@ -322,7 +324,7 @@ export function CampaignSidebar({ campaign }: { campaign: Campaign }) {
 const PHASES: Record<string, string> = { surprise: "Surprise", mob_declaration: "Mobs declaring", crawler_reaction: "Your reaction — Interrupts?",
   crawler_action: "Crawler actions", ended: "Ended" };
 
-export function CombatPanel({ enc }: { enc: Encounter }) {
+export function CombatPanel({ enc, campaign, onArt }: { enc: Encounter; campaign?: Campaign; onArt?: () => void }) {
   const party = enc.combatants.filter((c) => c.side === "party");
   const foes = enc.combatants.filter((c) => c.side === "foe");
   return (
@@ -331,6 +333,8 @@ export function CombatPanel({ enc }: { enc: Encounter }) {
       {enc.phase && <div className="row" style={{ margin: "4px 0 8px" }}><Chip tone={enc.phase === "crawler_reaction" ? "magenta" : "cyan"}>{PHASES[enc.phase] ?? enc.phase}</Chip></div>}
       {foes.map((f) => (
         <div key={f.id} className="combatant">
+          {campaign?.art?.mob[f.name.toLowerCase()] ? <img className="foe-art" src={campaign.art.mob[f.name.toLowerCase()]} alt="" />
+            : campaign && <ArtButton cid={campaign.id} kind="mob" subjectName={f.name} label="" onChanged={onArt} />}
           <span className={f.defeated ? "muted" : ""} style={{ textDecoration: f.defeated ? "line-through" : undefined }}>{f.name}</span>
           <div className="bar hp" style={{ width: 80 }}><i style={{ width: `${f.hb_percent ?? 0}%`, background: "linear-gradient(90deg,#b8323a,#ff5257)" }} /></div>
           <span className="mono muted">{f.defeated ? "down" : `${f.hb_percent}%`}</span>

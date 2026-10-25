@@ -23,8 +23,10 @@ from pydantic import BaseModel, Field
 
 from .access import COOKIE, COOKIE_DAYS, AccessGate, lan_addresses, login_page
 from .config import ROOT_DIR, Settings, resolve_codex_bin
-from .db import connect, init_db, now_iso, one, rows
+from .db import connect, init_db, now_iso, one, rows, transaction
 from .gm.orchestrator import WRITE_LOCK, BusyError, TurnService, recover_interrupted_turns
+from .art import service as art
+from .art.service import ArtWorker
 from .gm.providers import make_provider, prune_jobs, secure_dir
 from .importer.ledger import import_ledger, refresh_mechanical_status, report_markdown
 from .ledger import sync as ledger_sync
@@ -47,6 +49,14 @@ class PrefsIn(BaseModel):
     rulebook_dir: str | None = None
     ledger_dir: str | None = None
     active_campaign_id: int | None = None
+
+
+class ArtIn(BaseModel):
+    kind: str
+    subject_id: int | None = None
+    subject_name: str | None = None
+    prompt: str | None = Field(default=None, max_length=1200)
+    extra: str | None = Field(default=None, max_length=500)
 
 
 class TurnIn(BaseModel):
@@ -83,6 +93,7 @@ class AppState:
         self.prefs_path = settings.data_dir / "settings.json"
         self.index_status: dict = {"state": "idle"}
         self.turns = TurnService(settings, self.make_provider)
+        self.art = ArtWorker(settings, WRITE_LOCK)
 
     # Preferences live in a small JSON file (not the DB) so they can change while a turn holds the DB write lock.
     def prefs(self) -> dict:
@@ -130,6 +141,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
             print(f"[schema v2 backfill] {line}")
         if bootstrap:
             _bootstrap(state, c)
+            state.art.start()  # background renderer for campaign art (idle until a picture is queued)
         c.close()
         yield
 
@@ -310,6 +322,78 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         if path.parent != base or not path.is_file() or path.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"):
             raise HTTPException(404)
         return FileResponse(path)
+
+    # ------------------------------------------------------------------ art (local ComfyUI)
+    @app.get("/api/art/status")
+    def art_status():
+        return state.art.status()
+
+    @app.get("/api/campaigns/{cid}/art")
+    def art_list(cid: int, kind: str | None = None, subject_id: int | None = None, subject_name: str | None = None, c=Depends(db)):
+        campaign_or_404(c, cid)
+        sql, args = "SELECT * FROM art_jobs WHERE campaign_id = ? AND status != 'dismissed'", [cid]
+        if kind:
+            sql += " AND kind = ?"; args.append(kind)
+        if subject_id is not None:
+            sql += " AND subject_id = ?"; args.append(subject_id)
+        if subject_name:
+            sql += " AND lower(subject_name) = lower(?)"; args.append(subject_name)
+        return [art.job_view(j) for j in rows(c, sql + " ORDER BY id DESC LIMIT 200", tuple(args))]
+
+    @app.get("/api/campaigns/{cid}/art/preview")
+    def art_preview(cid: int, kind: str, subject_id: int | None = None, subject_name: str | None = None, c=Depends(db)):
+        campaign_or_404(c, cid)
+        try:
+            name, desc = art.subject_text(c, cid, kind, subject_id, subject_name)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        return {"subject_name": name, "prompt": art.build_prompt(kind, desc), "negative": art.NEGATIVE, "size": art.SIZES[kind]}
+
+    @app.post("/api/campaigns/{cid}/art")
+    def art_create(cid: int, body: ArtIn, c=Depends(db)):
+        campaign_or_404(c, cid)
+        try:
+            job = art.create_job(c, settings, cid, body.kind, subject_id=body.subject_id, subject_name=body.subject_name,
+                                 prompt=body.prompt, extra=body.extra)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        state.art.poke()
+        return job
+
+    @app.post("/api/art/{job_id}/{action}")
+    def art_action(job_id: int, action: str, c=Depends(db)):
+        j = one(c, "SELECT * FROM art_jobs WHERE id = ?", (job_id,))
+        if not j:
+            raise HTTPException(404, "no such picture")
+        if action == "approve" and j["status"] == "suggested":
+            c.execute("UPDATE art_jobs SET status = 'queued' WHERE id = ?", (job_id,))
+        elif action == "dismiss" and j["status"] in ("suggested", "failed", "done", "queued"):
+            c.execute("UPDATE art_jobs SET status = 'dismissed', is_current = 0 WHERE id = ?", (job_id,))
+        elif action == "retry" and j["status"] in ("failed", "done"):
+            new = art.create_job(c, settings, j["campaign_id"], j["kind"], subject_id=j["subject_id"], subject_name=j["subject_name"],
+                                 prompt=j["prompt"])
+            state.art.poke()
+            return new
+        elif action == "use" and j["status"] == "done":
+            if not WRITE_LOCK.acquire(timeout=1.5):
+                raise HTTPException(409, "The GM is resolving a turn; try again when it finishes.")
+            try:
+                with transaction(c):
+                    return art.make_current(c, settings, job_id)
+            finally:
+                WRITE_LOCK.release()
+        else:
+            raise HTTPException(422, f"can't {action} a picture that is {j['status']}")
+        state.art.poke()
+        return art.job_view(one(c, "SELECT * FROM art_jobs WHERE id = ?", (job_id,)))
+
+    @app.get("/media/art/{cid}/{name}")
+    def art_file(cid: int, name: str):
+        folder = art.art_dir(settings, cid).resolve()
+        path = (folder / name).resolve()
+        if path.parent != folder or not path.is_file():
+            raise HTTPException(404, "no such picture")
+        return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
     @app.get("/media/portraits/{name}")
     def portrait(name: str):

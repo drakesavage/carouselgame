@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Award, Backpack, Clock3, Coins, Flag, Footprints, Heart, Scroll, Search, Sparkles, Swords, Zap } from "lucide-react";
+import { ArtButton } from "./Art";
 import { api, CharacterCard, EventRow, fmtMinutes, Item, Quest } from "../api";
 import { Bar, Chip, Empty, humanize, Portrait } from "../ui";
 
@@ -47,6 +48,9 @@ export function CharactersView({ cid, version, openCharacter }: { cid: number; v
 
 export function InventoryView({ cid, version }: { cid: number; version: number }) {
   const { data } = useLoad(() => api.inventory(cid), [cid, version]);
+  const [artTick, setArtTick] = useState(0);
+  const { data: itemArt } = useLoad(() => api.artList(cid, { kind: "item" }), [cid, version, artTick]);
+  const artFor = (id: number) => itemArt?.find((j) => j.subject_id === id && j.is_current && j.url)?.url ?? undefined;
   const [q, setQ] = useState("");
   const match = (i: Item) => !q || `${i.name} ${i.owner_name ?? ""} ${i.description ?? ""}`.toLowerCase().includes(q.toLowerCase());
   const byOwner = useMemo(() => {
@@ -66,7 +70,9 @@ export function InventoryView({ cid, version }: { cid: number; version: number }
       return (
         <div key={i.id} className={`icard ${i.equipped ? "equipped" : ""} ${i.quantity == null ? "unknown" : ""}`}>
           <div className="icard-top">
+            {artFor(i.id) && <img className="icard-art" src={artFor(i.id)} alt="" />}
             <span className={`icard-name ${i.rarity ? "rarity-" + i.rarity.toLowerCase() : ""}`}>{i.name}</span>
+            <ArtButton cid={cid} kind="item" subjectId={i.id} subjectName={i.name} label="" onChanged={() => setArtTick((t) => t + 1)} />
             {i.quantity == null ? <span className="chip amber" title="Count not established in the ledger">qty ?</span> : <span className="icard-qty">×{i.quantity}</span>}
           </div>
           <div className="chips">

@@ -58,6 +58,8 @@ def campaign_summary(conn: sqlite3.Connection, cid: int) -> dict | None:
     camp["last_save"] = one(conn, "SELECT id, label, kind, created_at FROM save_points WHERE campaign_id = ? ORDER BY id DESC LIMIT 1", (cid,))
     from ..rules.state_ops import day_info
     camp["day"] = day_info(conn, cid)
+    from ..art.service import current_art
+    camp["art"] = current_art(conn, cid)
     camp["scene"] = one(conn, """SELECT id, title, location, group_key, situation, conditions, threats, participants_json, started_game_minutes
                                  FROM scenes WHERE campaign_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1""", (cid,))
     groups = rows(conn, "SELECT key, label, location, activity FROM party_groups WHERE campaign_id = ? AND status = 'active' ORDER BY id", (cid,))

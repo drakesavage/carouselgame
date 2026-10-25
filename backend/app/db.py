@@ -260,6 +260,32 @@ CREATE TABLE IF NOT EXISTS memory_summaries (
 );
 
 -- ---------- append-only logs ----------
+CREATE TABLE IF NOT EXISTS art_jobs (       -- campaign artwork rendered by the local ComfyUI (art/service.py)
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  kind TEXT NOT NULL,                     -- character | item | mob | scene
+  subject_id INTEGER,                     -- characters.id / items.id / scenes.id; NULL for mobs (matched by name)
+  subject_name TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  negative TEXT NOT NULL DEFAULT '',
+  width INTEGER NOT NULL,
+  height INTEGER NOT NULL,
+  seed INTEGER NOT NULL,
+  checkpoint TEXT,
+  status TEXT NOT NULL,                   -- suggested | queued | running | done | failed | dismissed
+  source TEXT NOT NULL DEFAULT 'player',  -- player | gm
+  reason TEXT,
+  note TEXT,
+  error TEXT,
+  file TEXT,
+  is_current INTEGER NOT NULL DEFAULT 0,
+  turn_id INTEGER,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_art_subject ON art_jobs(campaign_id, kind, subject_id);
+
 CREATE TABLE IF NOT EXISTS turns (
   id INTEGER PRIMARY KEY,
   campaign_id INTEGER NOT NULL REFERENCES campaigns(id),

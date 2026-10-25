@@ -64,6 +64,10 @@ class Settings:
     codex_model: str = field(default_factory=lambda: os.environ.get("CODEX_MODEL", ""))
     codex_reasoning_effort: str = field(default_factory=lambda: os.environ.get("CODEX_REASONING_EFFORT", "medium"))
     codex_timeout_s: int = field(default_factory=lambda: int(os.environ.get("CODEX_TIMEOUT_S", "240")))
+    # Local ComfyUI for campaign art (art/service.py). The portable install is started on demand if it isn't running.
+    comfy_url: str = field(default_factory=lambda: os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188"))
+    comfy_checkpoint: str = field(default_factory=lambda: os.environ.get("COMFY_CHECKPOINT", "DreamShaperXL_Turbo_v2_1.safetensors"))
+    comfy_timeout_s: int = field(default_factory=lambda: int(os.environ.get("COMFY_TIMEOUT_S", "900")))
     gemini_model: str = field(default_factory=lambda: os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"))
     # Input tokens per minute allowed by your Gemini tier (free tier: 250k for gemini-3.5-flash-lite; see AI Studio).
     gemini_tpm_limit: int = field(default_factory=lambda: int(os.environ.get("GEMINI_TPM_LIMIT", "250000")))

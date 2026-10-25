@@ -126,6 +126,15 @@ remaining exposure (your global `~/.codex/AGENTS.md` is still injected, but neut
 Put the key in `GEMINI_API_KEY` or `data\gemini_api_key.txt` (git-ignored). The free tier is rate-limited, and Google
 may use free-tier inputs, which include GM secrets, to improve its products. See docs/GM_RUNTIME.md §6.
 
+**Campaign art (local ComfyUI).** Every character sheet, inventory item, combat Mob and the scene banner has a **Paint**
+button. It opens the current picture, a gallery (click one to use it) and an editable prompt built only from what the
+party knows: a character's `visual` block, an item's description, the scene's place. Pictures are painted one at a time
+by the ComfyUI install at `E:arcodebattles\ComfyUI` (shared with Barcode Battles, started on demand; the first picture
+after a cold start takes about 4 minutes, then about 1–2 minutes each) with DreamShaper XL Turbo in a gritty
+painted-fantasy style. A character's picture becomes their portrait. The GM can **suggest** one picture per turn
+(`suggest_image`) when something notable appears; suggestions wait in the HUD's **Art** panel until you click Paint.
+Settings: `COMFYUI_URL`, `COMFYUI_ROOT`, `COMFY_CHECKPOINT`, `COMFY_TIMEOUT_S`. Pictures live in `data/art/`.
+
 **GM diagnostics** (*Saves & Settings → GM diagnostics*, needs the GM token from `data/gm_token.txt`): each turn's
 full context packet, tool rounds, Codex usage, game time elapsed, and an integrity report that flags rejected changes,
 gold/HP/item/time mentions that don't match the ledger updates, counted cycles on a recap, and leaked GM-only text.

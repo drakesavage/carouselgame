@@ -134,6 +134,16 @@ player-safe projection (names, foe HB %, own Actions/HP); the GM context gets th
   be clean and not behind upstream; author name and email are required. Validator failure → files restored, index
   reset, no commit. Push and pull are explicit, separate endpoints.
 
+## Campaign art (`backend/app/art/`)
+
+`comfy.py` is a small ComfyUI client: starts the portable install if needed, queues an SDXL text-to-image graph, polls
+`/history`, fetches the image through `/view` and calls `/free` when the queue empties (same server and pattern as
+Barcode Battles). `service.py` builds prompts from player-visible records only, stores jobs in `art_jobs`
+(`suggested → queued → running → done | failed | dismissed`), and runs one worker thread. Installing a character
+portrait takes the GM's turn lock, so a render finishing mid-turn can't change the turn's state fingerprint.
+`art_jobs` is not part of save points (pictures survive restores). GM suggestions are checked against unrevealed GM
+secrets (6-word overlap) and need the player's approval before anything renders.
+
 ## Extension points
 
 * **New mechanics** → a pydantic op + `_apply_*` in `rules/engine.py` (combat rounds, crafting, grinding, mending,

@@ -34,7 +34,15 @@ export type Campaign = {
   last_save: { id: number; label: string; kind: string; created_at: string } | null;
   scene: Scene | null; groups: Group[]; roster: CharacterCard[]; day: DayInfo;
   recent_events: { id: number; type: string; summary: string; game_time_minutes: number | null }[];
+  art?: ArtMap;
 };
+export type ArtKind = "character" | "item" | "mob" | "scene";
+/** Current picture URL per subject: ids as keys, except mobs (lower-case name). */
+export type ArtMap = Record<ArtKind, Record<string, string>>;
+export type ArtJob = { id: number; campaign_id: number; kind: ArtKind; subject_id: number | null; subject_name: string; prompt: string;
+  width: number; height: number; seed: number; status: "suggested" | "queued" | "running" | "done" | "failed" | "dismissed";
+  source: "player" | "gm"; reason: string | null; note: string | null; error: string | null; is_current: number; url: string | null;
+  created_at: string; finished_at: string | null; checkpoint: string | null };
 export type Combatant = { id: string; name: string; side: "party" | "foe"; defeated?: boolean; hb_percent?: number; actions_left?: number;
   evading?: boolean; hp_current?: number | null; hp_max?: number | null; dead?: boolean; dying?: string | null };
 export type Encounter = { id: number; name: string; round: number; phase?: string; summary?: string | null; combatants: Combatant[] };
@@ -128,6 +136,18 @@ export const api = {
   manifest: () => req<Manifest>("api/assets/manifest"),
   gmDiagnosticsList: (id: number, token: string) => req<DiagnosticsRow[]>(`api/gm/campaigns/${id}/diagnostics`, { headers: { "X-GM-Token": token } }),
   gmDiagnostics: (turnId: number, token: string) => req<Record<string, any>>(`api/gm/turns/${turnId}/diagnostics`, { headers: { "X-GM-Token": token } }),
+  artStatus: () => req<Record<string, any>>("api/art/status"),
+  artList: (cid: number, p: { kind?: ArtKind; subject_id?: number | null; subject_name?: string }) => {
+    const q = new URLSearchParams(Object.entries(p).filter(([, v]) => v != null && v !== "").map(([k, v]) => [k, String(v)]));
+    return req<ArtJob[]>(`api/campaigns/${cid}/art?${q}`);
+  },
+  artPreview: (cid: number, kind: ArtKind, subjectId?: number | null, subjectName?: string) => {
+    const q = new URLSearchParams({ kind, ...(subjectId != null ? { subject_id: String(subjectId) } : {}), ...(subjectName ? { subject_name: subjectName } : {}) });
+    return req<{ subject_name: string; prompt: string; negative: string; size: [number, number] }>(`api/campaigns/${cid}/art/preview?${q}`);
+  },
+  artCreate: (cid: number, body: { kind: ArtKind; subject_id?: number; subject_name?: string; prompt?: string }) =>
+    req<ArtJob>(`api/campaigns/${cid}/art`, { method: "POST", body: JSON.stringify(body) }),
+  artAction: (id: number, action: "approve" | "dismiss" | "retry" | "use") => req<ArtJob>(`api/art/${id}/${action}`, { method: "POST" }),
   gmRuntime: (token: string) => req<Record<string, any>>("api/gm/runtime", { headers: { "X-GM-Token": token } }),
   gmPromptCapture: (minutes: number, token: string) =>
     req<{ active: boolean; minutes: number }>("api/gm/runtime/prompt-capture", { method: "POST", headers: { "X-GM-Token": token, "Content-Type": "application/json" }, body: JSON.stringify({ minutes }) }),

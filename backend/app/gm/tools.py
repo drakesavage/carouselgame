@@ -17,7 +17,7 @@ from ..rules.dice import DiceError, DiceRoller, record_roll
 from ..rules.engine import ChangeError, apply_change, ops_reference, resolve_character
 
 # Tools whose results the model does not need before narrating (see OUTPUT_PROTOCOL).
-BOOKKEEPING_TOOLS = {"apply_changes", "count_cycle", "record_ruling", "gm_note", "system_notice", "reveal_secret"}
+BOOKKEEPING_TOOLS = {"apply_changes", "count_cycle", "record_ruling", "gm_note", "system_notice", "reveal_secret", "suggest_image"}
 
 TOOL_SPECS: list[dict] = [
     {"name": "skill_check",
@@ -65,6 +65,13 @@ TOOL_SPECS: list[dict] = [
      "description": "Emit a System AI message to the player (style: notice | achievement | warning | tooltip). For achievements also "
                     "record them with apply_changes op 'achievement'.",
      "parameters": {"text": "str (Markdown)", "style": "str?"}},
+    {"name": "suggest_image",
+     "description": "Suggest a picture for the player to approve (rendered locally by ComfyUI; nothing renders without their click). "
+                    "Use sparingly, at most one per turn, when the party first meets a notable character or Mob, gets a notable "
+                    "item, or enters a striking new place. kind: character | mob | item | scene (scene = the current scene). "
+                    "description: what it LOOKS like, only what the party has seen; never GM-only material. Skip it if the "
+                    "subject already has a picture.",
+     "parameters": {"kind": "str", "subject": "str (name; ignored for scene)", "description": "str (visual only, <= 60 words)", "reason": "str?"}},
     {"name": "count_cycle",
      "description": "Count one substantive decision-and-resolution cycle toward the advancement checkpoint (12 = one Level interval).",
      "parameters": {"decision": "str", "resolution": "str"}},
@@ -400,6 +407,39 @@ class ToolRunner:
                           (self.cid, self.turn_id, r.topic, r.ruling, r.certainty, label, json.dumps(r.sources), now_iso()))
         self.effects.changes.append(f"Ruling recorded ({label}): {r.topic}")
         return {"recorded": True}
+
+    def t_suggest_image(self, a: dict) -> dict:
+        from ..art.service import create_job
+        from ..config import Settings
+        kind = str(a.get("kind", "")).strip().lower()
+        subject = str(a.get("subject", "")).strip()
+        made = one(self.conn, "SELECT COUNT(*) AS n FROM art_jobs WHERE campaign_id = ? AND turn_id = ? AND source = 'gm'", (self.cid, self.turn_id))
+        if made["n"] >= 1:
+            raise ValueError("one picture suggestion per turn")
+        if kind in ("character", "item"):
+            table = "characters" if kind == "character" else "items"
+            row = one(self.conn, f"SELECT id FROM {table} WHERE campaign_id = ? AND lower(name) = lower(?)", (self.cid, subject))
+            if not row and kind == "character":
+                row = {"id": resolve_character(self.conn, self.cid, subject)["id"]}
+            if not row:
+                raise ValueError(f"no {kind} named {subject!r}")
+            sid, name = row["id"], None
+        elif kind == "scene":
+            sc = one(self.conn, "SELECT id FROM scenes WHERE campaign_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1", (self.cid,))
+            if not sc:
+                raise ValueError("no active scene; start one with apply_changes op scene first")
+            sid, name = sc["id"], None
+        elif kind == "mob":
+            sid, name = None, subject
+        else:
+            raise ValueError("kind must be character, mob, item or scene")
+        if one(self.conn, f"""SELECT id FROM art_jobs WHERE campaign_id = ? AND kind = ? AND status IN ('suggested','queued','running','done')
+                               AND {'lower(subject_name) = lower(?)' if kind == 'mob' else 'subject_id = ?'}""", (self.cid, kind, name if kind == "mob" else sid)):
+            return {"skipped": "that subject already has a picture or a pending suggestion"}
+        job = create_job(self.conn, Settings(), self.cid, kind, subject_id=sid, subject_name=name or subject,
+                         extra=str(a.get("description") or "")[:500], source="gm", status="suggested", reason=a.get("reason"), turn_id=self.turn_id)
+        self.effects.changes.append(f"Picture suggested: {job['subject_name']} ({kind}) — approve it in the Art queue")
+        return {"suggestion_id": job["id"], "note": job["note"]}
 
     def t_gm_note(self, a: dict) -> dict:
         subject, content = str(a.get("subject", "")).strip(), str(a.get("content", "")).strip()

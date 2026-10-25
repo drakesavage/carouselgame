@@ -103,12 +103,12 @@ export function StoryView({ campaign, onState, onNotices, openCharacter }: {
     <div className="story-layout">
       <aside className="side left">
         <RosterPanel campaign={campaign} openCharacter={openCharacter} />
-        {campaign.encounter && <div className="combat-left"><CombatPanel enc={campaign.encounter} /></div>}
+        {campaign.encounter && <div className="combat-left"><CombatPanel enc={campaign.encounter} campaign={campaign} onArt={onState} /></div>}
       </aside>
       <div className="story-col">
-        <div className="combat-top">{campaign.encounter && <CombatPanel enc={campaign.encounter} />}</div>
+        <div className="combat-top">{campaign.encounter && <CombatPanel enc={campaign.encounter} campaign={campaign} onArt={onState} />}</div>
         <div className="transcript" ref={scroller}>
-          <SceneBanner campaign={campaign} />
+          <SceneBanner campaign={campaign} onArt={onState} />
           <div className="transcript-inner">
             {messages === null ? <div className="muted">Loading transcript…</div> : messages.length === 0 && !pending ? (
               <Empty>
@@ -167,7 +167,7 @@ export function StoryView({ campaign, onState, onNotices, openCharacter }: {
           </div>
         </div>
       </div>
-      <aside className="side right"><CampaignSidebar campaign={campaign} /></aside>
+      <aside className="side right"><CampaignSidebar campaign={campaign} onArt={onState} /></aside>
     </div>
   );
 }
