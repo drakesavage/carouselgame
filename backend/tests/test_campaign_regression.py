@@ -363,3 +363,64 @@ def test_import_report_corrections_settle_ammo_assets_and_driscoll_and_reach_the
     camp = yaml.safe_load((root / "state/campaign.yaml").read_text(encoding="utf-8"))
     assert camp["shared_resource_snapshot"]["pistol_rounds"] == 22
     assert yaml.safe_load((root / "state/characters/mad-driscoll.yaml").read_text(encoding="utf-8"))["roster_category"] == "deceased_npcs"
+
+
+def test_import_report_shows_resolved_and_open_entries_and_consistency_finds_disagreements(conn, denton):
+    from app.consistency import summary
+    from app.ledger import sync
+    from app.reconcile import (advancement_mirror_record, annotate_report, clock_correction, gold_stabber_correction,
+                               location_correction)
+    root = sync.link(conn, denton)["root"]
+    before = {c["check"]: c["ok"] for c in summary(conn, denton)["checks"]}
+    assert before["Reserved: Personal Stabber"] is False  # paid in the market record, 'no payment' in the stash note
+    gold_stabber_correction(conn, denton, root, decided_by="owner (test)")
+    clock_correction(conn, denton, decided_by="owner (test)")
+    location_correction(conn, denton, decided_by="owner (test)")
+    advancement_mirror_record(conn, denton, decided_by="owner (test)")
+    rep = annotate_report(conn, denton, one(conn, "SELECT report_json FROM import_reports WHERE campaign_id = ? ORDER BY id DESC", (denton,))["report"])
+    status = {e["key"]: e["status"] for e in rep["conflicts"]}
+    assert status["conflict:gold"] == status["conflict:floor clock"] == status["conflict:advancement cycles"] == "resolved"
+    assert status["conflict:Silver Earth Box status:cliff"] == "open"  # its correction was not applied here
+    assert all(e["status"] == "open" for e in rep["manual_review"]) and rep["open"] > 0
+    checks = {c["check"]: c for c in summary(conn, denton)["checks"]}
+    for name in ("Gold", "Floor clock (minutes remaining)", "Clock: Advancement cycles", "Location and saferoom", "Reserved: Personal Stabber"):
+        assert checks[name]["ok"], checks[name]
+    assert checks["Scout: position"]["ok"] is False  # the stale checkpoint location is reported, not silently fixed
+
+
+def test_positions_follow_groups_in_gm_context_consistency_and_ledger(conn, denton):
+    from app.consistency import summary
+    from app.ledger import sync
+    from app.reconcile import location_correction, positions_correction
+    root = sync.link(conn, denton)["root"]
+    location_correction(conn, denton, decided_by="owner (test)")
+    positions_correction(conn, denton, root, decided_by="owner (test)")
+    checks = {c["check"]: c for c in summary(conn, denton)["checks"]}
+    assert all(v["ok"] for k, v in checks.items() if k.endswith(": position")), [k for k, v in checks.items() if not v["ok"]]
+    ctx = build_context(conn, denton, "what is Scout doing?")["text"]
+    assert "NOT PRESENT (group prison-recon, location unknown)" in ctx
+    with pytest.raises(ValueError):
+        positions_correction(conn, denton, root, decided_by="owner (test)")
+    pv = sync.preview(conn, denton, fetch=False)
+    assert pv["blockers"] == [] and all(c["status"] == "clean" for c in pv["changes"])
+    sync.apply(conn, denton, fingerprint=pv["fingerprint"], selected=None, message="Positions", author_name="Test", author_email="t@example.com")
+    sheet = lambda s: yaml.safe_load((root / f"state/characters/{s}.yaml").read_text(encoding="utf-8"))["location"]
+    assert sheet("cliff") == "Gilded Feathers, Heavensworth" and sheet("scout").startswith("Not recorded: with the") and sheet("jonai") == "The Molting Pigeon"
+
+
+def test_immediate_objective_is_its_linked_quests_and_drops_finished_ones(conn, denton):
+    from app.memory.views import campaign_summary
+    from app.reconcile import objective_correction
+    objective_correction(conn, denton, decided_by="owner (test)")
+    qs = campaign_summary(conn, denton)["quests"]
+    now = [q["title"][:20] for q in qs if q["immediate"]]
+    assert now == ["Use current daylight", "Complete final recon", "Build the Margit-ass"] and all(q["immediate"] for q in qs[:3])
+    ctx = build_context(conn, denton, "status")["text"]
+    assert "Immediate objective (quest records" in ctx and "[quest #" in ctx and "Use the remaining daylight" not in ctx
+    with transaction(conn):
+        apply_change(conn, denton, None, {"op": "quest", "title": qs[0]["title"], "status": "completed"})
+        apply_change(conn, denton, None, {"op": "quest", "title": "Claim the Personal Stabber", "immediate": True})
+    now = [q["title"] for q in campaign_summary(conn, denton)["quests"] if q["immediate"]]
+    assert now[-1] == "Claim the Personal Stabber" and not now[0].startswith("Use current daylight")
+    with pytest.raises(ValueError):
+        objective_correction(conn, denton, decided_by="owner (test)")

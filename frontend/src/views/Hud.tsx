@@ -228,14 +228,19 @@ export function RosterPanel({ campaign, openCharacter }: { campaign: Campaign; o
   const grouped = new Set(groups.flatMap((g) => g.members.map((m) => m.id)));
   const others = campaign.roster.filter((c) => !grouped.has(c.id) && c.id !== pcId);
   const [showOthers, setShowOthers] = useState(false);
+  // counts come from the groups (who is physically together), not from the stored party flag
+  const pcName = campaign.roster.find((c) => c.id === pcId)?.name.split(" ")[0] ?? "you";
+  const withPc = groups.find((g) => g.key === pcGroup)?.members.length ?? 0;
+  const away = groups.filter((g) => g.key !== pcGroup && g.key !== "_party").reduce((n, g) => n + g.members.length, 0);
   return (
-    <Panel title="Roster" accent={campaign.roster.length || campaign.party.length}>
+    <Panel title="Roster" accent={pcGroup ? `${withPc} with ${pcName} · ${away} elsewhere` : campaign.roster.length || campaign.party.length}>
       <div className="roster">
         {groups.map((g) => (
           <section key={g.key} className={`roster-group ${g.key === pcGroup || g.key === "_party" ? "here" : ""}`}>
             <div className="roster-head">
-              <span className="roster-label">{g.key === pcGroup ? "With you" : g.label}</span>
-              {g.location && <span className="roster-loc"><MapPin size={10} /> {g.location}</span>}
+              <span className="roster-label">{g.key === pcGroup ? `With ${pcName}` : g.key === "_party" ? g.label : `Elsewhere: ${g.label}`}</span>
+              {g.location ? <span className="roster-loc"><MapPin size={10} /> {g.location}</span>
+                : g.key !== "_party" && <span className="roster-loc muted"><MapPin size={10} /> position not recorded</span>}
             </div>
             {g.activity && g.key !== pcGroup && <div className="roster-activity">{g.activity.replace(/\s*\(checkpoints\/latest\.md\)$/, "")}</div>}
             {g.members.sort((a, b) => (a.id === pcId ? -1 : b.id === pcId ? 1 : 0)).map((c) => <Tile key={c.id} c={c} pc={c.id === pcId} openCharacter={openCharacter} />)}
@@ -268,7 +273,7 @@ function Objective({ q, now }: { q: Quest; now: number }) {
         <Icon size={13} />
         <span className="grow">{q.title}</span>
         {due != null && <Chip tone={due < 0 ? "red" : due < 120 ? "amber" : ""}>{due < 0 ? "overdue" : fmtMinutes(due)}</Chip>}
-        {q.priority === 1 && <Chip tone="magenta">priority</Chip>}
+        {q.immediate ? <Chip tone="cyan" title="Part of the immediate objective">now</Chip> : q.priority === 1 && <Chip tone="magenta">priority</Chip>}
       </button>
       {open && (
         <div className="objective-body">
@@ -307,7 +312,8 @@ export function CampaignSidebar({ campaign, onArt }: { campaign: Campaign; onArt
       </Panel>
       {campaign.encounter && <CombatPanel enc={campaign.encounter} campaign={campaign} onArt={onArt} />}
       <ArtQueue cid={campaign.id} onChanged={onArt} />
-      {campaign.active_objective && <Panel title="Immediate objective"><div style={{ fontSize: 13.5 }}>{campaign.active_objective}</div></Panel>}
+      {/* linked quests are the immediate objective (tagged "now" below); the stored string only shows when none are linked */}
+      {campaign.active_objective && !campaign.quests.some((q) => q.immediate) && <Panel title="Immediate objective"><div style={{ fontSize: 13.5 }}>{campaign.active_objective}</div></Panel>}
       <Panel title="Objectives" accent={campaign.quests.length || ""}>
         {campaign.quests.length ? campaign.quests.map((q) => <Objective key={q.id} q={q} now={campaign.game_time_minutes} />) : <div className="muted">None active.</div>}
       </Panel>

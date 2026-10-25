@@ -141,7 +141,8 @@ def _apply_group(ctx: Ctx, op: GroupUpsert) -> dict:
         ctx.conn.execute("UPDATE characters SET assignment = NULL WHERE campaign_id = ? AND assignment = ?", (ctx.campaign_id, op.key))
         for m in op.members:
             ch = resolve_character(ctx.conn, ctx.campaign_id, m)
-            ctx.conn.execute("UPDATE characters SET assignment = ?, location = COALESCE(?, location) WHERE id = ?", (op.key, g["location"], ch["id"]))
+            # a member is where the group is; a group with no recorded position leaves its members' position unknown too
+            ctx.conn.execute("UPDATE characters SET assignment = ?, location = ? WHERE id = ?", (op.key, g["location"], ch["id"]))
             names.append(ch["name"])
     summary = f"Group {g['label']}" + (f" @ {g['location']}" if g["location"] else "") + (f": {g['activity']}" if g["activity"] else "") + \
         (f" — members: {', '.join(names)}" if names else "") + (" (disbanded)" if g["status"] == "disbanded" else "")

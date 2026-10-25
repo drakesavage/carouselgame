@@ -5,6 +5,14 @@ import { api, Prefs, SavePoint } from "../api";
 import { Chip, Empty, Panel } from "../ui";
 import { Diagnostics } from "./Diagnostics";
 
+type ReportEntry = { status?: "resolved" | "open"; correction?: { id: number; subject: string; decision: string } };
+const openOf = (es?: ReportEntry[]) => (es ?? []).filter((e) => e.status === "open").length;
+const statusLine = (es?: ReportEntry[]) => es?.length ? ` (${es.length - openOf(es)} resolved, ${openOf(es)} open)` : "";
+/** Resolved by an owner-approved correction (reconcile.py), or still open: ambiguous records are never fixed silently. */
+function Resolution({ e }: { e: ReportEntry }) {
+  return e.correction ? <Chip tone="green" title={e.correction.subject}>correction #{e.correction.id}</Chip> : <Chip tone="amber">open</Chip>;
+}
+
 export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: number; version: number; onChanged: () => void; onCampaign: (id: number) => void }) {
   const [prefs, setPrefs] = useState<Prefs | null>(null);
   const [saves, setSaves] = useState<SavePoint[] | null>(null);
@@ -138,13 +146,14 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
               <div className="chips" style={{ marginBottom: 8 }}>
                 {Object.entries(report.imported ?? {}).map(([k, v]) => <Chip key={k} tone="green">{k.replace(/_/g, " ")}: {String(v)}</Chip>)}
               </div>
-              <details><summary className="row" style={{ cursor: "pointer" }}><AlertTriangle size={13} color="var(--amber)" /> {report.conflicts?.length ?? 0} conflicts</summary>
-                <ul>{report.conflicts?.map((c: any, i: number) => <li key={i} style={{ fontSize: 13 }}><b>{c.topic}</b>: {JSON.stringify(c.values)} — <span className="sub">{c.resolution}</span></li>)}</ul></details>
-              <details><summary style={{ cursor: "pointer" }}>{report.manual_review?.length ?? 0} items need manual review</summary>
-                <ul>{report.manual_review?.map((m: any, i: number) => <li key={i} style={{ fontSize: 13 }}><span className="mono">{m.record}</span> {m.issue}</li>)}</ul></details>
+              <details><summary className="row" style={{ cursor: "pointer" }}>{openOf(report.conflicts) ? <AlertTriangle size={13} color="var(--amber)" /> : null} {report.conflicts?.length ?? 0} conflicts{statusLine(report.conflicts)}</summary>
+                <ul>{report.conflicts?.map((c: any, i: number) => <li key={i} style={{ fontSize: 13 }}><Resolution e={c} /> <b>{c.topic}</b>: {JSON.stringify(c.values)} — <span className="sub">{c.correction ? c.correction.decision : c.resolution}</span></li>)}</ul></details>
+              <details><summary style={{ cursor: "pointer" }}>{report.manual_review?.length ?? 0} items for manual review{statusLine(report.manual_review)}</summary>
+                <ul>{report.manual_review?.map((m: any, i: number) => <li key={i} style={{ fontSize: 13 }}><Resolution e={m} /> <span className="mono">{m.record}</span> {m.path ? <span className="mono">{m.path}</span> : null} {m.issue}</li>)}</ul></details>
               <details><summary style={{ cursor: "pointer" }}>{report.rules_pending_implementation?.length ?? 0} house rules awaiting mechanical implementation</summary>
                 <ul>{report.rules_pending_implementation?.map((r: any, i: number) => <li key={i} style={{ fontSize: 13 }}>{r.rule} <Chip>{r.status ?? "pending"}</Chip></li>)}</ul></details>
               <div className="sub">Full report: reports/migration_report.md</div>
+              <Consistency cid={cid} version={version} />
             </div>
           )}
         </Panel>
@@ -179,6 +188,23 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
 
 
 /** Auto GM: what goes where, and today's Gemini quota. */
+/** Does each fact have one value across the records, the HUD and the GM briefing? Read-only (app/consistency.py). */
+function Consistency({ cid, version }: { cid: number; version: number }) {
+  const [r, setR] = useState<Awaited<ReturnType<typeof api.consistency>> | null>(null);
+  useEffect(() => { api.consistency(cid).then(setR).catch(() => setR(null)); }, [cid, version]);
+  if (!r) return null;
+  const failed = r.checks.filter((c) => !c.ok);
+  return (
+    <details style={{ marginTop: 10 }} open={failed.length > 0}>
+      <summary className="row" style={{ cursor: "pointer" }}>{failed.length ? <AlertTriangle size={13} color="var(--amber)" /> : null}
+        Record consistency: {r.checks.length - failed.length}/{r.checks.length} agree</summary>
+      <ul>{[...failed, ...r.checks.filter((c) => c.ok)].map((c, i) => (
+        <li key={i} style={{ fontSize: 13 }}><Chip tone={c.ok ? "green" : "amber"}>{c.ok ? "agrees" : "differs"}</Chip> <b>{c.check}</b>{" "}
+          <span className="sub">{Object.entries(c.values).map(([k, v]) => `${k}: ${String(v)}`).join(" · ")}</span></li>))}</ul>
+    </details>
+  );
+}
+
 function AutoInfo({ prefs, update }: { prefs: Prefs; update: (p: Partial<Prefs>) => Promise<void> }) {
   const [q, setQ] = useState<Record<string, any> | null>(null);
   useEffect(() => { api.geminiQuota().then(setQ).catch(() => {}); }, []);

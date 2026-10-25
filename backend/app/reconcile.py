@@ -6,7 +6,8 @@ an auditable record: what was decided, by whom, the evidence on each side, the o
 `ledger_edits` (optional) carry the decision into the Git ledger through the reviewed write-back: each names a file, a
 YAML path, the value now in the ledger (`expect`) and the new value, and only applies while the ledger still says
 `expect` (otherwise the write-back shows a conflict). `sheet_edits` (optional) set a field of a character sheet that no
-rule-engine op covers; each records the value it replaced.
+rule-engine op covers; each records the value it replaced. `resolves` lists the import-report entries the decision
+settles (see `report_keys`); `annotate_report` marks every other entry as still open.
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ CREATE TABLE IF NOT EXISTS corrections (
   ops_json TEXT NOT NULL DEFAULT '[]',
   results_json TEXT NOT NULL DEFAULT '[]',
   ledger_edits_json TEXT NOT NULL DEFAULT '[]',
+  resolves_json TEXT NOT NULL DEFAULT '[]',
   decided_by TEXT NOT NULL,
   save_point_id INTEGER,
   created_at TEXT NOT NULL
@@ -36,10 +38,15 @@ CREATE TABLE IF NOT EXISTS corrections (
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    if "resolves_json" not in {r[1] for r in conn.execute("PRAGMA table_info(corrections)")}:
+        conn.execute("ALTER TABLE corrections ADD COLUMN resolves_json TEXT NOT NULL DEFAULT '[]'")
+    for subject, keys in BACKFILL_RESOLVES.items():  # corrections recorded before `resolves` existed
+        conn.execute("UPDATE corrections SET resolves_json = ? WHERE subject = ? AND resolves_json = '[]'", (json.dumps(keys), subject))
 
 
 def apply_correction(conn: sqlite3.Connection, cid: int, *, subject: str, decision: str, evidence: list[dict], ops: list[dict],
-                     decided_by: str, ledger_edits: list[dict] | None = None, sheet_edits: list[dict] | None = None) -> dict:
+                     decided_by: str, ledger_edits: list[dict] | None = None, sheet_edits: list[dict] | None = None,
+                     resolves: list[str] | None = None, position_edits: list[dict] | None = None) -> dict:
     if not evidence:
         raise ValueError("a correction needs evidence")
     if not decided_by.strip():
@@ -49,11 +56,13 @@ def apply_correction(conn: sqlite3.Connection, cid: int, *, subject: str, decisi
         sp = create_save_point(conn, cid, f"Before correction: {subject}"[:120], kind="manual")
         results = [apply_change(conn, cid, None, op) for op in ops]  # validated; any failure rolls everything back
         results += [_sheet_edit(conn, cid, e) for e in sheet_edits or []]
+        results += [_position_edit(conn, cid, e) for e in position_edits or []]
         cor_id = conn.execute(
-            """INSERT INTO corrections (campaign_id, subject, decision, evidence_json, ops_json, results_json, ledger_edits_json, decided_by,
-                                        save_point_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            """INSERT INTO corrections (campaign_id, subject, decision, evidence_json, ops_json, results_json, ledger_edits_json, resolves_json,
+                                        decided_by, save_point_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (cid, subject, decision, json.dumps(evidence, ensure_ascii=False), json.dumps(ops, ensure_ascii=False),
-             json.dumps(results, ensure_ascii=False, default=str), json.dumps(ledger_edits or [], ensure_ascii=False), decided_by, sp, now_iso())).lastrowid
+             json.dumps(results, ensure_ascii=False, default=str), json.dumps(ledger_edits or [], ensure_ascii=False),
+             json.dumps(resolves or BACKFILL_RESOLVES.get(subject, [])), decided_by, sp, now_iso())).lastrowid
         conn.execute("INSERT INTO events (campaign_id, type, summary, payload_json, visibility, created_at) VALUES (?,?,?,?,?,?)",
                      (cid, "correction", f"Record corrected: {subject}. {decision}"[:500], json.dumps({"correction_id": cor_id}), "player", now_iso()))
     return {"id": cor_id, "save_point_id": sp, "results": results}
@@ -75,12 +84,66 @@ def _sheet_edit(conn: sqlite3.Connection, cid: int, e: dict) -> dict:
     return {"summary": f"{c['name']}: sheet {'.'.join(e['path'])} corrected", "before": before, "after": e["value"]}
 
 
+def _position_edit(conn: sqlite3.Connection, cid: int, e: dict) -> dict:
+    """A character's recorded position (None = not recorded); no engine op sets a position to unknown."""
+    c = one(conn, "SELECT id, name, location FROM characters WHERE campaign_id = ? AND id = ?", (cid, e["character_id"]))
+    if not c or c["location"] != e["expect"]:
+        raise ValueError(f"{c and c['name']}: location is {c and c['location']!r}, not {e['expect']!r}; re-review")
+    conn.execute("UPDATE characters SET location = ? WHERE id = ?", (e["location"], c["id"]))
+    return {"summary": f"{c['name']}: location {c['location']!r} -> {e['location'] or 'not recorded'}", "before": c["location"], "after": e["location"]}
+
+
+def report_keys(kind: str, entry: dict) -> str:
+    """Stable key of an import-report entry: 'conflict:<topic>[:<character>]' or 'review:<record>:<path or issue>'."""
+    if kind == "conflict":
+        who = (entry.get("values") or {}).get("character")
+        return f"conflict:{entry.get('topic')}" + (f":{who}" if who else "")
+    return f"review:{entry.get('record')}:{entry.get('path') or entry.get('issue')}"
+
+
+def _matches(key: str, pattern: str) -> bool:
+    return key.startswith(pattern[:-1]) if pattern.endswith("*") else key == pattern
+
+
+def annotate_report(conn: sqlite3.Connection, cid: int, report: dict) -> dict:
+    """The import report with each conflict and review item marked resolved (by which correction) or open."""
+    cors = corrections(conn, cid)
+    out = dict(report)
+    for section, kind in (("conflicts", "conflict"), ("manual_review", "review")):
+        marked = []
+        for e in report.get(section) or []:
+            key = report_keys(kind, e)
+            hit = next((c for c in cors if any(_matches(key, p) for p in c.get("resolves") or [])), None)
+            marked.append({**e, "key": key, "status": "resolved" if hit else "open",
+                           **({"correction": {"id": hit["id"], "subject": hit["subject"], "decision": hit["decision"]}} if hit else {})})
+        out[section] = marked
+    out["open"] = sum(1 for s in ("conflicts", "manual_review") for e in out.get(s) or [] if e["status"] == "open")
+    return out
+
+
 def corrections(conn: sqlite3.Connection, cid: int) -> list[dict]:
     ensure_schema(conn)
     return rows(conn, "SELECT * FROM corrections WHERE campaign_id = ? ORDER BY id", (cid,))
 
 
 # ------------------------------------------------------------------ decided corrections (M1)
+AMMO_REVIEW = ["review:state/shared_inventory.yaml:'Crossbow Bolt'*", "review:state/shared_inventory.yaml:'Pistol Round'*",
+               "review:state/campaign.yaml:current_state.ammunition_count_status",
+               "review:state/campaign.yaml:shared_resource_snapshot.crossbow_bolts_carried_available",
+               "review:state/campaign.yaml:shared_resource_snapshot.pistol_rounds",
+               "review:state/shared_inventory.yaml:items[14].count_status", "review:state/shared_inventory.yaml:items[16].count_status",
+               "review:state/shared_inventory.yaml:ammunition_reconciliation.status"]
+BACKFILL_RESOLVES = {
+    "Gold total and Personal Stabber payment": ["conflict:gold"],
+    "Floor clock after the market sweep": ["conflict:floor clock"],
+    "Silver Earth Box status and rewards": ["conflict:Silver Earth Box status:*"],
+    "Ammunition count": AMMO_REVIEW,
+    # his tools stay with him on Floor 1, so their count no longer matters to the party
+    "Mad Driscoll's roster category": ["conflict:roster category:mad-driscoll", "review:state/characters/mad-driscoll.yaml:*"],
+    "Advancement count mirror": ["conflict:advancement cycles"],
+}
+
+
 STABBER_NOTE_OLD = "The Personal Stabber is reserved but not owned and no 30-Gold payment has been made."
 STABBER_NOTE_NEW = ("The Personal Stabber was prepaid (30 Gold, Gilded Feathers market sweep) and is held by Secondhand Saviors "
                     "until Scout personally claims it; it is not owned or carried by anyone yet.")
@@ -344,3 +407,78 @@ def driscoll_correction(conn: sqlite3.Connection, cid: int, ledger_root, decided
                             decision="Deceased: his sheet's roster category is deceased_npcs, matching the roster. His trapsmith tools stay "
                                      "with him on Floor 1, not in party inventory.",
                             evidence=evidence, ops=[], decided_by=decided_by, ledger_edits=edits)
+
+
+def advancement_mirror_record(conn: sqlite3.Connection, cid: int, decided_by: str) -> dict:
+    """Owner decision 2026-10-25 (decision 6): the console's 4/12 was already right; write-back mirrors the live counter into
+    campaign.yaml current_state. Recorded for the audit trail: no state changes."""
+    if one(conn, "SELECT 1 FROM corrections WHERE campaign_id = ? AND subject = 'Advancement count mirror'", (cid,)):
+        raise ValueError("already recorded")
+    evidence = [
+        {"source": "state/advancement.yaml", "says": "'the authoritative live advancement counter'; log 6 -> 11/12 (DCC-DENTON-014), 11 -> 12 -> reset "
+                                                     "0/12 (DCC-DENTON-015), 0 -> 4/12 for the four market-sweep decisions (f1a5680)."},
+        {"source": "state/campaign.yaml current_state.advancement_cycles", "says": "11/12, left over from DCC-DENTON-014."},
+        {"source": "state/roster.yaml, checkpoints/latest.md, floor_3_molting_pigeon_checkpoint",
+         "says": "0/12 and 11/12: correct snapshots for their own checkpoints."},
+    ]
+    return apply_correction(conn, cid, subject="Advancement count mirror",
+                            decision="4/12 is current. Write-back keeps campaign.yaml current_state.advancement_cycles equal to the live "
+                                     "counter in state/advancement.yaml; checkpoint snapshots stay as recorded.",
+                            evidence=evidence, ops=[], decided_by=decided_by)
+
+
+def positions_correction(conn: sqlite3.Connection, cid: int, ledger_root, decided_by: str) -> dict:
+    """Owner decision 2026-10-25: characters are where their group is; a group with no recorded position leaves its members
+    unknown. Fixes the checkpoint's 'The Molting Pigeon' left on every crawler after the daylight split."""
+    groups = {g["key"]: g for g in rows(conn, "SELECT key, label, location, activity FROM party_groups WHERE campaign_id = ? AND status = 'active'", (cid,))}
+    edits, ledger, moved = [], [], []
+    for c in rows(conn, """SELECT id, name, provenance, assignment, location FROM characters WHERE campaign_id = ? AND assignment IS NOT NULL
+                           AND status NOT IN ('deceased','dead') ORDER BY party_order, id""", (cid,)):
+        g = groups.get(c["assignment"])
+        if not g or (g["location"] or None) == (c["location"] or None) or (g["location"] and c["location"] and g["location"].startswith(c["location"])):
+            continue
+        edits.append({"character_id": c["id"], "expect": c["location"], "location": g["location"]})
+        moved.append(c["name"])
+        if not g["location"] and (c["provenance"] or "").startswith("ledger:"):
+            rel = c["provenance"].split(":", 1)[1]
+            if _ledger_yaml(ledger_root, rel).get("location") == c["location"]:
+                ledger.append({"file": rel, "path": ["location"], "expect": c["location"],
+                               "value": f"Not recorded: with the {g['label']} group ({g['activity'] or 'assignment'})"[:200]})
+    if len(moved) != 12:
+        raise ValueError(f"{len(moved)} crawlers are out of step with their group, not the 12 this decision covered; re-review")
+    evidence = [
+        {"source": "state/characters/*.yaml location, checkpoints/latest.md (98e66e4, 13:04 CDT)",
+         "says": "'The Molting Pigeon' on every sheet, written when all twelve were back at the saferoom."},
+        {"source": "state/roster.yaml current_daylight_assignments", "says": "After the checkpoint the party split: prison-recon, training-market, saferoom."},
+        {"source": "console groups", "says": "training-market at Gilded Feathers, Heavensworth (decision 4); prison-recon position not recorded."},
+        {"source": "rules/state_ops.py group op", "says": "Joining a group with no recorded location kept each member's old location; fixed in the same change."},
+    ]
+    return apply_correction(conn, cid, subject="Character positions follow their groups",
+                            decision="Each crawler is where their group is: the training-market group at Gilded Feathers, Heavensworth; the "
+                                     "prison-recon group's position is not recorded, so its members' is unknown; the saferoom group at The Molting Pigeon.",
+                            evidence=evidence, ops=[], decided_by=decided_by, ledger_edits=ledger, position_edits=edits)
+
+
+def objective_correction(conn: sqlite3.Connection, cid: int, decided_by: str) -> dict:
+    """Owner decision 2026-10-25: the immediate objective is its quest records, not a separate string."""
+    want = ["Use current daylight for skill training and weapon/armor shopping.",
+            "Complete final reconnaissance and plan the Fallen Watch prison attack without co",
+            "Build the Margit-assisted Pass-Pulse Gold Siphon after nightfall."]
+    found = []
+    for prefix in want:
+        q = one(conn, "SELECT id, title FROM quests WHERE campaign_id = ? AND status = 'active' AND title LIKE ?", (cid, prefix + "%"))
+        if not q:
+            raise ValueError(f"no active quest {prefix!r}; re-review")
+        found.append(q)
+    camp = one(conn, "SELECT active_objective, objective_quests_json AS j FROM campaigns WHERE id = ?", (cid,))
+    if json.loads(camp["j"] or "[]"):
+        raise ValueError("the immediate objective is already linked to quests")
+    evidence = [
+        {"source": "state/campaign.yaml active_objective (console campaigns.active_objective)", "says": camp["active_objective"] or ""},
+        {"source": "console quests", "says": "; ".join(f"#{q['id']} {q['title']}" for q in found) + ": the same three goals as separate records."},
+    ]
+    ops = [{"op": "quest", "title": q["title"], "immediate": True} for q in found]
+    return apply_correction(conn, cid, subject="Immediate objective linked to quests",
+                            decision="The immediate objective is quests " + ", ".join(f"#{q['id']}" for q in found) + " in that order; the "
+                                     "hand-written string stays as history. Finishing a quest drops it from the objective.",
+                            evidence=evidence, ops=ops, decided_by=decided_by)

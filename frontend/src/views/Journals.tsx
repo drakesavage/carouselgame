@@ -13,8 +13,18 @@ function useLoad<T>(fn: () => Promise<T>, deps: unknown[]) {
 
 export function CharactersView({ cid, version, openCharacter }: { cid: number; version: number; openCharacter: (id: number) => void }) {
   const { data } = useLoad(() => api.characters(cid), [cid, version]);
+  const { data: camp } = useLoad(() => api.campaign(cid), [cid, version]);
   if (!data) return <div className="muted">Loading…</div>;
-  const groups = data.reduce<Record<string, CharacterCard[]>>((acc, c) => { const g = c.in_party ? "Active party" : humanize(c.roster_category ?? c.kind); (acc[g] ??= []).push(c); return acc; }, {});
+  // where people are comes from the party groups; party membership is a separate chip
+  const pc = data.find((c) => c.id === camp?.active_character_id);
+  const groupOf = (key?: string | null) => camp?.groups.find((g) => g.key === key);
+  const heading = (c: CharacterCard) => {
+    const g = groupOf(c.assignment);
+    if (!g) return c.in_party ? "Party (no group)" : humanize(c.roster_category ?? c.kind);
+    if (pc && g.key === pc.assignment) return `With ${pc.name.split(" ")[0]}`;
+    return `Elsewhere: ${g.label} @ ${g.location ?? "position not recorded"}`;
+  };
+  const groups = data.reduce<Record<string, CharacterCard[]>>((acc, c) => { (acc[heading(c)] ??= []).push(c); return acc; }, {});
   return (
     <div className="view-inner">
       <div className="h1">Characters</div>
@@ -35,6 +45,7 @@ export function CharactersView({ cid, version, openCharacter }: { cid: number; v
                 </div>
                 <div className="chips" style={{ marginTop: 8 }}>
                   <Chip tone={c.status === "active" ? "green" : "amber"}>{c.status}</Chip>
+                  {c.in_party ? <Chip tone="cyan" title="Member of the System party">party member</Chip> : null}
                   {c.statuses.map((s) => <Chip key={s.id}>{s.name}</Chip>)}
                 </div>
               </div>

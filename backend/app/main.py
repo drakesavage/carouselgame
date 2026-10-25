@@ -392,6 +392,13 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
             result = apply_reference(c, cid, body.markdown, body.source)
         return {**result, "save_point_id": sp}
 
+    @app.get("/api/campaigns/{cid}/consistency")
+    def campaign_consistency(cid: int, c=Depends(db)):
+        """Read-only: does each fact have one value across the records, the HUD and the GM briefing? (player-visible values only)"""
+        from .consistency import summary
+        campaign_or_404(c, cid)
+        return summary(c, cid)
+
     @app.get("/api/campaigns/{cid}/corrections")
     def campaign_corrections(cid: int, c=Depends(db)):
         """Owner-approved record corrections, with their evidence (player-visible: they change visible state)."""
@@ -732,8 +739,9 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     def import_reports(c=Depends(db)):
         out = []
         for r in rows(c, "SELECT id, campaign_id, source_path, report_json, created_at FROM import_reports ORDER BY id DESC"):
+            from .reconcile import annotate_report
             out.append({"id": r["id"], "campaign_id": r["campaign_id"], "source_path": r["source_path"], "created_at": r["created_at"],
-                        "report": player_safe_report(r["report"])})
+                        "report": annotate_report(c, r["campaign_id"], player_safe_report(r["report"]))})
         return out
 
     # ------------------------------------------------------------------ ledger write-back

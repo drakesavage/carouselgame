@@ -20,7 +20,7 @@ export type CharacterSheet = CharacterCard & {
   limited_uses: { ability: string; per: string; uses: number; uses_allowed: number; cooldown_minutes: number | null }[];
 };
 export type Quest = { id: number; kind: string; title: string; description?: string | null; status: string; priority: number; progress?: string | null; giver?: string | null;
-  details?: Record<string, unknown>; due_at_minutes?: number | null };
+  details?: Record<string, unknown>; due_at_minutes?: number | null; immediate?: boolean };  // immediate: part of the linked immediate objective
 export type Scene = { id: number; title: string; location: string | null; group_key: string | null; situation: string | null; conditions: string | null;
   threats: string | null; participants: string[]; started_game_minutes: number | null };
 export type Group = { key: string; label: string; location: string | null; activity: string | null; members: CharacterCard[] };
@@ -152,6 +152,7 @@ export const api = {
     req<{ updated: string[]; unmatched: string[]; save_point_id: number }>(`api/campaigns/${cid}/visual-reference`, { method: "POST", body: JSON.stringify({ markdown, source }) }),
   artDraftAppearance: (cid: number, subjectId: number) =>
     req<{ appearance: string }>(`api/campaigns/${cid}/art/draft-appearance`, { method: "POST", body: JSON.stringify({ kind: "character", subject_id: subjectId }) }),
+  consistency: (cid: number) => req<{ ok: boolean; failed: number; checks: { check: string; ok: boolean; values: Record<string, unknown>; note?: string }[] }>(`api/campaigns/${cid}/consistency`),
   artDraftItemLooks: (cid: number, body: { item_ids?: number[]; overwrite?: boolean } = {}) =>
     post<{ drafted: { id: number; name: string; appearance: string }[]; skipped: number; remaining: number }>(`api/campaigns/${cid}/art/draft-item-looks`, body),
   artAppearances: (cid: number, kind: ArtKind) => req<Record<string, string>>(`api/campaigns/${cid}/art/appearances?kind=${kind}`),

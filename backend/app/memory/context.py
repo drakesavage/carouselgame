@@ -202,7 +202,11 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
         ident.append(f"NOTE: the campaign record places the party at {camp['current_location']}"
                      f"{' (saferoom)' if camp['safe_room'] else ''}, but the current scene is at {scene['location']}. Records disagree: do not assume "
                      "saferoom protection in the scene; settle it in play and record it with op set_location.")
-    if camp["active_objective"]:
+    linked = immediate_objective(conn, cid)
+    if linked:
+        ident.append("Immediate objective (quest records; set with op quest immediate=true/false): "
+                     + "; ".join(f"{q['title']} [quest #{q['id']}]" for q in linked))
+    elif camp["active_objective"]:
         ident.append("Immediate objective: " + camp["active_objective"])
     for k in rows(conn, "SELECT key, label, current, maximum, visibility FROM clocks WHERE campaign_id = ?", (cid,)):
         ident.append(f"Clock {k['key']} ({k['label']}): {k['current']}/{k['maximum'] or '-'}{' [GM-ONLY]' if k['visibility'] == 'gm' else ''}")
@@ -437,3 +441,10 @@ def _combat_context(conn: sqlite3.Connection, enc: dict) -> str:
     lines.append("Procedure: declare Mob Attacks -> (player decides Interrupts) -> resolve -> crawler Actions -> end round. "
                  "Never choose the player character's Actions; ask.")
     return "\n".join(lines)
+
+
+def immediate_objective(conn, cid: int) -> list[dict]:
+    """The active quests linked as the immediate objective, in order (campaigns.objective_quests)."""
+    ids = json.loads(one(conn, "SELECT objective_quests_json AS j FROM campaigns WHERE id = ?", (cid,))["j"] or "[]")
+    by_id = {q["id"]: q for q in rows(conn, "SELECT id, title FROM quests WHERE campaign_id = ? AND status = 'active' AND visibility = 'player'", (cid,))}
+    return [by_id[i] for i in ids if i in by_id]

@@ -225,6 +225,8 @@ class Builder:
     def _character(self, f: str, B: dict, c: dict) -> None:
         g = c["name"]
         m = B.get("mechanics") or {}
+        if c.get("location") and "location" in B and B.get("location") != c["location"]:
+            self.set(f, ["location"], c["location"], f"Location → {c['location']}", g)  # an unknown position never overwrites the ledger's wording
         if c["level"] is not None and _int(B.get("level")) != c["level"]:
             self.set(f, ["level"], c["level"], f"Level {B.get('level')} → {c['level']}", g)
             o = get(self.base.get("state/roster.yaml"), ["current_state_override", "current_members", c["slug"], "level"])

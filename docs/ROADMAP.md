@@ -5,7 +5,7 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 | Milestone | Priority | Status | Dependencies | Commit | Tests | Screenshot review | Open blockers |
 |---|---|---|---|---|---|---|---|
 | M0 Safe upgrade workflow | P0 | Done | none | 385d7dd | 155 backend; typecheck/build; isolation probe PASS | Settings passcode masked | ledger behind by 2 (see below) |
-| M1 Canonical-state reconciliation | P0 | In progress | M0 | (pending) | 156 backend | n/a | waiting on owner counts for uncounted gear; 44 house rules move to M2/M7 |
+| M1 Canonical-state reconciliation | P0 | Exit gate met | M0 | (pending) | 166 backend; consistency 21/21 | HUD roster + objectives | 7 uncounted-gear items stay open for owner counts; 44 house rules move to M2/M7 |
 | M2 Mechanics reliability & GM gates | P0 | Backlog | M1 | | | | |
 | M3 Main story HUD | P1 | Backlog | M1 underway | | | | |
 | M4 Characters, party, people | P1 | Backlog | M3 | | | | |
@@ -129,8 +129,34 @@ conflict: moved to M2.
 **Decision 9: Mad Driscoll.** Owner chose: deceased; fix the sheet. Correction #7 (save point #19): his sheet's
 `roster_category` becomes `deceased_npcs`, matching the roster; his trapsmith tools stay with him on Floor 1.
 
-**Pending reviewed write-back (Ledger view)**: 63 clean changes, no blockers. Not written: that commit is the owner's.
+**Conflict report and consistency check (exit gate).**
+* Each correction records which import-report entries it settles; Settings shows every conflict and review item as
+  resolved (with its correction number) or open. Now: 16/16 conflicts resolved; 10/18 review items resolved, 8 open
+  (7 uncounted items awaiting the owner's counts, and the Passive-Skills flag, moved to M2). Decision 6 is recorded as
+  correction #8 (no state change) so it has an audit entry.
+* `app/consistency.py` compares each fact as every surface serves it (records, HUD summary, GM briefing): Gold, floor
+  clock, advancement, location and saferoom, the player character's group, every assigned character's position, and
+  reservations. Settings shows it; a regression test runs it on a disposable copy. It found the stale positions below.
 
-**Still open in M1**: counts for the uncounted gear (Cliff's basic carried gear, Eli's converted needle-spear javelins,
-Nate's personal maintenance tools, recovered electrical cabling, better-quality liquor); the owner chose to supply them.
-The 44 unimplemented house rules belong to M2 (mechanics) and M7 (rules center).
+**Decision 10: positions.** Owner chose: characters follow their group.
+* Evidence: every crawler sheet kept the 13:04 checkpoint's "The Molting Pigeon" after the daylight split, so the GM was
+  told e.g. "Scout NOT PRESENT (group prison-recon, The Molting Pigeon)". Cause: joining a group with no recorded
+  location kept the member's old location.
+* Correction #9 (save point #21): training-market members at Gilded Feathers, Heavensworth; prison-recon members'
+  position not recorded (their sheets get "Not recorded: with the Prison Recon group (...)"); saferoom unchanged. Engine
+  fix: group members take the group's location, unknown included. Write-back now carries known character locations.
+
+**Decision 11: immediate objective.** Owner chose: link it to the quests.
+* Correction #10 (save point #22): the immediate objective is quests #3, #5, #4 in the old string's order; the string is
+  kept as history. The quest op takes `immediate: true/false`, so the GM can change it in play; a finished quest drops
+  out. The HUD tags those quests "now" instead of repeating the text; the GM briefing lists them by quest number.
+
+**Decision 12: party labels.** Owner chose: With Cliff / Elsewhere. The HUD roster and the Characters page group people
+by party group ("With Cliff", "Elsewhere: <group> @ <place or position not recorded>"), counts come from the groups
+("6 with Cliff · 9 elsewhere"), and System-party membership is its own chip.
+
+**Pending reviewed write-back (Ledger view)**: 75 clean changes, no blockers. Not written: that commit is the owner's.
+
+**Still open in M1** (visible in Settings): counts for the uncounted gear (Cliff's basic carried gear, Eli's converted
+needle-spear javelins, Nate's personal maintenance tools, recovered electrical cabling, better-quality liquor). The
+Passive-Skills flag and the 44 unimplemented house rules belong to M2 (mechanics) and M7 (rules center).

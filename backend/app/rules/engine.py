@@ -127,6 +127,7 @@ class QuestUpsert(BaseModel):
     priority: int | None = Field(default=None, ge=1, le=3)
     progress: str | None = None
     giver: str | None = None
+    immediate: bool | None = None                # true: part of the immediate objective (in order added); false: no longer
 
 
 class NpcAttitude(BaseModel):
@@ -433,12 +434,13 @@ def _apply_quest(ctx: Ctx, op: QuestUpsert) -> dict:
     if op.owner:
         extra["owner_character_id"] = resolve_character(ctx.conn, ctx.campaign_id, op.owner)["id"]
     if q:
-        fields = {k: v for k, v in op.model_dump(exclude={"op", "title", "details", "due_in_minutes", "owner"}).items() if v is not None}
+        fields = {k: v for k, v in op.model_dump(exclude={"op", "title", "details", "due_in_minutes", "owner", "immediate"}).items() if v is not None}
         fields.update(extra)
-        if not fields:
+        if not fields and op.immediate is None:
             raise ChangeError("quest update has no changes")
-        ctx.conn.execute(f"UPDATE quests SET {', '.join(f'{k} = ?' for k in fields)}, updated_at = ? WHERE id = ?",
-                         (*fields.values(), now_iso(), q["id"]))
+        if fields:
+            ctx.conn.execute(f"UPDATE quests SET {', '.join(f'{k} = ?' for k in fields)}, updated_at = ? WHERE id = ?",
+                             (*fields.values(), now_iso(), q["id"]))
         verb = {"completed": "completed", "failed": "failed"}.get(op.status or "", "updated")
         summary = f"Quest {verb}: {q['title']}"
         etype = "quest_" + verb
@@ -454,6 +456,13 @@ def _apply_quest(ctx: Ctx, op: QuestUpsert) -> dict:
             ctx.conn.execute(f"UPDATE quests SET {', '.join(f'{k} = ?' for k in extra)} WHERE id = ?", (*extra.values(), qid))
         summary = f"New {op.kind or 'quest'}: {op.title.strip()}"
         etype = "quest_added"
+    if op.immediate is not None:
+        qid = q["id"] if q else ctx.conn.execute("SELECT id FROM quests WHERE campaign_id = ? AND title = ? ORDER BY id DESC",
+                                                 (ctx.campaign_id, op.title.strip())).fetchone()[0]
+        ids = json.loads(one(ctx.conn, "SELECT objective_quests_json AS j FROM campaigns WHERE id = ?", (ctx.campaign_id,))["j"] or "[]")
+        ids = [i for i in ids if i != qid] + ([qid] if op.immediate else [])
+        ctx.conn.execute("UPDATE campaigns SET objective_quests_json = ? WHERE id = ?", (json.dumps(ids), ctx.campaign_id))
+        summary += " (now part of the immediate objective)" if op.immediate else " (no longer the immediate objective)"
     ctx.event(etype, summary, op.model_dump(exclude={"op"}))
     return {"summary": summary}
 

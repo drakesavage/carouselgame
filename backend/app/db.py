@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
   floor_deadline_minutes INTEGER,                  -- game minute at which the floor collapses
   active_character_id INTEGER,                     -- the player's crawler
   active_objective TEXT,
+  objective_quests_json TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -293,6 +294,7 @@ CREATE TABLE IF NOT EXISTS corrections (    -- owner-approved corrections of can
   ops_json TEXT NOT NULL DEFAULT '[]',
   results_json TEXT NOT NULL DEFAULT '[]',
   ledger_edits_json TEXT NOT NULL DEFAULT '[]',
+  resolves_json TEXT NOT NULL DEFAULT '[]',   -- import-report keys this settles (reconcile.report_keys)
   decided_by TEXT NOT NULL,
   save_point_id INTEGER,
   created_at TEXT NOT NULL
@@ -514,7 +516,9 @@ COLUMN_MIGRATIONS = [
     ("quests", "owner_character_id", "INTEGER"),
     ("turns", "stage_json", "TEXT"),
     ("art_jobs", "engine", "TEXT NOT NULL DEFAULT 'comfy'"),
-    ("characters", "portrait_crop_json", "TEXT"),  # {cx, cy, k, ar}: square crop of the portrait image (null = default)  # comfy | codex (art/codex_image.py)  # staged tool calls and roll records while a turn is in flight
+    ("characters", "portrait_crop_json", "TEXT"),
+    ("corrections", "resolves_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ("campaigns", "objective_quests_json", "TEXT NOT NULL DEFAULT '[]'"),  # ordered quest ids that make up the immediate objective  # {cx, cy, k, ar}: square crop of the portrait image (null = default)  # comfy | codex (art/codex_image.py)  # staged tool calls and roll records while a turn is in flight
 ]
 
 

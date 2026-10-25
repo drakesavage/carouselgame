@@ -41,16 +41,14 @@ def list_campaigns(conn: sqlite3.Connection) -> list[dict]:
 
 def campaign_summary(conn: sqlite3.Connection, cid: int) -> dict | None:
     camp = one(conn, """SELECT id, name, is_demo, data_source, current_floor, current_location, safe_room, game_time_minutes,
-                               floor_deadline_minutes, active_character_id, active_objective, updated_at
+                               floor_deadline_minutes, active_character_id, active_objective, objective_quests_json, updated_at
                         FROM campaigns WHERE id = ?""", (cid,))
     if not camp:
         return None
     party = rows(conn, f"SELECT {PUBLIC_CHAR_COLUMNS} FROM characters WHERE campaign_id = ? AND in_party = 1 ORDER BY party_order, id", (cid,))
     camp["floor_clock"] = floor_clock(camp)
     camp["party"] = [character_card(conn, c) for c in party]
-    camp["quests"] = rows(conn, """SELECT id, kind, title, description, status, priority, progress FROM quests
-                                   WHERE campaign_id = ? AND visibility = 'player' AND status IN ('active','paused')
-                                   ORDER BY priority, id""", (cid,))
+    order = {q: n for n, q in enumerate(camp.pop("objective_quests") or [])}
     from ..rules.combat import public_encounter
     camp["encounter"] = public_encounter(one(conn, """SELECT id, name, round, summary, combatants_json FROM encounters
                                     WHERE campaign_id = ? AND status = 'active' AND visibility = 'player' ORDER BY id DESC LIMIT 1""", (cid,)), conn)
@@ -73,8 +71,12 @@ def campaign_summary(conn: sqlite3.Connection, cid: int) -> dict | None:
                                                        'character_death','mob_defeated','advancement_checkpoint','encounter_start','encounter_end','group_moved',
                                                        'scene_started','location_changed','floor_collapse','dungeon_day')
                                           ORDER BY id DESC LIMIT 6""", (cid,))
-    camp["quests"] = rows(conn, """SELECT id, kind, title, description, status, priority, progress, details_json, due_at_minutes FROM quests
-                                   WHERE campaign_id = ? AND visibility = 'player' AND status IN ('active','paused') ORDER BY priority, id""", (cid,))
+    quests = rows(conn, """SELECT id, kind, title, description, status, priority, progress, details_json, due_at_minutes FROM quests
+                           WHERE campaign_id = ? AND visibility = 'player' AND status IN ('active','paused') ORDER BY priority, id""", (cid,))
+    for q in quests:
+        q["immediate"] = q["id"] in order and q["status"] == "active"
+    # the immediate objective is its linked quests, first and in order; a finished quest drops out by itself
+    camp["quests"] = sorted(quests, key=lambda q: (0, order[q["id"]]) if q["immediate"] else (1, 0))
     return camp
 
 
