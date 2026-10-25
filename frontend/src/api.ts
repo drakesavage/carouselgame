@@ -102,6 +102,7 @@ export const api = {
   campaign: (id: number) => req<Campaign>(`api/campaigns/${id}`),
   characters: (id: number) => req<CharacterCard[]>(`api/campaigns/${id}/characters`),
   character: (id: number, cid: number) => req<CharacterSheet>(`api/campaigns/${id}/characters/${cid}`),
+  dossier: (id: number, cid: number) => req<Record<string, unknown>>(`api/campaigns/${id}/characters/${cid}/dossier`),
   inventory: (id: number) => req<{ shared: Item[]; by_character: Item[] }>(`api/campaigns/${id}/inventory`),
   quests: (id: number) => req<Quest[]>(`api/campaigns/${id}/quests`),
   npcs: (id: number) => req<CharacterCard[]>(`api/campaigns/${id}/npcs`),

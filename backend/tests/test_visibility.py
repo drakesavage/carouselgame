@@ -35,6 +35,7 @@ def _player_urls(client, cid):
             f"/api/campaigns/{cid}/records?q=secret debt syndicate hidden plans", f"/api/rules/search?q=secret&cid={cid}"]
     for ch in client.get(f"/api/campaigns/{cid}/characters").json():
         urls.append(f"/api/campaigns/{cid}/characters/{ch['id']}")
+        urls.append(f"/api/campaigns/{cid}/characters/{ch['id']}/dossier")
     for rec in client.get(f"/api/campaigns/{cid}/records").json():
         urls.append(f"/api/campaigns/{cid}/records/{rec['id']}")
     return urls

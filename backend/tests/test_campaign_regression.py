@@ -1,6 +1,7 @@
 """Regression tests on the real Denton campaign, imported from a throwaway clone of the ledger into a temp database.
 The real ledger clone and data/campaign.db are never touched. Skipped when the ledger clone is absent."""
 import json
+import re
 import shutil
 import subprocess
 import uuid
@@ -202,3 +203,48 @@ def test_briefing_carries_what_the_gm_needs_and_the_continuity_report_passes(con
     report = continuity(conn, denton, ctx, [], 0, 0, [])
     failing = [c for c in report["checks"] if c["status"] != "pass"]
     assert not failing, failing
+
+
+def test_cliff_dossier_preserves_the_record_exactly(client, conn, denton):
+    """The dossier is a view: every value must equal the saved record (Cliff as the regression fixture)."""
+    cliff = ids(conn, denton)["cliff"]
+    d = client.get(f"/api/campaigns/{denton}/characters/{cliff['id']}/dossier").json()
+    sheet = client.get(f"/api/campaigns/{denton}/characters/{cliff['id']}").json()
+    assert (d["name"], d["level"], d["race"], d["class_name"], d["crawler_number"]) == \
+        (sheet["name"], sheet["level"], sheet["race"], sheet["class_name"], sheet["crawler_number"])
+    for a in d["attributes"]:
+        assert a["value"] == sheet["stats"]["stats"][a["key"]] and a["modifier"] == sheet["stats"]["modifiers"][a["key"]]
+    c = d["combat"]
+    assert (c["health"]["current"], c["health"]["max"], c["mana"]["current"], c["mana"]["max"], c["ai_favor"]) == \
+        (sheet["hp_current"], sheet["hp_max"], sheet["mana_current"], sheet["mana_max"], sheet["ai_favor"])
+    for k in ("evade", "damage_resistance", "move", "step"):
+        assert c[k] == sheet["derived"][k]
+    by_id = {s["id"]: s for s in sheet["skills"]}
+    assert len(d["skills"]) == len(sheet["skills"])  # one canonical card per skill
+    for s in d["skills"]:
+        raw = by_id[s["id"]]
+        assert s["rank"] == raw["rank"] and s["gear_granted"] == (raw["kind"] == "equipment_skill")
+        assert s["specialty"] == (raw["properties"] or {}).get("specialty")
+    eng = next(s for s in d["skills"] if s["name"] == "Engineering")
+    assert (eng["rank"], eng["specialty"], eng["perk"], eng["category"]) == (8, "Portable Traps", "Quick Deployment", "engineering")
+    assert next(s for s in d["skills"] if s["name"] == "Aiming")["gear_granted"] is True
+    assert {"Portable Traps", "Quick Deployment", "Make It Work"} <= {h["title"] for h in d["build"]["highlights"]}
+    owned = {i["id"]: i for i in sheet["items"]}
+    for i in d["equipment"]["equipped"] + d["equipment"]["carried"]:
+        assert i["id"] in owned and i["equipped"] == bool(owned[i["id"]]["equipped"]) and i["quantity"] == owned[i["id"]]["quantity"]
+    assert all(i.get("shared") for i in d["equipment"]["linked_shared"])  # shared stash shown as shared, never as owned
+    assert all(q["kind"] != "reservation" or q["title"] not in {i["name"] for i in d["equipment"]["equipped"]} for q in d["equipment"]["commitments"])
+    assert d["history"] and all(h["text"] for h in d["history"])
+    # viewing changes nothing
+    assert client.get(f"/api/campaigns/{denton}/characters/{cliff['id']}").json() == sheet
+
+
+def test_every_party_dossier_builds_without_gm_material(client, conn, denton):
+    secrets_text = " ".join(r["content"] for r in rows(conn, "SELECT content FROM gm_secrets WHERE campaign_id = ?", (denton,)))
+    for ch in rows(conn, "SELECT id, name FROM characters WHERE campaign_id = ?", (denton,)):
+        r = client.get(f"/api/campaigns/{denton}/characters/{ch['id']}/dossier")
+        assert r.status_code == 200, ch["name"]
+        body = r.text
+        # no long run of GM-only text appears in any dossier
+        sample = [s for s in re.split(r"(?<=[.!?])\s+", secrets_text) if len(s) > 60][:400]
+        assert not any(s in body for s in sample), ch["name"]

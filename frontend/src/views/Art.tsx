@@ -188,11 +188,11 @@ export function ArtQueue({ cid, onChanged }: { cid: number; onChanged?: () => vo
 }
 
 /** Adjust which square of a portrait shows in every portrait tile: drag the square, zoom with the slider. */
-export function CropButton({ cid, c, onSaved }: { cid: number; c: { id: number; name: string; portrait_path?: string | null; portrait_crop?: PortraitCrop | null }; onSaved: () => void }) {
+export function CropButton({ cid, c, onSaved, compact }: { cid: number; c: { id: number; name: string; portrait_path?: string | null; portrait_crop?: PortraitCrop | null }; onSaved: () => void; compact?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button className="btn small ghost" style={{ marginTop: 4, width: "100%" }} onClick={() => setOpen(true)}><Crop size={12} /> Adjust crop</button>
+      <button className="btn small ghost" style={compact ? undefined : { marginTop: 4, width: "100%" }} onClick={() => setOpen(true)} title="Adjust portrait crop"><Crop size={12} /> {compact ? "Crop" : "Adjust crop"}</button>
       {open && c.portrait_path && <CropDialog cid={cid} c={c} url={`media/portraits/${encodeURIComponent(c.portrait_path)}`} onClose={(saved) => { setOpen(false); if (saved) onSaved(); }} />}
     </>
   );

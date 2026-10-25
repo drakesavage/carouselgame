@@ -303,6 +303,14 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     def make_demo(c=Depends(db), _=Depends(write_lock)):
         return {"campaign_id": seed_demo(c)}
 
+    @app.get("/api/campaigns/{cid}/characters/{char_id}/dossier")
+    def character_dossier(cid: int, char_id: int, c=Depends(db)):
+        from .memory.dossier import build as build_dossier
+        d = build_dossier(c, cid, char_id)
+        if not d:
+            raise HTTPException(404, "character not found")
+        return d
+
     @app.put("/api/campaigns/{cid}/characters/{char_id}/portrait-crop")
     def portrait_crop(cid: int, char_id: int, body: CropIn, c=Depends(db), _=Depends(write_lock)):
         if not one(c, "SELECT id FROM characters WHERE campaign_id = ? AND id = ?", (cid, char_id)):
