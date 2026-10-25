@@ -227,3 +227,120 @@ def silver_earth_box_correction(conn: sqlite3.Connection, cid: int, ledger_root,
                             decision="All twelve Silver Earth Boxes are opened; the selection-time 'unopened' notes are stale. Each box's "
                                      "physical reward is added to its crawler's inventory (use not recorded).",
                             evidence=evidence, ops=ops, decided_by=decided_by, ledger_edits=edits, sheet_edits=sheet_edits)
+
+
+def _ledger_yaml(root, rel: str) -> dict:
+    from pathlib import Path
+
+    import yaml
+    return yaml.safe_load((Path(root) / rel).read_text(encoding="utf-8")) or {}
+
+
+AMMO_RULING = ("Owner ruling 2026-10-25 (Crawler Console correction): the last exact distribution (Floor 2 northeast Warden "
+               "checkpoint, 89a4c9c) is current: crossbow bolts Cliff 24, Maya 20, Priya 20 (64 shared); Terri 22 pistol rounds. "
+               "Unrecorded Floor 2 shots after that checkpoint are waived.")
+
+
+def ammunition_correction(conn: sqlite3.Connection, cid: int, ledger_root, decided_by: str) -> dict:
+    """Owner ruling 2026-10-25: the last exact ammunition distribution is current (64 shared bolts, 22 pistol rounds)."""
+    found = {}
+    for name in ("Crossbow Bolt", "Pistol Round"):
+        it = one(conn, "SELECT id, quantity FROM items WHERE campaign_id = ? AND owner_character_id IS NULL AND name = ?", (cid, name))
+        if not it or it["quantity"] is not None:
+            raise ValueError(f"shared {name} is {it and it['quantity']!r}, not the unknown count this ruling was decided against; re-review")
+        found[name] = it["id"]
+    inv = _ledger_yaml(ledger_root, "state/shared_inventory.yaml")
+    camp = _ledger_yaml(ledger_root, "state/campaign.yaml")
+    ids = {e.get("id") for e in inv.get("items") or [] if isinstance(e, dict)}
+    edits = []
+    for iid, semantics in (("crossbow-bolt", "Exact count by owner ruling: 64 shared bolts (Cliff 24, Maya 20, Priya 20 at the last exact distribution)."),
+                           ("pistol-round", "Exact count by owner ruling: 22 rounds (Terri's last exact count).")):
+        if iid in ids:
+            edits.append({"file": "state/shared_inventory.yaml", "path": ["items", {"id": iid}, "quantity_semantics"], "value": semantics})
+    if (inv.get("ammunition_reconciliation") or {}).get("status") == "unresolved":
+        edits.append({"file": "state/shared_inventory.yaml", "path": ["ammunition_reconciliation", "status"], "expect": "unresolved",
+                      "value": "resolved-by-owner-ruling"})
+        edits.append({"file": "state/shared_inventory.yaml", "path": ["ammunition_reconciliation", "owner_ruling"], "value": AMMO_RULING})
+    if str((camp.get("current_state") or {}).get("ammunition_count_status", "")).startswith("Unresolved"):
+        edits.append({"file": "state/campaign.yaml", "path": ["current_state", "ammunition_count_status"], "value": AMMO_RULING})
+    snap = camp.get("shared_resource_snapshot") or {}
+    for key, n in (("crossbow_bolts_carried_available", 64), ("pistol_rounds", 22)):
+        if str(snap.get(key, "")).startswith("unresolved"):
+            edits.append({"file": "state/campaign.yaml", "path": ["shared_resource_snapshot", key], "expect": snap[key], "value": n})
+    evidence = [
+        {"source": "state/shared_inventory.yaml ammunition_reconciliation and historical_floor_2_ammunition_distribution",
+         "says": "Last exact distribution at the Floor 2 northeast Warden checkpoint (89a4c9c, Sept 8): bolts Cliff 24, Maya 20, Priya 20; "
+                 "Terri 22 pistol rounds; status unresolved; 'No exact current total is invented'; a ruling is required before the "
+                 "first ammo-dependent Floor 3 action."},
+        {"source": "git history 89a4c9c..0374b26 (Sept 8-10)",
+         "says": "The Greenhouse Boss fight and a crawler rescue happened with no ammunition record; the Homogenous Humor fight (two bolts "
+                 "lost) was earlier (afea15f, Sept 6), so it is already reflected in the exact count."},
+        {"source": "state/characters/cliff.yaml, terri-campion.yaml", "says": "Cliff's crossbow uses shared crossbow bolts; Terri's pistol uses shared pistol rounds."},
+        {"source": "state/gilded_feathers_market.yaml", "says": "Bolts and pistol rounds were stocked, not bought (only the 30-Gold Stabber was paid)."},
+        {"source": "story history (threads 4, 5)", "says": "No ammunition counts."},
+    ]
+    ops = [{"op": "set_quantity", "item_id": found["Crossbow Bolt"], "name": "Crossbow Bolt", "character": "shared", "quantity": 64,
+            "reason": "Owner ruling: last exact distribution (Cliff 24, Maya 20, Priya 20)"},
+           {"op": "set_quantity", "item_id": found["Pistol Round"], "name": "Pistol Round", "character": "shared", "quantity": 22,
+            "reason": "Owner ruling: Terri's last exact count"}]
+    return apply_correction(conn, cid, subject="Ammunition count",
+                            decision="Owner ruling: the last exact distribution is current. 64 shared crossbow bolts (Cliff 24, Maya 20, "
+                                     "Priya 20) and 22 pistol rounds; unrecorded Floor 2 shots are waived.",
+                            evidence=evidence, ops=ops, decided_by=decided_by, ledger_edits=edits)
+
+
+def _asset_note(e: dict) -> str:
+    bits = [str(e[k]) for k in ("status", "quantification") if e.get(k)]
+    if e.get("floor_3_installed_systems"):
+        bits.append("Installed: " + " ".join(e["floor_3_installed_systems"]))
+    for k in ("gasoline_remaining", "prepared_wood_gas_fuel_remaining", "primary_mode", "effect"):
+        if e.get(k):
+            bits.append(f"{k.replace('_', ' ').capitalize()}: {e[k]}")
+    bits.append(f"Full record: state/shared_inventory.yaml historical_floor_2_assets ({e['id']}).")
+    return " ".join(b if b.endswith(".") else b + "." for b in bits)
+
+
+def floor_2_assets_correction(conn: sqlite3.Connection, cid: int, ledger_root, decided_by: str) -> dict:
+    """Owner decision 2026-10-25: everything in historical_floor_2_assets came along to Floor 3 and is current shared kit."""
+    inv = _ledger_yaml(ledger_root, "state/shared_inventory.yaml")
+    assets = [e for e in inv.get("historical_floor_2_assets") or [] if isinstance(e, dict) and e.get("name")]
+    ops = []
+    for e in assets:
+        if one(conn, "SELECT 1 FROM items WHERE campaign_id = ? AND owner_character_id IS NULL AND name = ?", (cid, e["name"])):
+            continue  # already current (the Gold Siphon Assembly)
+        ops.append({"op": "add_item", "character": "shared", "name": e["name"], "quantity": e.get("quantity") if e.get("quantity") is not None else 1,
+                    "description": _asset_note(e)})
+    if len(ops) != 10:
+        raise ValueError(f"{len(ops)} historical Floor 2 assets are missing from the console, not the 10 this decision covered; re-review")
+    evidence = [
+        {"source": "state/shared_inventory.yaml (commit 08593db, 2026-09-25 rules audit)",
+         "says": "Renamed latest_floor_2_assets to historical_floor_2_assets; the importer skips historical sections, so none of these "
+                 "reached the console (the Gold Siphon Assembly was separately copied into items)."},
+        {"source": "state/shared_inventory.yaml (commit 98e66e4, Floor 3 checkpoint)",
+         "says": "The same section was then updated with current Floor 3 status: the pickup operational at The Molting Pigeon with its "
+                 "gasifier, jousting station and kite reel; the Murder Drum speaker mount installed and functional."},
+        {"source": "git history since Floor 2", "says": "No record of using, losing, or leaving behind the rune plates, biscuits, caches, toolkit or winch cable."},
+    ]
+    return apply_correction(conn, cid, subject="Floor 2 assets carried to Floor 3",
+                            decision="Everything in historical_floor_2_assets came along and is current shared kit: the pickup, the Murder "
+                                     "Drum speaker mount, 3 Explosive Rune Plates, 40 Crawler Biscuits, the arrow / handgun round / shotgun "
+                                     "shell / trap stake caches, the Portable Mechanic Toolkit and the Spare Winch Cable.",
+                            evidence=evidence, ops=ops, decided_by=decided_by)
+
+
+def driscoll_correction(conn: sqlite3.Connection, cid: int, ledger_root, decided_by: str) -> dict:
+    """Owner decision 2026-10-25: Mad Driscoll is deceased; his sheet's roster category follows the roster."""
+    d = one(conn, "SELECT id, provenance, status FROM characters WHERE campaign_id = ? AND name = 'Mad Driscoll'", (cid,))
+    if not d or d["status"] != "deceased":
+        raise ValueError("Mad Driscoll is not recorded as deceased in the console; re-review")
+    rel = d["provenance"].split(":", 1)[1]
+    sheet = _ledger_yaml(ledger_root, rel)
+    edits = [{"file": rel, "path": ["roster_category"], "expect": "allied_npcs", "value": "deceased_npcs"}] if sheet.get("roster_category") == "allied_npcs" else []
+    evidence = [
+        {"source": "state/roster.yaml", "says": "Lists mad-driscoll under deceased_npcs; 'Mad Driscoll died in the Floor 1 collapse.'"},
+        {"source": rel, "says": "roster_category allied_npcs, but status deceased, died in the Floor 1 collapse; 'cannot act, assist, travel, craft, or appear'."},
+    ]
+    return apply_correction(conn, cid, subject="Mad Driscoll's roster category",
+                            decision="Deceased: his sheet's roster category is deceased_npcs, matching the roster. His trapsmith tools stay "
+                                     "with him on Floor 1, not in party inventory.",
+                            evidence=evidence, ops=[], decided_by=decided_by, ledger_edits=edits)

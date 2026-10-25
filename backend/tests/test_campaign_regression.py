@@ -337,3 +337,29 @@ def test_write_back_mirrors_the_live_advancement_count_into_campaign_current_sta
     assert camp["current_state"]["advancement_cycles"] == "4/12"
     assert camp["floor_3_molting_pigeon_checkpoint"]["advancement_cycles"] == "11/12"  # the DCC-DENTON-014 snapshot stays as recorded
     assert not [c for c in sync.preview(conn, denton, fetch=False)["changes"] if c["summary"].startswith("Campaign mirror")]
+
+
+def test_import_report_corrections_settle_ammo_assets_and_driscoll_and_reach_the_ledger(conn, denton):
+    from app.ledger import sync
+    from app.reconcile import ammunition_correction, driscoll_correction, floor_2_assets_correction
+    root = sync.link(conn, denton)["root"]
+    ammunition_correction(conn, denton, root, decided_by="owner (test)")
+    floor_2_assets_correction(conn, denton, root, decided_by="owner (test)")
+    driscoll_correction(conn, denton, root, decided_by="owner (test)")
+    q = lambda n: one(conn, "SELECT quantity FROM items WHERE campaign_id = ? AND owner_character_id IS NULL AND name = ?", (denton, n))["quantity"]
+    assert q("Crossbow Bolt") == 64 and q("Pistol Round") == 22 and q("Crawler Biscuit") == 40 and q("Explosive Rune Plate") == 3
+    assert "Molting Pigeon" in one(conn, "SELECT description FROM items WHERE campaign_id = ? AND name LIKE '1987 Toyota Pickup%'", (denton,))["description"]
+    for fn in (ammunition_correction, floor_2_assets_correction):
+        with pytest.raises(ValueError):
+            fn(conn, denton, root, decided_by="owner (test)")
+    pv = sync.preview(conn, denton, fetch=False)
+    assert pv["blockers"] == [] and all(c["status"] == "clean" for c in pv["changes"])
+    sync.apply(conn, denton, fingerprint=pv["fingerprint"], selected=None, message="Import report", author_name="Test", author_email="t@example.com")
+    inv = yaml.safe_load((root / "state/shared_inventory.yaml").read_text(encoding="utf-8"))
+    bolt = next(e for e in inv["items"] if e.get("id") == "crossbow-bolt")
+    assert bolt["quantity"] == 64 and bolt["quantity_semantics"].startswith("Exact count by owner ruling")
+    assert inv["ammunition_reconciliation"]["status"] == "resolved-by-owner-ruling"
+    assert any(e.get("name") == "Crawler Biscuit" and e.get("quantity") == 40 for e in inv["items"])
+    camp = yaml.safe_load((root / "state/campaign.yaml").read_text(encoding="utf-8"))
+    assert camp["shared_resource_snapshot"]["pistol_rounds"] == 22
+    assert yaml.safe_load((root / "state/characters/mad-driscoll.yaml").read_text(encoding="utf-8"))["roster_category"] == "deceased_npcs"

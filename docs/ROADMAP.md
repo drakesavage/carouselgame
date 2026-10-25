@@ -5,7 +5,7 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 | Milestone | Priority | Status | Dependencies | Commit | Tests | Screenshot review | Open blockers |
 |---|---|---|---|---|---|---|---|
 | M0 Safe upgrade workflow | P0 | Done | none | 385d7dd | 155 backend; typecheck/build; isolation probe PASS | Settings passcode masked | ledger behind by 2 (see below) |
-| M1 Canonical-state reconciliation | P0 | In progress | M0 | (pending) | 156 backend | n/a | remaining conflicts need owner decisions (import report) |
+| M1 Canonical-state reconciliation | P0 | In progress | M0 | (pending) | 156 backend | n/a | waiting on owner counts for uncounted gear; 44 house rules move to M2/M7 |
 | M2 Mechanics reliability & GM gates | P0 | Backlog | M1 | | | | |
 | M3 Main story HUD | P1 | Backlog | M1 underway | | | | |
 | M4 Characters, party, people | P1 | Backlog | M3 | | | | |
@@ -103,9 +103,34 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 * Write-back now keeps `current_state.advancement_cycles` equal to the live counter on every write (like the roster's
   floor-clock mirror): 11/12 → 4/12 now. No correction record was needed; console state was already right.
 
-**Pending reviewed write-back (Ledger view)**: 41 clean changes, no blockers. `state/campaign.yaml`: clock, dungeon
-time, location, saferoom, box count, advancement mirror. `state/roster.yaml`: clock mirror. `state/shared_inventory.yaml`:
-Gold and Stabber note. Twelve character sheets: the box reward and the selection note. Not written: that commit is the
-owner's.
+**Import report review.** The 4 remaining conflicts: advancement, floor clock and Gold were already settled by
+decisions 6, 3 and 2; Mad Driscoll is decision 9. The 18 review items: 9 ammunition entries (decision 7), 8 uncounted
+items (pending the owner's counts), and the request to flag Passive Skills, which is a mechanics feature, not a state
+conflict: moved to M2.
 
-**Still open in M1**: the importer's remaining 4 conflicts / 18 review items / 44 unimplemented house rules.
+**Decision 7: ammunition.** Owner ruling: the last exact distribution is current.
+* Evidence: exact count at the Floor 2 northeast Warden checkpoint (`89a4c9c`, Sept 8, after the Homogenous Humor fight
+  that lost two bolts): bolts Cliff 24, Maya 20, Priya 20; Terri 22 pistol rounds. The Greenhouse Boss fight and a rescue
+  followed with no ammunition record (`0374b26`); the ledger refused to invent a total and asked for a ruling. Chat
+  history has no counts; the market only listed stock.
+* Applied as correction #5 (save point #17): 64 shared crossbow bolts and 22 pistol rounds (the sheets draw both from
+  the shared pool). Write-back marks both counts established and records the ruling in `ammunition_reconciliation` and
+  `campaign.yaml`.
+
+**Decision 8: Floor 2 assets.** Owner chose: everything in `historical_floor_2_assets` came along.
+* Evidence: the Sept 25 rules audit (`08593db`) renamed `latest_floor_2_assets` to `historical_floor_2_assets`, which
+  the importer skips, but the Floor 3 checkpoint (`98e66e4`) then wrote current status into it (pickup operational at The
+  Molting Pigeon; speaker mount installed). Nothing records using or losing the rest.
+* Applied as correction #6 (save point #18): ten shared items added: the 1987 Toyota Pickup (status, fuel, installed
+  systems in its note), the Reversible Murder Drum Speaker Mount, 3 Explosive Rune Plates, 40 Crawler Biscuits, the
+  15-arrow, 15-handgun-round, 9-shotgun-shell and 6-trap-stake caches, the Portable Mechanic Toolkit and the Spare Winch
+  Cable. Write-back adds them to `items`; the historical section keeps the full records.
+
+**Decision 9: Mad Driscoll.** Owner chose: deceased; fix the sheet. Correction #7 (save point #19): his sheet's
+`roster_category` becomes `deceased_npcs`, matching the roster; his trapsmith tools stay with him on Floor 1.
+
+**Pending reviewed write-back (Ledger view)**: 63 clean changes, no blockers. Not written: that commit is the owner's.
+
+**Still open in M1**: counts for the uncounted gear (Cliff's basic carried gear, Eli's converted needle-spear javelins,
+Nate's personal maintenance tools, recovered electrical cabling, better-quality liquor); the owner chose to supply them.
+The 44 unimplemented house rules belong to M2 (mechanics) and M7 (rules center).
