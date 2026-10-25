@@ -303,3 +303,37 @@ def test_clock_and_location_corrections_reach_hud_context_and_ledger(conn, dento
     root = sync.link(conn, denton)["root"]
     cy = yaml.safe_load((root / "state/campaign.yaml").read_text(encoding="utf-8"))
     assert cy["floor_clock"]["remaining_minutes"] == 12881 and cy["safe_room_status"] is False and cy["current_location"].startswith("Gilded Feathers")
+
+
+def test_silver_earth_box_correction_settles_status_adds_rewards_and_reaches_the_ledger(conn, denton):
+    from app.ledger import sync
+    from app.reconcile import silver_earth_box_correction
+    root = sync.link(conn, denton)["root"]
+    silver_earth_box_correction(conn, denton, root, decided_by="owner (test)")
+    cliff = one(conn, "SELECT id, sheet_json FROM characters WHERE campaign_id = ? AND name LIKE 'Cliff%'", (denton,))
+    assert cliff["sheet"]["floor_3_selection"]["silver_earth_box"]["status"] == "opened-and-resolved"
+    assert one(conn, "SELECT quantity FROM items WHERE owner_character_id = ? AND name = 'Family-size bag of peanut M&Ms'", (cliff["id"],))["quantity"] == 1
+    with pytest.raises(ValueError):
+        silver_earth_box_correction(conn, denton, root, decided_by="owner (test)")
+    pv = sync.preview(conn, denton, fetch=False)
+    assert pv["blockers"] == [] and all(c["status"] == "clean" for c in pv["changes"])
+    sync.apply(conn, denton, fingerprint=pv["fingerprint"], selected=None, message="Boxes", author_name="Test", author_email="t@example.com")
+    doc = yaml.safe_load((root / "state/characters/cliff.yaml").read_text(encoding="utf-8"))
+    assert doc["floor_3_selection"]["silver_earth_box"]["status"] == "opened-and-resolved"
+    assert any(e.get("name") == "Family-size bag of peanut M&Ms" and e.get("quantity") == 1 for e in doc["inventory"])
+    camp = yaml.safe_load((root / "state/campaign.yaml").read_text(encoding="utf-8"))
+    assert camp["floor_3_selection_resolution"]["unopened_rewards"]["silver_earth_boxes"] == 0
+
+
+def test_write_back_mirrors_the_live_advancement_count_into_campaign_current_state(conn, denton):
+    from app.ledger import sync
+    root = sync.link(conn, denton)["root"]
+    assert yaml.safe_load((root / "state/campaign.yaml").read_text(encoding="utf-8"))["current_state"]["advancement_cycles"] == "11/12"
+    pv = sync.preview(conn, denton, fetch=False)
+    mirror = [c for c in pv["changes"] if c["summary"].startswith("Campaign mirror of advancement cycles")]
+    assert len(mirror) == 1 and mirror[0]["detail"] == {"from": "11/12", "to": "4/12"} and mirror[0]["status"] == "clean"
+    sync.apply(conn, denton, fingerprint=pv["fingerprint"], selected=None, message="Mirror", author_name="Test", author_email="t@example.com")
+    camp = yaml.safe_load((root / "state/campaign.yaml").read_text(encoding="utf-8"))
+    assert camp["current_state"]["advancement_cycles"] == "4/12"
+    assert camp["floor_3_molting_pigeon_checkpoint"]["advancement_cycles"] == "11/12"  # the DCC-DENTON-014 snapshot stays as recorded
+    assert not [c for c in sync.preview(conn, denton, fetch=False)["changes"] if c["summary"].startswith("Campaign mirror")]

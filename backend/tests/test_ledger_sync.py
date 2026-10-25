@@ -55,7 +55,8 @@ def _apply(conn, cid, pv, **kw):
 def test_untouched_campaign_proposes_nothing(conn, mini_repo):
     cid, _ = import_ledger(conn, mini_repo)
     pv = sync.preview(conn, cid, fetch=False)
-    assert pv["changes"] == [] and pv["blockers"] == []
+    # only the stale campaign.yaml mirror of the live advancement counter is proposed
+    assert [c["summary"] for c in pv["changes"]] == ["Campaign mirror of advancement cycles 9/12 → 4/12"] and pv["blockers"] == []
 
 
 def test_play_is_written_back_minimally_and_idempotently(conn, mini_repo):
@@ -183,7 +184,7 @@ def test_api_preview_and_apply(client, conn, mini_repo):
 
 def test_real_ledger_round_trip_passes_its_own_validator(conn, real_repo):
     cid, rep = import_ledger(conn, real_repo)
-    assert sync.preview(conn, cid, fetch=False)["changes"] == []
+    assert [c["summary"] for c in sync.preview(conn, cid, fetch=False)["changes"]] == ["Campaign mirror of advancement cycles 11/12 → 4/12"]
     roller = DiceRoller(source=scripted([17, 20]))
     with transaction(conn):
         t = _turn(conn, cid)

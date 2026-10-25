@@ -5,7 +5,7 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 | Milestone | Priority | Status | Dependencies | Commit | Tests | Screenshot review | Open blockers |
 |---|---|---|---|---|---|---|---|
 | M0 Safe upgrade workflow | P0 | Done | none | 385d7dd | 155 backend; typecheck/build; isolation probe PASS | Settings passcode masked | ledger behind by 2 (see below) |
-| M1 Canonical-state reconciliation | P0 | In progress | M0 | (pending) | 156 backend | n/a | remaining conflicts need owner decisions (Silver Earth Box, import report) |
+| M1 Canonical-state reconciliation | P0 | In progress | M0 | (pending) | 156 backend | n/a | remaining conflicts need owner decisions (import report) |
 | M2 Mechanics reliability & GM gates | P0 | Backlog | M1 | | | | |
 | M3 Main story HUD | P1 | Backlog | M1 underway | | | | |
 | M4 Characters, party, people | P1 | Backlog | M3 | | | | |
@@ -83,9 +83,29 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
   Pigeon stays the saferoom group's location; the recon group's position stays unknown. The GM context no longer
   carries the "records disagree" location note.
 
-**Pending reviewed write-back (Ledger view)**: 15 clean changes, no blockers. `state/campaign.yaml`: clock, dungeon
-time, location, saferoom. `state/roster.yaml`: clock mirror. `state/shared_inventory.yaml`: Gold and Stabber note. Not
-written: that commit is the owner's.
+**Decision 5: Silver Earth Boxes.** Owner chose: opened, fix console and ledger; add the physical rewards to inventory.
+* Evidence: the only "unopened" records are the class-selection notes of Sept 22 (`2f89e56`): `floor_3_selection.silver_earth_box`
+  on all twelve sheets and `unopened_rewards: silver_earth_boxes: 12` in `campaign.yaml`. Everything later (`98e66e4`,
+  Sept 25) says opened: each sheet's `floor_3_silver_earth_box`, the inventory box (quantity 0, opened-and-resolved), the
+  checkpoint, the roster, and the twelve hobby Skills already on the console sheets.
+* Applied as correction #4 (save point #16): the twelve selection notes now read opened-and-resolved (a new audited
+  `sheet_edits` step in `reconcile.py`, since no engine op edits sheet fields), and each box's physical reward is
+  in its crawler's inventory (quantity 1; whether edible ones were eaten is not recorded). This settles the import
+  report's twelve "Silver Earth Box status" conflicts.
 
-**Still open in M1**: Silver Earth Box status per character, and the importer's 16 conflicts / 18 review items / 44
-unimplemented house rules.
+**Decision 6: advancement count.** Owner chose: mirror the live count.
+* Evidence: `state/advancement.yaml` calls itself the authoritative live counter, and its log runs 6 → 11/12
+  (DCC-DENTON-014), 11 → 12 → reset to 0/12 (DCC-DENTON-015), then 0 → 4/12 for the four market-sweep decisions
+  (`f1a5680`). The console and GM context already show 4/12. The roster's and checkpoint's 0/12 and
+  `floor_3_molting_pigeon_checkpoint`'s 11/12 are correct snapshots for their checkpoints and stay as recorded. The only
+  stale live-looking value is `campaign.yaml current_state.advancement_cycles: 11/12`, which the GM could still read
+  through lookup_records.
+* Write-back now keeps `current_state.advancement_cycles` equal to the live counter on every write (like the roster's
+  floor-clock mirror): 11/12 → 4/12 now. No correction record was needed; console state was already right.
+
+**Pending reviewed write-back (Ledger view)**: 41 clean changes, no blockers. `state/campaign.yaml`: clock, dungeon
+time, location, saferoom, box count, advancement mirror. `state/roster.yaml`: clock mirror. `state/shared_inventory.yaml`:
+Gold and Stabber note. Twelve character sheets: the box reward and the selection note. Not written: that commit is the
+owner's.
+
+**Still open in M1**: the importer's remaining 4 conflicts / 18 review items / 44 unimplemented house rules.

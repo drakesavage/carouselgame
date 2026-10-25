@@ -5,7 +5,8 @@ decision real through the same validated rule-engine ops play uses, in one trans
 an auditable record: what was decided, by whom, the evidence on each side, the ops applied and their results.
 `ledger_edits` (optional) carry the decision into the Git ledger through the reviewed write-back: each names a file, a
 YAML path, the value now in the ledger (`expect`) and the new value, and only applies while the ledger still says
-`expect` (otherwise the write-back shows a conflict).
+`expect` (otherwise the write-back shows a conflict). `sheet_edits` (optional) set a field of a character sheet that no
+rule-engine op covers; each records the value it replaced.
 """
 from __future__ import annotations
 
@@ -38,7 +39,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
 
 
 def apply_correction(conn: sqlite3.Connection, cid: int, *, subject: str, decision: str, evidence: list[dict], ops: list[dict],
-                     decided_by: str, ledger_edits: list[dict] | None = None) -> dict:
+                     decided_by: str, ledger_edits: list[dict] | None = None, sheet_edits: list[dict] | None = None) -> dict:
     if not evidence:
         raise ValueError("a correction needs evidence")
     if not decided_by.strip():
@@ -47,6 +48,7 @@ def apply_correction(conn: sqlite3.Connection, cid: int, *, subject: str, decisi
     with transaction(conn):
         sp = create_save_point(conn, cid, f"Before correction: {subject}"[:120], kind="manual")
         results = [apply_change(conn, cid, None, op) for op in ops]  # validated; any failure rolls everything back
+        results += [_sheet_edit(conn, cid, e) for e in sheet_edits or []]
         cor_id = conn.execute(
             """INSERT INTO corrections (campaign_id, subject, decision, evidence_json, ops_json, results_json, ledger_edits_json, decided_by,
                                         save_point_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
@@ -55,6 +57,22 @@ def apply_correction(conn: sqlite3.Connection, cid: int, *, subject: str, decisi
         conn.execute("INSERT INTO events (campaign_id, type, summary, payload_json, visibility, created_at) VALUES (?,?,?,?,?,?)",
                      (cid, "correction", f"Record corrected: {subject}. {decision}"[:500], json.dumps({"correction_id": cor_id}), "player", now_iso()))
     return {"id": cor_id, "save_point_id": sp, "results": results}
+
+
+def _sheet_edit(conn: sqlite3.Connection, cid: int, e: dict) -> dict:
+    c = one(conn, "SELECT id, name, sheet_json FROM characters WHERE campaign_id = ? AND id = ?", (cid, e["character_id"]))
+    if not c:
+        raise ValueError(f"no character #{e['character_id']}")
+    sheet = c["sheet"] or {}
+    node = sheet
+    for k in e["path"][:-1]:
+        node = node.setdefault(k, {})
+    before = node.get(e["path"][-1])
+    if "expect" in e and before != e["expect"]:
+        raise ValueError(f"{c['name']}: sheet {'.'.join(e['path'])} is {before!r}, not {e['expect']!r}; re-review")
+    node[e["path"][-1]] = e["value"]
+    conn.execute("UPDATE characters SET sheet_json = ? WHERE id = ?", (json.dumps(sheet, ensure_ascii=False), c["id"]))
+    return {"summary": f"{c['name']}: sheet {'.'.join(e['path'])} corrected", "before": before, "after": e["value"]}
 
 
 def corrections(conn: sqlite3.Connection, cid: int) -> list[dict]:
@@ -151,3 +169,61 @@ def location_correction(conn: sqlite3.Connection, cid: int, decided_by: str) -> 
                             decision="The campaign location is where Cliff is: Gilded Feathers, Heavensworth, not a saferoom. The Molting "
                                      "Pigeon remains the party's saferoom, where the support group is; the recon group's position stays unknown.",
                             evidence=evidence, ops=ops, decided_by=decided_by)
+
+
+BOX_OPENED = {"quantity": 0, "status": "opened-and-resolved"}
+BOX_REWARDS_NOW = {"silver_earth_boxes": 0,
+                   "ownership": "All twelve personal Silver Earth Boxes were opened at DCC-DENTON-014; see floor_3_molting_pigeon_checkpoint.boxes."}
+
+
+def silver_earth_box_correction(conn: sqlite3.Connection, cid: int, ledger_root, decided_by: str) -> dict:
+    """Owner decision 2026-10-25: every Silver Earth Box is opened; the selection-time 'unopened' notes are stale; each
+    box's physical reward is in its crawler's inventory."""
+    from pathlib import Path
+
+    import yaml
+    root = Path(ledger_root)
+    boxed = []
+    for c in rows(conn, "SELECT id, name, provenance, sheet_json FROM characters WHERE campaign_id = ? AND provenance LIKE 'ledger:%' ORDER BY id", (cid,)):
+        box = (c["sheet"] or {}).get("floor_3_silver_earth_box")
+        if isinstance(box, dict) and box.get("status") == "opened":
+            boxed.append(c)
+    if len(boxed) != 12:
+        raise ValueError(f"{len(boxed)} crawlers have an opened-box record, not the 12 this correction was decided against; re-review")
+    ops, sheet_edits, edits = [], [], []
+    for c in boxed:
+        sheet = c["sheet"]
+        sel = (sheet.get("floor_3_selection") or {}).get("silver_earth_box")
+        if sel != {"quantity": 1, "status": "unopened"}:
+            raise ValueError(f"{c['name']}: selection-time box note is {sel!r}, not the stale 'unopened' note; re-review")
+        reward = sheet["floor_3_silver_earth_box"].get("physical_reward") or ""
+        name = reward[:1].upper() + reward[1:]
+        if not name or one(conn, "SELECT 1 FROM items WHERE campaign_id = ? AND owner_character_id = ? AND name = ?", (cid, c["id"], name)):
+            raise ValueError(f"{c['name']}: no physical reward recorded, or it is already in inventory; re-review")
+        ops.append({"op": "add_item", "character": c["name"], "name": name, "quantity": 1,
+                    "description": "Physical reward from this crawler's Floor 3 Silver Earth Box. Whether it has since been used, eaten or "
+                                   "given away is not recorded."})
+        sheet_edits.append({"character_id": c["id"], "path": ["floor_3_selection", "silver_earth_box"], "expect": sel, "value": BOX_OPENED})
+        f = c["provenance"].split(":", 1)[1]
+        doc = yaml.safe_load((root / f).read_text(encoding="utf-8"))
+        if (doc.get("floor_3_selection") or {}).get("silver_earth_box") == sel:
+            edits.append({"file": f, "path": ["floor_3_selection", "silver_earth_box"], "expect": sel, "value": BOX_OPENED})
+    camp = yaml.safe_load((root / "state/campaign.yaml").read_text(encoding="utf-8"))
+    old = (camp.get("floor_3_selection_resolution") or {}).get("unopened_rewards")
+    if isinstance(old, dict) and old.get("silver_earth_boxes") == 12:
+        edits.append({"file": "state/campaign.yaml", "path": ["floor_3_selection_resolution", "unopened_rewards"], "expect": old, "value": BOX_REWARDS_NOW})
+    evidence = [
+        {"source": "state/characters/*.yaml floor_3_selection.silver_earth_box, state/campaign.yaml floor_3_selection_resolution (commit 2f89e56, 2026-09-22)",
+         "says": "Written at class selection: one unopened Silver Earth Box per crawler; 'unopened_rewards: silver_earth_boxes: 12'."},
+        {"source": "state/characters/*.yaml floor_3_silver_earth_box and inventory silver-earth-box-floor-3 (commit 98e66e4, 2026-09-25)",
+         "says": "Every crawler: status opened, Earth Hobby Potion consumed, final hobby Skill granted, physical reward named; inventory box "
+                 "quantity 0, opened-and-resolved."},
+        {"source": "state/campaign.yaml floor_3_molting_pigeon_checkpoint.boxes, state/roster.yaml, checkpoints/latest.md (98e66e4)",
+         "says": "'All twelve Silver Earth Boxes opened; no Silver Earth Box remains unopened.'"},
+        {"source": "console skills", "says": "All twelve hobby Skills are on the console sheets at the recorded ranks (Erin's Geocaching 4 after DCC-DENTON-015)."},
+        {"source": "physical rewards", "says": "Named only on the sheets, never added to any inventory in the ledger or the console."},
+    ]
+    return apply_correction(conn, cid, subject="Silver Earth Box status and rewards",
+                            decision="All twelve Silver Earth Boxes are opened; the selection-time 'unopened' notes are stale. Each box's "
+                                     "physical reward is added to its crawler's inventory (use not recorded).",
+                            evidence=evidence, ops=ops, decided_by=decided_by, ledger_edits=edits, sheet_edits=sheet_edits)

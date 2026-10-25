@@ -439,6 +439,11 @@ class Builder:
         clock = one(self.conn, "SELECT * FROM clocks WHERE campaign_id = ? AND key = 'advancement_cycles'", (self.cid,))
         if not isinstance(B, dict) or not clock:
             return
+        # campaign.yaml current_state mirrors the live counter (owner decision, M1), so it can't go stale beside it
+        live = f"{clock['current']}/{clock['maximum']}"
+        mirror = get(self.base.get("state/campaign.yaml"), ["current_state", "advancement_cycles"])
+        if isinstance(mirror, str):
+            self.set("state/campaign.yaml", ["current_state", "advancement_cycles"], live, f"Campaign mirror of advancement cycles {mirror} → {live}", "Advancement")
         base_cur = _int(B.get("cycles_current"))
         counted = [e["summary"].split(" — ", 1)[-1] for e in self._events("clock_changed") if (e.get("payload") or {}).get("key") == "advancement_cycles"]
         checkpoints = self._events("advancement_checkpoint")
