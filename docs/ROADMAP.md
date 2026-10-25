@@ -6,7 +6,7 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 |---|---|---|---|---|---|---|---|
 | M0 Safe upgrade workflow | P0 | Done | none | 385d7dd | 155 backend; typecheck/build; isolation probe PASS | Settings passcode masked | ledger behind by 2 (see below) |
 | M1 Canonical-state reconciliation | P0 | Exit gate met | M0 | (pending) | 166 backend; consistency 21/21 | HUD roster + objectives | 7 uncounted-gear items stay open for owner counts; 44 house rules move to M2/M7 |
-| M2 Mechanics reliability & GM gates | P0 | In progress | M1 | | 174 backend | n/a | coverage matrix, crafting, party checks done; next P1: combat completion, traps |
+| M2 Mechanics reliability & GM gates | P0 | In progress | M1 | | 176 backend | n/a | coverage matrix and all P1 gaps done; next: trap records (owner), P2 gaps, 30-turn playtest |
 | M3 Main story HUD | P1 | Backlog | M1 underway | | | | |
 | M4 Characters, party, people | P1 | Backlog | M3 | | | | |
 | M5 Inventory, crafting, economy | P1 | Backlog | M3 | | | | |
@@ -198,7 +198,7 @@ passes), and a full GM turn that crafts once with one set of rolls. Live campaig
 42 tested, 5 missing; P1 now 6.
 
 **Party Skill Checks and off-screen groups (7.8, 15.2).** New GM tool `party_check` (`backend/app/rules/party.py`; Core
-Rulebook p. 59, Rules for Survival p. 18). Every participant (a list, or a party group's members) rolls the Skill against
+Rulebook p. 61, Rules for Survival p. 18). Every participant (a list, or a party group's members) rolls the Skill against
 one Difficulty, with no Help; the party succeeds when half or more succeed; each Amazing Success or Critical Hit lifts one
 teammate's failure, each Major or Critical Fail drags down another teammate's Success. INTERPRETATION (the book does not
 order them): both apply at once against the original results, lifting the narrowest miss and dragging down the narrowest
@@ -208,3 +208,27 @@ apply with the ordinary ops. Refused calls roll nothing. Tests: the book's own e
 edge cases, the recon group resolved secretly on the disposable copy, and the guards (Cliff's group, undeclared stakes,
 one participant, outsiders). Also fixed a flaky crafting test that assumed the real-dice Check always succeeded.
 Coverage: 44 tested, 4 missing; P1 now 4 (ammunition, Call a Play, Catcher/Interrupts, traps).
+
+**Combat completion (10.8, 10.9, 10.7, 7.7)** in `backend/app/rules/combat.py`, from Core Rulebook pp. 84, 88, 93, 183,
+189. Bow, Crossbow and Handgun Attacks each spend one round of the supply the sheet names, whose count must be
+established (64 bolts and 22 pistol rounds now are; Erin's "Arrow supply" is not, so her bow is refused until it is);
+a Crossbow fires once per round; a Handgun needs a Reload Action after a Major Fail; shots are tallied and combat end
+prompts the recovery ruling (CORE 12.3). New tools: `combat_call_play` (an Action, 2d6 keep high, applied to the ally's
+Attack Check if it needs it, otherwise to damage; INTERPRETATION: lasts through the next round), `combat_intervene`
+(+1d6 to another crawler's missed Attack), and `combat_catch` (Catcher Ranks required, direct Attacks only, no Evade,
++5 DR per 5 Ranks). Every combat step is now atomic, so a refused Attack spends nothing. Tested on the disposable copy
+in one scripted fight: no firing before the ammunition ruling, the Catcher and Area guards, bolt and round counts, the
+Crossbow cooldown, Erin's unestablished arrows, a Called Play and an Intervene each turning a miss into a hit, the
+Handgun reload, and the fired-ammunition tally. Coverage: 47 tested, 3 missing; P1 now 1 (traps).
+
+**Traps (13.7, CAMPAIGN)** in `backend/app/rules/traps.py`; the books give no general procedure for crawler-built traps
+(Trap Engineer only covers crafting them, Core Rulebook p. 203), so the console enforces the campaign rule's record-keeping
+and timing instead of inventing statistics. New GM tool `trap`: `record` sets a trap's full record (components, ammunition,
+deploy cost, trigger, area, Check, damage, effects, reset, bulk, label and source) and is refused while the trap is
+deployed; `deploy` requires a record and spends its cost (Actions in combat, otherwise time); `trigger` rolls its Check
+(fixed attack bonus vs Evade, an operator's Skill, or a target's save), applies damage, spends ammunition and leaves it
+triggered (or spent); `reset` and `stow` follow its record; `status` lists every trap's record and condition. Tested on
+the disposable copy through one fight. None of the party's existing traps has a record yet: the ledger holds full module
+details only for the Murder Drum Battery's Skyhook Harpoon and Kill-Lane Wings. Trap condition is not yet written back
+to the ledger (P2). Coverage: 47 tested, 2 missing; no P1 gaps remain. All Core Rulebook citations added in M2 now use
+the rulebook index's page numbers (what search_rules and read_rule_page return).

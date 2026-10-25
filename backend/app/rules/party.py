@@ -1,4 +1,4 @@
-"""Party Skill Checks (CORE_MECHANICS 7.8; Core Rulebook p. 59, Rules for Survival p. 18) and off-screen group
+"""Party Skill Checks (CORE_MECHANICS 7.8; Core Rulebook p. 61, Rules for Survival p. 18) and off-screen group
 resolution (CORE_MECHANICS 15.2).
 
 A Party Skill Check: every participant rolls the Skill against the same Difficulty; the party succeeds when half or

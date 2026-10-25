@@ -1,10 +1,10 @@
-"""Crafting (CORE_MECHANICS 13.1, 13.2, 13.5, 13.6; Core Rulebook pp. 221-227).
+"""Crafting (CORE_MECHANICS 13.1, 13.2, 13.5, 13.6; Core Rulebook pp. 223-227; page numbers are the rulebook index's).
 
 One call is one crafting attempt, declared in full before anything is spent (13.1): the item, the crafting Skill, the
 materials, the time and the Difficulty, from Table 43 by size or from a declared project's design (a blueprint may set
 its own). Every material must be on hand with an established count, or nothing happens. Then, in order:
 
-  materials are consumed (whether or not the roll succeeds, BOOK p. 225);
+  materials are consumed (whether or not the roll succeeds, BOOK p. 227);
   the floor clock advances size x size hours (or the design's build time);
   the lead crafter makes an Unopposed Fabricate Check, or Engineering for moving parts, with Help from qualified
   assistants (13.6, BOOK 7.7);
@@ -136,7 +136,7 @@ def craft(conn: sqlite3.Connection, roller: DiceRoller, cid: int, turn_id: int |
             raise ChangeError(f"{label} has {it['quantity']}x {it['name']}, the attempt needs {m.quantity}; nothing was spent")
         spend.append((m, it, owner))
 
-    # ---- materials are consumed on the attempt (BOOK p. 225), then the time passes
+    # ---- materials are consumed on the attempt (BOOK p. 227), then the time passes
     lines = []
     for m, it, owner in spend:
         apply_change(conn, cid, turn_id, {"op": "remove_item", "item_id": it["id"], "name": it["name"],

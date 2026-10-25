@@ -4,33 +4,31 @@ Generated from `backend/app/rules/coverage.py` (`python -m app.rules.coverage`);
 
 | Status | Rules | Meaning |
 |---|---|---|
-| implemented and tested | 44 | the console enforces it and a test exercises it |
+| implemented and tested | 47 | the console enforces it and a test exercises it |
 | implemented, untested | 2 | enforced, but no test yet |
-| partly implemented | 11 | part is enforced; the gap column says what is not |
+| partly implemented | 10 | part is enforced; the gap column says what is not |
 | GM ruling | 36 | table procedure the GM applies with the existing tools |
 | reference only | 7 | history, authority or bibliography |
-| missing | 4 | a mechanic the console should enforce and does not |
+| missing | 2 | a mechanic the console should enforce and does not |
 
 ## Gaps by priority
 
-### P1 (4)
-- **§10.7 Evade and Interrupts** (partly implemented): Catcher and the other class Interrupts are not tools (Marcus and Terri have Catcher +3)
-- **§10.8 Attacks** (partly implemented): firing does not spend ammunition (64 shared bolts, 22 pistol rounds are now counted)
-- **§10.9 Call a Play** (missing): Call a Play (2d6 keep high, bonus to the proposed Action's Check or damage) is not a tool
-- **§13.7 Traps** (missing): traps are items with a status; deploy, trigger, Check, damage and reset are not modelled
+### P1 (0)
 
-### P2 (6)
+### P2 (7)
 - **§— Ai Favor Rerolls** (partly implemented): the reroll itself is not a tool: no reroll window, no 'Natural 1 cannot be rerolled' check, and the Favor is not spent automatically
 - **§7.4 Opposed Skill Checks** (implemented, untested): no test of the opposed default
-- **§7.7 Help and Intervene** (partly implemented): Intervene (an Action after the roll, +1d6) is not a tool
 - **§10.2 Surprise** (implemented, untested): no test of either surprise case
+- **§10.7 Evade and Interrupts** (partly implemented): Taunt (INT-Opposed redirect) and the Healing Interrupt are not tools
 - **§12.3 Looting and salvage** (GM ruling): no salvage step and no 'looted or salvaged once' guard
+- **§13.7 Traps** (partly implemented): trap condition is not written back to the ledger yet, and the party's existing traps have no records until the owner rules them
 - **§14.2 Level awards** (partly implemented): award sizes (Quest >= 1; Boss tiers 1-6) are not checked
 
-### P3 (11)
+### P3 (12)
 - **§— Recurring Character Completeness** (GM ruling): no check flags null combat-critical fields before an encounter
 - **§4.1 Player character** (GM ruling): no integrity flag when narration gives Cliff dialogue or decisions
 - **§5.10 Flavor cannot override agency or state** (partly implemented): flags warn only; nothing blocks the turn
+- **§7.7 Help and Intervene** (implemented and tested): Intervene on an Evade or a non-Attack Check in combat is not a tool
 - **§10.1 Establish the encounter** (partly implemented): positions, ranges and cover are not tracked
 - **§10.11 NPC-versus-NPC resolution** (missing): the published d12 NPC-versus-NPC table is not a tool
 - **§11.3 Injuries** (partly implemented): repeated injuries never become long-term
@@ -89,7 +87,7 @@ Generated from `backend/app/rules/coverage.py` (`python -m app.rules.coverage`);
 | 7.4 | Opposed Skill Checks | implemented, untested | default_dc opposed = 10 + antagonist Mod + Floor |  | no test of the opposed default | P2 |
 | 7.5 | Untrained Skills | implemented and tested | untrained: Disadvantage, Stat Mod only | `test_untrained_check_rolls_disadvantage_without_rank` |  |  |
 | 7.6 | Advantage and Disadvantage | implemented and tested | Advantage and Disadvantage cancel one for one | `test_advantage_cancels_disadvantage` |  |  |
-| 7.7 | Help and Intervene | partly implemented | Help: 1d6 with Ranks, 1d2 without, rolled per helper | `test_stat_check_cannot_receive_help` | Intervene (an Action after the roll, +1d6) is not a tool | P2 |
+| 7.7 | Help and Intervene | implemented and tested | Help: 1d6 with Ranks, 1d2 without, per helper; Intervene: combat_intervene adds 1d6 after another crawler's Attack | `test_stat_check_cannot_receive_help`, `test_prison_assault_mechanics_ammo_called_play_intervene_and_catcher` | Intervene on an Evade or a non-Attack Check in combat is not a tool | P3 |
 | 7.8 | Party Skill Checks | implemented and tested | party_check tool: everyone rolls vs one Difficulty, no Help, half or more succeed; Amazing/Critical lifts one failure, Major/Critical Fail drags down another's Success (applied at once: INTERPRETATION) | `test_party_check_tally_half_succeeds_with_conversions`, `test_onscreen_party_check_rolls_everyone_and_shows_the_result` |  |  |
 | 7.9 | Degrees of outcome | implemented and tested | degree_of: Critical Hit to Critical Fail | `test_degrees_of_outcome` |  |  |
 | 7.9 | Crazy Dungeon critical flourish | GM ruling | the flourish is narration on a natural 1 or 20 the server rolled |  |  |  |
@@ -108,9 +106,9 @@ Generated from `backend/app/rules/coverage.py` (`python -m app.rules.coverage`);
 | 10.4 | Action economy | implemented and tested | two Actions; an Interrupt spends one | `test_round_flow_evade_damage_attack_and_actions` |  |  |
 | 10.5 | Mob Actions | implemented and tested | Elites and Bosses act once per participating crawler | `test_mob_evade_default_and_actions_for_elites` |  |  |
 | 10.6 | Targeting | GM ruling | random targeting through roll_dice |  |  |  |
-| 10.7 | Evade and Interrupts | partly implemented | Evade: one Check per incoming Attack | `test_round_flow_evade_damage_attack_and_actions`, `test_evade_major_fail_adds_floor_damage_and_injury_after_combat` | Catcher and the other class Interrupts are not tools (Marcus and Terri have Catcher +3) | P1 |
-| 10.8 | Attacks | partly implemented | attack vs Evade; natural 20 doubles base dice; Amazing adds Floor damage | `test_book_damage_examples` | firing does not spend ammunition (64 shared bolts, 22 pistol rounds are now counted) | P1 |
-| 10.9 | Call a Play | missing |  |  | Call a Play (2d6 keep high, bonus to the proposed Action's Check or damage) is not a tool | P1 |
+| 10.7 | Evade and Interrupts | partly implemented | Evade: one Check per incoming Attack; Catcher (combat_catch: direct Attacks only, no Evade, +5 DR per 5 Ranks); Intervene (combat_intervene) | `test_round_flow_evade_damage_attack_and_actions`, `test_evade_major_fail_adds_floor_damage_and_injury_after_combat`, `test_prison_assault_mechanics_ammo_called_play_intervene_and_catcher` | Taunt (INT-Opposed redirect) and the Healing Interrupt are not tools | P2 |
+| 10.8 | Attacks | implemented and tested | attack vs Evade; natural 20 doubles base dice; Amazing adds Floor damage; Bow/Crossbow/Handgun spend one established round per Attack, Crossbow once per round, Handgun reload after a Major Fail; shots tallied for recovery | `test_book_damage_examples`, `test_prison_assault_mechanics_ammo_called_play_intervene_and_catcher` |  |  |
+| 10.9 | Call a Play | implemented and tested | combat_call_play: an Action, 2d6 keep high; the ally's Attack gets it on the Check if needed, else on damage; lasts through the next round (INTERPRETATION) | `test_prison_assault_mechanics_ammo_called_play_intervene_and_catcher` |  |  |
 | 10.10 | Look for Clues | GM ruling | an Unopposed skill_check |  |  |  |
 | 10.11 | NPC-versus-NPC resolution | missing |  |  | the published d12 NPC-versus-NPC table is not a tool | P3 |
 | 11.1 | Damage order | implemented and tested | combat._mitigate: DR, resistance, vulnerability, immunity, then slots | `test_book_damage_examples` |  |  |
@@ -127,7 +125,7 @@ Generated from `backend/app/rules/coverage.py` (`python -m app.rules.coverage`);
 | 13.4 | Legacy System-recognized equipment | GM ruling | grandfathered gear keeps its recorded effect on the sheet |  |  |  |
 | 13.5 | Failure and salvage | implemented and tested | craft consumes materials on the attempt; Failure salvages by margin (Table 47: 1-2 all, 3-9 half, 10+ none) | `test_failed_crafting_consumes_then_salvages_by_margin_and_nothing_is_spent_when_short` |  |  |
 | 13.6 | Assistance | implemented and tested | the lead crafter makes the one Check, with Help dice from assistants; a project's lead is enforced | `test_gold_siphon_is_built_from_its_declared_design` |  |  |
-| 13.7 | Traps | missing |  |  | traps are items with a status; deploy, trigger, Check, damage and reset are not modelled | P1 |
+| 13.7 | Traps | partly implemented | trap tool: a full record (components, ammunition, deploy cost, trigger, area, Check, damage, effects, reset, bulk) is required before deployment and locked while deployed; deploy/trigger/reset/stow spend Actions in combat or time, and ammunition per trigger | `test_traps_need_a_record_lock_while_deployed_and_spend_real_costs` | trap condition is not written back to the ledger yet, and the party's existing traps have no records until the owner rules them | P2 |
 | 14.1 | No experience-point total | reference only | there is no XP pool by design |  |  |  |
 | 14.2 | Level awards | partly implemented | level op records source (quest, boss, grind, crawler kill) | `test_level_award_banks_stat_points_and_resets_grind_progress` | award sizes (Quest >= 1; Boss tiers 1-6) are not checked | P2 |
 | 14.3 | Correspondence-play advancement checkpoints | implemented and tested | count_cycle; checkpoint at 12; overflow carries | `test_advancement_checkpoint`, `test_checkpoint_not_due_is_rejected` |  |  |

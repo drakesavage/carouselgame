@@ -100,10 +100,26 @@ COMBAT_SPECS: list[dict] = [
      "parameters": {}},
     {"name": "combat_attack",
      "description": "Step 4 crawler Attack: d20 + Skill Rank + Stat Mod vs the Mob's Evade, damage on a hit (Natural 20 doubles dice, Amazing adds Floor). "
-                    "attack = name of an attack on the crawler's sheet (or give skill + stat + damage). Spends one Action; marks the Skill.",
+                    "attack = name of an attack on the crawler's sheet (or give skill + stat + damage). Spends one Action; marks the Skill. "
+                    "Bow, Crossbow and Handgun Attacks spend one of the ammunition the sheet names (or `ammunition`: the item), whose count "
+                    "must be established; a Crossbow fires once per round; a Handgun needs combat_action 'Reload' after a Major Fail. "
+                    "A Called Play for this attacker is applied automatically.",
      "parameters": {"attacker": "str", "target": "str", "attack": "str?", "advantage": "int?", "disadvantage": "int?",
-                    "modifiers": "[{source, value}]?", "skill": "str?", "stat": "str?", "damage": "str?"}},
-    {"name": "combat_action", "description": "Spend an Action on anything else (Move, Help, Retrieve, Use Hotlist Item, Call a Play, non-attack Spell, Taunt...). Resolve its check/effect with the normal tools.",
+                    "modifiers": "[{source, value}]?", "skill": "str?", "stat": "str?", "damage": "str?", "ammunition": "str?"}},
+    {"name": "combat_catch",
+     "description": "Step 2 Interrupt (Catcher, BOOK p. 189): a crawler with Ranks in Catcher spends an Action to take a declared direct "
+                    "(non-Area) Attack aimed at an adjacent ally. The catcher takes it with no Evade; +5 DR at Catcher Rank 5, 10, 15.",
+     "parameters": {"catcher": "str", "ally": "str", "mob": "str?", "attack": "str?"}},
+    {"name": "combat_call_play",
+     "description": "Step 4 Action (Call a Play, BOOK p. 88): propose a specific Action for an ally; 2d6 keep the higher is the bonus. When "
+                    "that ally Attacks (the target, if given) the bonus is added to the Check if it needs it, otherwise to damage. Lasts "
+                    "through the next round.",
+     "parameters": {"caller": "str", "ally": "str", "action": "str", "target": "str?"}},
+    {"name": "combat_intervene",
+     "description": "Interrupt (Intervene, BOOK pp. 84, 93): right after another crawler's Attack misses (usually a Near Miss), a crawler "
+                    "spends an Action to add 1d6 to that total; a hit then deals damage. Once per Attack.",
+     "parameters": {"crawler": "str"}},
+    {"name": "combat_action", "description": "Spend an Action on anything else (Move, Help, Retrieve, Reload, Use Hotlist Item, non-attack Spell, Taunt...). Resolve its check/effect with the normal tools.",
      "parameters": {"combatant": "str", "action": "str"}},
     {"name": "combat_damage", "description": "Apply other damage (traps, debuffs, environment, Mob-vs-Mob): amount or dice expression; bypass_dr for Debuff damage.",
      "parameters": {"target": "str", "amount": "int?", "expression": "str?", "damage_type": "str?", "bypass_dr": "bool?", "cause": "str"}},
@@ -120,7 +136,7 @@ TOOL_SPECS.extend([
                     "Neighborhood Map. Does not advance time: also call advance_time.",
      "parameters": {"character": "str", "skill": "str", "hours": "int", "map_bonus": "bool?"}},
     {"name": "party_check",
-     "description": "Party Skill Check (CORE 7.8; BOOK p. 59) when the whole group performs one task together (sneaking past a post, "
+     "description": "Party Skill Check (CORE 7.8; BOOK p. 61) when the whole group performs one task together (sneaking past a post, "
                     "climbing down together); not when one qualified character can do it for everyone. Every participant rolls the Skill "
                     "vs the same Difficulty (no Help); the party succeeds if half or more succeed; each Amazing Success/Critical Hit turns "
                     "one teammate's failure into a Success, each Major/Critical Fail turns another's Success into a Failure. Give "
@@ -130,8 +146,18 @@ TOOL_SPECS.extend([
      "parameters": {"skill": "str", "stat": "str", "participants": "[str]?", "group": "str?", "members": "[{character, skill?, stat?, advantage?, disadvantage?, modifiers?}]?",
                     "dc": "int?", "dc_kind": "unopposed|opposed|stat?", "antagonist_mod": "int?", "modifiers": "[{source, value}]?", "reason": "str",
                     "hidden": "bool?", "offscreen": "bool?", "objective": "str?", "stakes": "str?", "on_success": "str?"}},
+    {"name": "trap",
+     "description": "Traps the party built (CORE 13.7, CAMPAIGN). action record: set a trap's full record BEFORE it is deployed (spec: "
+                    "components, ammunition {item, per_trigger}?, deploy {actions, minutes}, trigger, area, check {kind: attack (attack_bonus "
+                    "vs Evade) | operator (operator_skill + operator_stat) | save (save_stat vs dc) | none}, damage?, effects?, reset {actions, "
+                    "minutes}, reset_notes?, single_use?, bulk, label CAMPAIGN|INTERPRETATION|BOOK, source). Never invent a record to resolve "
+                    "a trigger: if a trap has none, ask for a ruling first. Records are locked while deployed. action deploy (trap, location, by): "
+                    "armed, spending its deploy cost (Actions in combat, else time). action trigger (trap, target, operator?): its Check and "
+                    "damage, ammunition spent. action reset (trap, by). action stow (trap). action status: every trap's record and condition.",
+     "parameters": {"action": "record|deploy|trigger|reset|stow|status", "trap": "str?", "spec": "object?", "location": "str?", "by": "str?",
+                    "target": "str?", "operator": "str?", "advantage": "int?"}},
     {"name": "craft",
-     "description": "One crafting attempt (CORE 13.1-13.6; BOOK pp. 221-227), declared in full first: nothing is spent unless every "
+     "description": "One crafting attempt (CORE 13.1-13.6; BOOK pp. 223-227), declared in full first: nothing is spent unless every "
                     "material is on hand with an established count. kind common: 1 Misc. Junk, no Check. kind mundane: give size "
                     "(Table 43: tiny 1 junk/1h, small 4/4h, petite 16/9h, medium 32/16h, large 64/25h...) or project (a declared project "
                     "quest; its design supplies skill, Difficulty, hours, junk, lead and Advantage). Materials are consumed on the attempt, the "
@@ -266,6 +292,37 @@ class ToolRunner:
             self.effects.changes.append(out["summary"])
         return out
 
+    def t_trap(self, a: dict) -> dict:
+        from ..rules import traps
+        act = str(a.get("action") or "")
+        if act == "status":
+            return {"traps": traps.status(self.conn, self.cid)}
+        if act not in ("record", "deploy", "trigger", "reset", "stow"):
+            raise ValueError("action must be record, deploy, trigger, reset, stow or status")
+        if not a.get("trap"):
+            raise ValueError("name the trap")
+        self.conn.execute("SAVEPOINT trap")
+        try:
+            if act == "record":
+                out = traps.record(self.conn, self.cid, str(a["trap"]), a.get("spec") or {})
+            elif act == "deploy":
+                out = traps.deploy(self.conn, self.roller, self.cid, self.turn_id, str(a["trap"]), str(a.get("location") or ""), a.get("by"))
+            elif act == "trigger":
+                out = traps.trigger(self.conn, self.roller, self.cid, self.turn_id, str(a["trap"]), str(a.get("target") or ""),
+                                    a.get("operator"), int(a.get("advantage") or 0))
+            elif act == "reset":
+                out = traps.reset(self.conn, self.roller, self.cid, self.turn_id, str(a["trap"]), a.get("by"))
+            else:
+                out = traps.stow(self.conn, self.cid, str(a["trap"]))
+        except Exception:
+            self.conn.execute("ROLLBACK TO trap")
+            self.conn.execute("RELEASE trap")
+            raise
+        self.conn.execute("RELEASE trap")
+        self._card_new_rolls()
+        self.effects.changes.extend(out.get("lines") or [out["summary"]])
+        return out
+
     def t_craft(self, a: dict) -> dict:
         from ..rules.crafting import CraftRequest, craft
         req = CraftRequest.model_validate(a)
@@ -292,11 +349,16 @@ class ToolRunner:
     def _combat(self, fn, *args, **kw) -> dict:
         from ..rules.combat import Combat
         cb = Combat(self.conn, self.cid, self.turn_id, self.roller)
+        self.conn.execute("SAVEPOINT combat")  # one combat step is atomic: an Attack that fails validation spends no ammunition
         try:
             out = getattr(cb, fn)(*args, **kw)
-        finally:
-            for res, char_id, _hidden in cb.rolls:
-                self._card(res, char_id)
+        except Exception:
+            self.conn.execute("ROLLBACK TO combat")
+            self.conn.execute("RELEASE combat")
+            raise
+        self.conn.execute("RELEASE combat")
+        for res, char_id, _hidden in cb.rolls:
+            self._card(res, char_id)
         lines = out.get("lines") or [out["summary"]]
         self.effects.changes.extend(line for line in lines if line)
         return out
@@ -315,8 +377,17 @@ class ToolRunner:
         return self._combat("resolve")
 
     def t_combat_attack(self, a: dict) -> dict:
-        keys = ("attack", "advantage", "disadvantage", "modifiers", "skill", "stat", "damage")
+        keys = ("attack", "advantage", "disadvantage", "modifiers", "skill", "stat", "damage", "ammunition")
         return self._combat("attack", str(a["attacker"]), str(a["target"]), **{k: a[k] for k in keys if a.get(k) is not None})
+
+    def t_combat_catch(self, a: dict) -> dict:
+        return self._combat("catch", str(a["catcher"]), str(a["ally"]), a.get("mob"), a.get("attack"))
+
+    def t_combat_call_play(self, a: dict) -> dict:
+        return self._combat("call_play", str(a["caller"]), str(a["ally"]), str(a.get("action") or ""), a.get("target"))
+
+    def t_combat_intervene(self, a: dict) -> dict:
+        return self._combat("intervene", str(a["crawler"]))
 
     def t_combat_action(self, a: dict) -> dict:
         return self._combat("spend_action", str(a["combatant"]), str(a.get("action") or "Action"))

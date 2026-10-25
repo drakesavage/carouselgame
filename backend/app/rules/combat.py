@@ -9,6 +9,17 @@ Round sequence (BOOK 10.3): 1 Mob Action Declaration → 2 Crawler Reaction (Int
   Minor Injury after combat; Critical Fail doubles damage.
 * Crawler Attack: d20 + Attack Skill Rank + Stat Mod vs Mob Evade (stat block, default 10 + DEX Mod + Floor).
   Natural 20 doubles base damage dice; Amazing Success adds the Floor Number.
+* Ammunition (BOOK p. 183): Bow, Crossbow and Handgun Attacks each spend one round from the supply the sheet names (or
+  `ammunition`), whose count must be established; the shots are tallied for recovery after combat (CORE 12.3). A
+  Crossbow fires once per round; a Handgun needs an Action to reload after a Major Fail or worse.
+* Call a Play (BOOK p. 88, CORE 10.9): an Action; 2d6 keep the higher. When the ally makes the proposed Attack the
+  bonus is added to the Check if it needs it, otherwise to damage. INTERPRETATION: a Called Play lasts through the next
+  round, then lapses.
+* Intervene (BOOK pp. 84, 93, CORE 7.7): an Interrupt Action after another crawler's Attack result is known; +1d6 to
+  that total, which may turn a miss (usually a Near Miss) into a hit.
+* Catcher (BOOK p. 189, CORE 10.7): an Interrupt in the Crawler Reaction Phase by a crawler with Ranks in Catcher, on a
+  direct (non-Area) Attack declared at an adjacent ally: the catcher takes it with no Evade, gaining +5 DR at Ranks 5,
+  10 and 15.
 * Damage order (BOOK 11.1): DR → resistance → vulnerability → immunity → Health Bar. Damage is applied in whole
   Health Bar slots; damage smaller than a slot is lost (Core p. 94).
 * 0% HB: Mobs die; crawlers gain Dying (countdown = CON Mod, INTERPRETATION — the book says "CON" on p. 96 and
@@ -30,9 +41,16 @@ from pydantic import BaseModel, Field
 from ..db import now_iso, one, rows
 from .checks import STAT_ALIASES, degree_of, is_success
 from .dice import DiceRoller, RollResult, record_roll
-from .engine import ChangeError, Ctx, resolve_character
+from .engine import ChangeError, Ctx, apply_change, resolve_character
 
 DYING_BASIS = "con_mod"   # INTERPRETATION; see module docstring
+AMMO_SKILLS = {"bow", "crossbow", "handgun", "rifle", "shotgun", "sling"}   # each Attack spends ammunition (BOOK p. 183)
+
+
+def _singular(text: str) -> str:
+    """'Shared Crossbow Bolts' and 'Crossbow Bolt' compare equal."""
+    words = [w[:-1] if w.endswith("s") and not w.endswith("ss") else w for w in re.findall(r"[a-z]+", text.lower())]
+    return " ".join(words)
 
 
 # ------------------------------------------------------------------ inputs
@@ -282,7 +300,7 @@ class Combat:
             _char_slots(ch)  # fail early if the sheet can't take damage
             combatants.append({"id": f"c{ch['id']}", "name": ch["name"], "side": "party", "character_id": ch["id"],
                                "actions_left": 1 if req.surprise == "crawlers" else (0 if req.surprise == "mobs" else 2),
-                               "evading": False, "advantage_vs": [], "pending_injury": False})
+                               "evading": False, "advantage_vs": [], "pending_injury": False, "fired": [], "reload": False})
         n_party = len(combatants)
         for sb in req.foes:
             if sb.health_bar:
@@ -300,7 +318,8 @@ class Combat:
                                    "attacks": [a.model_dump() for a in sb.attacks], "defeated": False, "notes": sb.notes,
                                    "max_slots_per_hit": sb.max_slots_per_hit})
         phase = "surprise" if req.surprise == "crawlers" else "mob_declaration"
-        state = {"round": 1, "phase": phase, "surprise": req.surprise, "setup": req.setup, "floor": floor, "declared": [], "combatants": combatants}
+        state = {"round": 1, "phase": phase, "surprise": req.surprise, "setup": req.setup, "floor": floor, "declared": [], "combatants": combatants,
+                 "plays": [], "shots": {}, "last_attack": None}
         eid = self.conn.execute("INSERT INTO encounters (campaign_id, name, status, round, summary, combatants_json) VALUES (?,?,?,?,?,?)",
                                 (self.cid, req.name, "active", 1, req.setup, json.dumps(state))).lastrowid
         foes = [c["name"] for c in combatants if c["side"] == "foe"]
@@ -362,8 +381,116 @@ class Combat:
         st = _state(enc)
         c = _find(st, who)
         self._spend(c, action)
+        reloaded = action.strip().lower().startswith("reload") and c.get("reload")
+        if reloaded:
+            c["reload"] = False
         _save(self.conn, enc, st)
-        return {"summary": f"{c['name']} uses an Action: {action}", "actions_left": c["actions_left"]}
+        return {"summary": f"{c['name']} uses an Action: {action}" + (" (handgun reloaded)" if reloaded else ""), "actions_left": c["actions_left"]}
+
+    # -- Interrupts and plays
+    def catch(self, catcher: str, ally: str, mob: str | None = None, attack: str | None = None) -> dict:
+        enc = _require(self.conn, self.cid)
+        st = _state(enc)
+        if st["phase"] != "crawler_reaction":
+            raise ChangeError("Catcher is an Interrupt taken in the Crawler Reaction Phase, after Mob Actions are declared")
+        c, a = _find(st, catcher, "party"), _find(st, ally, "party")
+        if c["id"] == a["id"]:
+            raise ChangeError("Catcher takes a hit meant for an adjacent ally, not for yourself")
+        ch = self._char(c)
+        srow = one(self.conn, "SELECT rank FROM skills WHERE character_id = ? AND lower(name) = 'catcher'", (ch["id"],))
+        if not srow or not srow["rank"]:
+            raise ChangeError(f"{ch['name']} has no Ranks in Catcher")
+        hits = [d for d in st["declared"] if d["target"] == a["id"] and not d.get("caught_for")
+                and (not mob or _find(st, mob, "foe")["id"] == d["mob"]) and (not attack or d["attack"].lower() == attack.lower())]
+        if not hits:
+            raise ChangeError(f"no declared Attack at {a['name']} matches; Catcher answers a declared Attack")
+        d = hits[0]
+        m = _find(st, d["mob"])
+        if next(x for x in m["attacks"] if x["name"] == d["attack"]).get("area"):
+            raise ChangeError("Catcher only takes direct (non-Area) Attacks")
+        self._spend(c, "Catcher")
+        d["target"], d["caught_for"] = c["id"], a["id"]
+        _save(self.conn, enc, st)
+        bonus = 5 * min(3, int(srow["rank"]) // 5)
+        return {"summary": f"{c['name']} leaps in to take {m['name']}'s {d['attack']} for {a['name']} (no Evade on it"
+                           + (f"; +{bonus} DR from Catcher Rank {srow['rank']}" if bonus else "") + ")", "actions_left": c["actions_left"]}
+
+    def call_play(self, caller: str, ally: str, action: str, target: str | None = None) -> dict:
+        enc = _require(self.conn, self.cid)
+        st = _state(enc)
+        if st["phase"] not in ("crawler_action", "surprise"):
+            raise ChangeError(f"Call a Play is an Action in the Crawler Action Phase (current: {st['phase']})")
+        c, a = _find(st, caller, "party"), _find(st, ally, "party")
+        if c["id"] == a["id"]:
+            raise ChangeError("a Called Play proposes an Action for an ally")
+        if not action.strip():
+            raise ChangeError("the proposal must be specific enough that everyone knows what fulfils it")
+        mob = _find(st, target, "foe") if target else None
+        self._spend(c, "Call a Play")
+        r = self._roll("2d6kh1", reason=f"{c['name']} calls a play for {a['name']}: {action}", char_id=c["character_id"],
+                       detail={"kind": "call_a_play", "character": c["name"], "ally": a["name"], "action": action})
+        st.setdefault("plays", []).append({"caller": c["id"], "ally": a["id"], "action": action, "target": mob["id"] if mob else None,
+                                           "bonus": r.total, "round": st["round"], "used": False})
+        _save(self.conn, enc, st)
+        return {"summary": f"{c['name']} calls a play: {a['name']} — {action}" + (f" (vs {mob['name']})" if mob else "")
+                           + f". Called Play bonus +{r.total}.", "bonus": r.total, "actions_left": c["actions_left"]}
+
+    def intervene(self, who: str) -> dict:
+        enc = _require(self.conn, self.cid)
+        st = _state(enc)
+        last = st.get("last_attack")
+        c = _find(st, who, "party")
+        if not last or last["round"] != st["round"]:
+            raise ChangeError("Intervene answers another crawler's Attack result this round; there is none to change")
+        if last["attacker"] == c["id"]:
+            raise ChangeError("Intervene helps another crawler, not your own Attack")
+        if last["hit"] or last.get("intervened"):
+            raise ChangeError("that Attack " + ("already hit" if last["hit"] else "has already been Intervened on"))
+        a, mob = _find(st, last["attacker"]), _find(st, last["mob"])
+        if mob["defeated"]:
+            raise ChangeError(f"{mob['name']} is already defeated")
+        self._spend(c, "Intervene")
+        r = self._roll("1d6", reason=f"{c['name']} Intervenes in {a['name']}'s Attack", char_id=c["character_id"],
+                       detail={"kind": "intervene", "character": c["name"], "ally": a["name"]})
+        total = last["total"] + r.total
+        degree = degree_of(last["natural"], total, mob["evade"])
+        last.update({"total": total, "degree": degree, "intervened": True})
+        lines = [f"{c['name']} Intervenes: +{r.total} → {a['name']}'s total {total} vs Evade {mob['evade']} → {degree}"]
+        if is_success(degree):
+            last["hit"] = True
+            lines += self._hit(st, a, self._char(a), mob, degree, last["damage"], last.get("damage_bonus", 0))
+        _save(self.conn, enc, st)
+        return {"summary": " ".join(lines), "lines": lines, "hit": last["hit"], "actions_left": c["actions_left"]}
+
+    def _hit(self, st: dict, a: dict, ch: dict, mob: dict, degree: str, dmg_expr: str, bonus: int = 0) -> list[str]:
+        expr, dtype = parse_damage(dmg_expr)
+        if degree == "Critical Hit":
+            expr = double_dice(expr)
+        dr_ = self._roll(expr, reason=f"{ch['name']} damage to {mob['name']}", char_id=ch["id"],
+                         detail={"kind": "damage", "target": mob["name"], "critical": degree == "Critical Hit"})
+        floor_bonus = st["floor"] if degree == "Amazing Success" else 0
+        final, notes = _mitigate(dr_.total + floor_bonus + bonus, mob["dr"], dtype, mob.get("resistances") or {})
+        _, text = damage_mob(mob, final, degree)
+        extra = (f" + Floor {floor_bonus}" if floor_bonus else "") + (f" + Called Play {bonus}" if bonus else "")
+        if mob["defeated"]:
+            self._event("mob_defeated", f"{mob['name']} defeated by {ch['name']}", {"mob": mob["name"]})
+        return [f"Damage {expr} = {dr_.total}{extra}{' − ' + ', '.join(notes) if notes else ''} = {final}. {text}"]
+
+    def _ammo(self, ch: dict, skill: str, entry: dict | None, override: str | None) -> dict | None:
+        """The item an Attack spends one of (BOOK p. 183: 'Each Attack requires proper ammunition'), or None."""
+        text = override or (entry or {}).get("ammunition")
+        if not text:
+            if skill.lower() in AMMO_SKILLS:
+                raise ChangeError(f"{ch['name']}'s {skill} Attack needs ammunition: give `ammunition` (the item it spends)")
+            return None
+        want = _singular(re.sub(r"\b(shared|supply|the|of)\b", " ", text.lower()))
+        for owner_sql, args in (("owner_character_id = ?", (ch["id"],)), ("owner_character_id IS NULL", ())):
+            for it in rows(self.conn, f"SELECT * FROM items WHERE campaign_id = ? AND {owner_sql} AND (quantity IS NULL OR quantity > 0)", (self.cid, *args)):
+                if _singular(it["name"].lower()) == want:
+                    if it["quantity"] is None:
+                        raise ChangeError(f"the count of {it['name']} is not established; settle it with set_quantity before firing")
+                    return it
+        raise ChangeError(f"no {text!r} with a count for {ch['name']} to fire; establish it (add_item/set_quantity) or name `ammunition`")
 
     def resolve(self) -> dict:
         enc = _require(self.conn, self.cid)
@@ -380,7 +507,12 @@ class Combat:
             atk = next(x for x in mob["attacks"] if x["name"] == d["attack"])
             ch = self._char(tgt)
             mult, extra, note = 1.0, 0, "did not Evade"
-            if tgt["evading"]:
+            catch_dr = 0
+            if d.get("caught_for"):
+                srow = one(self.conn, "SELECT rank FROM skills WHERE character_id = ? AND lower(name) = 'catcher'", (ch["id"],))
+                catch_dr = 5 * min(3, int((srow or {}).get("rank") or 0) // 5)
+                note = f"caught for {_find(st, d['caught_for'])['name']} (no Evade" + (f"; +{catch_dr} DR" if catch_dr else "") + ")"
+            elif tgt["evading"]:
                 bonus = (ch.get("derived") or {}).get("evade")
                 bonus = int(bonus) if isinstance(bonus, (int, float)) else _mod(ch, "dexterity")
                 r = self._roll(f"1d20+{bonus}", reason=f"Evade {mob['name']}'s {atk['name']}", target=atk["to_hit"], char_id=ch["id"],
@@ -410,7 +542,7 @@ class Combat:
                 lines.append(r.detail["summary"])
             expr, dtype = parse_damage(atk["damage"])
             dr = (ch.get("derived") or {}).get("damage_resistance")
-            dr = int(dr) if isinstance(dr, (int, float)) else 0
+            dr = (int(dr) if isinstance(dr, (int, float)) else 0) + catch_dr
             dmg_roll = self._roll(expr, reason=f"{mob['name']} {atk['name']} damage", char_id=ch["id"],
                                   detail={"kind": "damage", "target": ch["name"]})
             raw = int(dmg_roll.total * mult) + extra
@@ -426,7 +558,8 @@ class Combat:
         return {"summary": f"Round {st['round']} Mob Actions resolved; Crawler Action Phase.", "lines": lines}
 
     def attack(self, attacker: str, target: str, attack: str | None = None, advantage: int = 0, disadvantage: int = 0,
-               modifiers: list[dict] | None = None, skill: str | None = None, stat: str | None = None, damage: str | None = None) -> dict:
+               modifiers: list[dict] | None = None, skill: str | None = None, stat: str | None = None, damage: str | None = None,
+               ammunition: str | None = None) -> dict:
         enc = _require(self.conn, self.cid)
         st = _state(enc)
         if st["phase"] not in ("crawler_action", "surprise"):
@@ -456,7 +589,19 @@ class Combat:
         net = adv - dis
         d20 = "2d20kh1" if net > 0 else "2d20kl1" if net < 0 else "1d20"
         extra = sum(int(m.get("value", 0)) for m in modifiers or [])
+        sk = skill.lower()
+        if sk == "crossbow" and "crossbow" in a.get("fired", []):
+            raise ChangeError(f"{ch['name']}'s Crossbow has a cooldown of once per round (BOOK p. 183)")
+        if sk == "handgun" and a.get("reload"):
+            raise ChangeError(f"{ch['name']} must spend an Action to reload the handgun first (combat_action 'Reload')")
+        ammo = self._ammo(ch, skill, entry, ammunition)
         self._spend(a, "Attack")
+        if ammo:
+            apply_change(self.conn, self.cid, self.turn_id, {"op": "remove_item", "item_id": ammo["id"], "name": ammo["name"],
+                                                              "character": ch["name"] if ammo["owner_character_id"] else "shared",
+                                                              "quantity": 1, "cause": f"fired at {mob['name']}"})
+            st.setdefault("shots", {})[ammo["name"]] = st.get("shots", {}).get(ammo["name"], 0) + 1
+        a.setdefault("fired", []).append(sk)
         if mob["id"] in a["advantage_vs"]:
             a["advantage_vs"].remove(mob["id"])
         r = self._roll(f"{d20}+{rank}+{smod}" + (f"{extra:+d}" if extra else ""), reason=f"{ch['name']} attacks {mob['name']} ({entry.get('name') if entry else skill})",
@@ -466,6 +611,19 @@ class Combat:
                                "advantage": "advantage" if net > 0 else "disadvantage" if net < 0 else "none"})
         nat = next(d.value for d in r.dice if d.sides == 20 and d.kept)
         r.degree = degree_of(nat, r.total, mob["evade"])
+        play = next((p for p in st.get("plays", []) if not p["used"] and p["ally"] == a["id"] and p["target"] in (None, mob["id"])), None)
+        play_line, play_damage = None, 0
+        if play:
+            play["used"] = True
+            caller = _find(st, play["caller"])["name"]
+            if is_success(r.degree):
+                play_damage = play["bonus"]
+                play_line = f"{caller}'s Called Play: the Attack hits without it, so +{play['bonus']} damage"
+            else:
+                boosted = degree_of(nat, r.total + play["bonus"], mob["evade"])
+                play_line = f"{caller}'s Called Play +{play['bonus']}: {r.total + play['bonus']} vs Evade {mob['evade']} → {boosted}"
+                r.total += play["bonus"]
+                r.degree = boosted
         r.outcome = "success" if is_success(r.degree) else "failure"
         r.detail.update({"natural": nat, "d20s": [d.value for d in r.dice if d.sides == 20],
                          "summary": f"{ch['name']} — {skill}: d20 {nat} + Rank {rank} + {stat_key[:3].upper()} {smod:+d}{f' {extra:+d}' if extra else ''} = {r.total} vs Evade {mob['evade']} → {r.degree}"})
@@ -474,21 +632,15 @@ class Combat:
         if srow and rank > 0:
             marked = bool(self.conn.execute("UPDATE skills SET marked = 1 WHERE character_id = ? AND lower(name) = lower(?) AND kind = 'skill' AND marked = 0 AND passive = 0",
                                             (ch["id"], skill)).rowcount)
-        lines = [r.detail["summary"]]
+        lines = [r.detail["summary"]] + ([play_line] if play_line else [])
+        if ammo:
+            lines.append(f"Spent 1 {ammo['name']} ({ammo['quantity'] - 1} left)")
+        st["last_attack"] = {"attacker": a["id"], "mob": mob["id"], "round": st["round"], "natural": nat, "total": r.total, "degree": r.degree,
+                             "hit": is_success(r.degree), "damage": dmg_expr, "damage_bonus": play_damage}
+        if sk == "handgun" and r.degree in ("Major Fail", "Critical Fail"):
+            a["reload"] = True
         if is_success(r.degree):
-            expr, dtype = parse_damage(dmg_expr)
-            if r.degree == "Critical Hit":
-                expr = double_dice(expr)
-            dr_ = self._roll(expr, reason=f"{ch['name']} damage to {mob['name']}", char_id=ch["id"],
-                             detail={"kind": "damage", "target": mob["name"], "critical": r.degree == "Critical Hit"})
-            floor_bonus = st["floor"] if r.degree == "Amazing Success" else 0
-            final, notes = _mitigate(dr_.total + floor_bonus, mob["dr"], dtype, mob.get("resistances") or {})
-            _, text = damage_mob(mob, final, r.degree)
-            bonus_text = f" + Floor {floor_bonus}" if floor_bonus else ""
-            mitig_text = " − " + ", ".join(notes) if notes else ""
-            lines.append(f"Damage {expr} = {dr_.total}{bonus_text}{mitig_text} = {final}. {text}")
-            if mob["defeated"]:
-                self._event("mob_defeated", f"{mob['name']} defeated by {ch['name']}", {"mob": mob["name"]})
+            lines += self._hit(st, a, ch, mob, r.degree, dmg_expr, play_damage)
         else:
             lines.append({"Near Miss": "Near Miss — an ally may Intervene (+1d6) with an Action.",
                           "Major Fail": "Major Fail — apply a complication (dropped weapon, lost footing, ammunition...).",
@@ -538,9 +690,14 @@ class Combat:
                 dying = one(self.conn, "SELECT * FROM status_effects WHERE character_id = ? AND name = 'Dying'", (ch["id"],))
                 if dying:
                     lines.append(_set_dying(Ctx(self.conn, self.cid, self.turn_id), ch, _dying_left(dying) - 1, "Clean Up"))
-                c["actions_left"], c["evading"] = 2, False
+                c["actions_left"], c["evading"], c["fired"] = 2, False, []
             else:
                 c["actions_left"] = c["actions"]
+        lapsed = [p for p in st.get("plays", []) if not p["used"] and p["round"] < st["round"]]
+        st["plays"] = [p for p in st.get("plays", []) if not p["used"] and p["round"] >= st["round"]]
+        if lapsed:
+            lines.append("Called Play lapsed: " + "; ".join(f"{_find(st, p['ally'])['name']} — {p['action']}" for p in lapsed))
+        st["last_attack"] = None
         st["round"] += 1
         st["phase"], st["declared"] = "mob_declaration", []
         foes_left = [c["name"] for c in st["combatants"] if c["side"] == "foe" and not c["defeated"]]
@@ -559,12 +716,16 @@ class Combat:
                                   (c["character_id"], "Minor Injury", "From a badly failed Evade; removed by a Short Rest", "debuff", "combat"))
                 lines.append(f"{c['name']} gains a Minor Injury now that the adrenaline wears off")
                 ctx.event("status_added", f"{c['name']} gains status: Minor Injury", {"character_id": c["character_id"]})
+        if st.get("shots"):
+            lines.append("Ammunition fired: " + ", ".join(f"{n}x {k}" for k, n in st["shots"].items())
+                         + ". Recovery depends on impact, access and time (CORE 12.3): roll or rule it, then add_item what is found.")
         st["phase"] = "ended"
         self.conn.execute("UPDATE encounters SET status = 'resolved', combatants_json = ?, summary = COALESCE(summary, '') || ? WHERE id = ?",
                           (json.dumps(st), f"\nOutcome: {outcome}", enc["id"]))
         defeated = [c["name"] for c in st["combatants"] if c["side"] == "foe" and c["defeated"]]
         ctx.event("encounter_end", f"Combat ends: {enc['name']} — {outcome}", {"defeated": defeated, "rounds": st["round"]})
-        return {"summary": f"Combat over after {st['round']} round(s): {outcome}", "lines": lines, "defeated": defeated}
+        return {"summary": f"Combat over after {st['round']} round(s): {outcome}", "lines": lines, "defeated": defeated,
+                "ammunition_fired": st.get("shots") or {}}
 
 
 def public_encounter(enc: dict | None, conn: sqlite3.Connection) -> dict | None:

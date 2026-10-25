@@ -82,8 +82,9 @@ MATRIX: dict[str, dict] = {
     "7.4": R("untested", "default_dc opposed = 10 + antagonist Mod + Floor", gap="no test of the opposed default", priority="P2"),
     "7.5": R("tested", "untrained: Disadvantage, Stat Mod only", ("test_untrained_check_rolls_disadvantage_without_rank",)),
     "7.6": R("tested", "Advantage and Disadvantage cancel one for one", ("test_advantage_cancels_disadvantage",)),
-    "7.7": R("partial", "Help: 1d6 with Ranks, 1d2 without, rolled per helper", ("test_stat_check_cannot_receive_help",),
-             gap="Intervene (an Action after the roll, +1d6) is not a tool", priority="P2"),
+    "7.7": R("tested", "Help: 1d6 with Ranks, 1d2 without, per helper; Intervene: combat_intervene adds 1d6 after another crawler's Attack",
+             ("test_stat_check_cannot_receive_help", "test_prison_assault_mechanics_ammo_called_play_intervene_and_catcher"),
+             gap="Intervene on an Evade or a non-Attack Check in combat is not a tool", priority="P3"),
     "7.8": R("tested", "party_check tool: everyone rolls vs one Difficulty, no Help, half or more succeed; Amazing/Critical lifts one "
              "failure, Major/Critical Fail drags down another's Success (applied at once: INTERPRETATION)",
              ("test_party_check_tally_half_succeeds_with_conversions", "test_onscreen_party_check_rolls_everyone_and_shows_the_result")),
@@ -101,12 +102,15 @@ MATRIX: dict[str, dict] = {
     "10.4": R("tested", "two Actions; an Interrupt spends one", ("test_round_flow_evade_damage_attack_and_actions",)),
     "10.5": R("tested", "Elites and Bosses act once per participating crawler", ("test_mob_evade_default_and_actions_for_elites",)),
     "10.6": R("gm_ruling", "random targeting through roll_dice"),
-    "10.7": R("partial", "Evade: one Check per incoming Attack", ("test_round_flow_evade_damage_attack_and_actions",
-                                                                 "test_evade_major_fail_adds_floor_damage_and_injury_after_combat"),
-              gap="Catcher and the other class Interrupts are not tools (Marcus and Terri have Catcher +3)", priority="P1"),
-    "10.8": R("partial", "attack vs Evade; natural 20 doubles base dice; Amazing adds Floor damage", ("test_book_damage_examples",),
-              gap="firing does not spend ammunition (64 shared bolts, 22 pistol rounds are now counted)", priority="P1"),
-    "10.9": R("missing", gap="Call a Play (2d6 keep high, bonus to the proposed Action's Check or damage) is not a tool", priority="P1"),
+    "10.7": R("partial", "Evade: one Check per incoming Attack; Catcher (combat_catch: direct Attacks only, no Evade, +5 DR per 5 Ranks); "
+              "Intervene (combat_intervene)", ("test_round_flow_evade_damage_attack_and_actions",
+              "test_evade_major_fail_adds_floor_damage_and_injury_after_combat", "test_prison_assault_mechanics_ammo_called_play_intervene_and_catcher"),
+              gap="Taunt (INT-Opposed redirect) and the Healing Interrupt are not tools", priority="P2"),
+    "10.8": R("tested", "attack vs Evade; natural 20 doubles base dice; Amazing adds Floor damage; Bow/Crossbow/Handgun spend one "
+              "established round per Attack, Crossbow once per round, Handgun reload after a Major Fail; shots tallied for recovery",
+              ("test_book_damage_examples", "test_prison_assault_mechanics_ammo_called_play_intervene_and_catcher")),
+    "10.9": R("tested", "combat_call_play: an Action, 2d6 keep high; the ally's Attack gets it on the Check if needed, else on damage; "
+              "lasts through the next round (INTERPRETATION)", ("test_prison_assault_mechanics_ammo_called_play_intervene_and_catcher",)),
     "10.10": R("gm_ruling", "an Unopposed skill_check"),
     "10.11": R("missing", gap="the published d12 NPC-versus-NPC table is not a tool", priority="P3"),
     "11.1": R("tested", "combat._mitigate: DR, resistance, vulnerability, immunity, then slots", ("test_book_damage_examples",)),
@@ -135,7 +139,11 @@ MATRIX: dict[str, dict] = {
     "13.6": R("tested", "the lead crafter makes the one Check, with Help dice from assistants; a project's lead is enforced",
               ("test_gold_siphon_is_built_from_its_declared_design",)),
     "13.4": R("gm_ruling", "grandfathered gear keeps its recorded effect on the sheet"),
-    "13.7": R("missing", gap="traps are items with a status; deploy, trigger, Check, damage and reset are not modelled", priority="P1"),
+    "13.7": R("partial", "trap tool: a full record (components, ammunition, deploy cost, trigger, area, Check, damage, effects, reset, bulk) "
+              "is required before deployment and locked while deployed; deploy/trigger/reset/stow spend Actions in combat or time, and "
+              "ammunition per trigger", ("test_traps_need_a_record_lock_while_deployed_and_spend_real_costs",),
+              gap="trap condition is not written back to the ledger yet, and the party's existing traps have no records until the owner "
+                  "rules them", priority="P2"),
     "14.1": R("reference", "there is no XP pool by design"),
     "14.2": R("partial", "level op records source (quest, boss, grind, crawler kill)", ("test_level_award_banks_stat_points_and_resets_grind_progress",),
               gap="award sizes (Quest >= 1; Boss tiers 1-6) are not checked", priority="P2"),

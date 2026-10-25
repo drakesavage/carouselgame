@@ -451,7 +451,7 @@ def test_rule_labels_come_from_the_matrix(conn, denton):
     refresh_mechanical_status(conn)
     label = {r["title"]: r["mechanical_status"] for r in rows(conn, "SELECT title, mechanical_status FROM house_rules WHERE campaign_id = ?", (denton,))}
     assert label["Mending"] == "implemented" and label["Rest"] == "implemented"      # import labelled both pending
-    assert label["Party Skill Checks"] == "implemented" and label["Call a Play"] == "pending" and label["Traps"] == "pending"
+    assert label["Party Skill Checks"] == label["Call a Play"] == "implemented" and label["Traps"] == "partial"
     assert classify({"section": "7.9", "title": "Crazy Dungeon critical flourish"})["status"] == "gm_ruling"
 
 
@@ -560,3 +560,107 @@ def test_onscreen_party_check_rolls_everyone_and_shows_the_result(conn, denton):
     out = res["result"]
     assert res["ok"] and out["participants"] == 4 and len(run.effects.rolls) == 4 and not out["hidden"]
     assert out["summary"].startswith("Party ") and out["summary"] in run.effects.changes
+
+
+def test_prison_assault_mechanics_ammo_called_play_intervene_and_catcher(conn, denton):
+    from app.rules.combat import Combat, MobAttack, StartCombat, StatBlock
+    from app.rules.dice import DiceRoller
+    from tests.conftest import scripted
+    cb = lambda dice: Combat(conn, denton, None, DiceRoller(source=scripted(dice)))
+    qty = lambda n: one(conn, "SELECT quantity FROM items WHERE campaign_id = ? AND owner_character_id IS NULL AND name = ?", (denton, n))["quantity"]
+    from app.ledger import sync
+    from app.reconcile import ammunition_correction
+    with pytest.raises(ChangeError, match="not established"):   # before the owner's ammunition ruling nobody can fire
+        cb([1]).start(StartCombat(name="dry", party=["Cliff", "Marcus"], foes=[StatBlock(name="Rat", health_bar=[1], evade=5)]))
+        cb([1]).declare([])
+        cb([1]).resolve()
+        cb([15]).attack("Cliff", "Rat", attack="Light Crossbow")
+    cb([1]).end("test reset")
+    ammunition_correction(conn, denton, sync.link(conn, denton)["root"], decided_by="owner (test)")
+    bolts, rounds = qty("Crossbow Bolt"), qty("Pistol Round")
+    cb([1]).start(StartCombat(name="Fallen Watch gate", party=["Cliff", "Marcus", "Vada", "Scout", "Terri", "Erin"], setup="test",
+                              foes=[StatBlock(name="Warden", kind="elite", health_bar=[10] * 20, evade=25,
+                                              attacks=[MobAttack(name="Swipe", to_hit=12, damage="1d4"),
+                                                       MobAttack(name="Sweep", to_hit=12, damage="1d4", area=True)])]))
+    cb([1]).declare([{"mob": "Warden", "attack": "Sweep", "target": "Vada"}, {"mob": "Warden", "attack": "Swipe", "target": "Vada"}])
+    with pytest.raises(ChangeError, match="no Ranks in Catcher"):
+        cb([1]).catch("Cliff", "Vada")
+    with pytest.raises(ChangeError, match="non-Area"):
+        cb([1]).catch("Scout", "Vada", attack="Sweep")
+    assert "+5 DR from Catcher Rank 6" in cb([1]).catch("Scout", "Vada", attack="Swipe")["summary"]
+    res = cb([4]).resolve()
+    assert any("caught for Vada" in l for l in res["lines"]) and not any(l.startswith("Scout — Evade") for l in res["lines"])
+    # Vada still takes the Area Sweep she did not Evade; the Swipe went to Scout
+    assert sum(1 for l in res["lines"] if "→ Vada" in l) == 1 and sum(1 for l in res["lines"] if "→ Scout" in l) == 1
+
+    # ammunition: one bolt per shot, Crossbow once per round, nothing spent on a refused shot
+    hit = cb([15, 4, 4]).attack("Cliff", "Warden", attack="Light Crossbow")
+    assert hit["hit"] and qty("Crossbow Bolt") == bolts - 1 and any("left)" in l for l in hit["lines"])
+    with pytest.raises(ChangeError, match="once per round"):
+        cb([20]).attack("Cliff", "Warden", attack="Light Crossbow")
+    with pytest.raises(ChangeError, match="Arrow supply"):
+        cb([20]).attack("Erin", "Warden", attack="Shortbow", stat="dexterity")
+    assert qty("Crossbow Bolt") == bolts - 1
+    # Called Play: +6 turns Marcus's miss by 3 into a hit
+    assert cb([6, 2]).call_play("Vada", "Marcus", "smash the Warden's lantern arm", target="Warden")["bonus"] == 6
+    play = cb([8, 3, 3]).attack("Marcus", "Warden", attack="Pipe Club")
+    assert play["hit"] and any("Called Play +6: 28" in l for l in play["lines"])
+    # Intervene: Erin's +6 turns Marcus's Near Miss into a hit
+    near = cb([9]).attack("Marcus", "Warden", attack="Pipe Club")
+    assert not near["hit"] and "Near Miss" in near["summary"]
+    iv = cb([6, 3, 3]).intervene("Erin")
+    assert iv["hit"] and "total 29" in iv["summary"]
+    with pytest.raises(ChangeError, match="already hit"):
+        cb([6]).intervene("Terri")
+    # Handgun: a Critical Fail still fires a round and needs a reload Action
+    cb([1]).attack("Terri", "Warden", attack="Service Pistol")
+    assert qty("Pistol Round") == rounds - 1
+    with pytest.raises(ChangeError, match="reload"):
+        cb([20]).attack("Terri", "Warden", attack="Service Pistol")
+    assert "reloaded" in cb([1]).spend_action("Terri", "Reload")["summary"]
+    end = cb([1]).end("withdrew")
+    assert end["ammunition_fired"] == {"Crossbow Bolt": 1, "Pistol Round": 1} and any("Ammunition fired" in l for l in end["lines"])
+
+
+def test_traps_need_a_record_lock_while_deployed_and_spend_real_costs(conn, denton):
+    from app.gm.tools import ToolRunner
+    from app.rules.combat import Combat, MobAttack, StartCombat, StatBlock
+    from app.rules.dice import DiceRoller
+    from tests.conftest import scripted
+    tool = lambda dice, **a: ToolRunner(conn, None, DiceRoller(source=scripted(dice)), denton, 0).run("trap", a)
+    qty = lambda n: one(conn, "SELECT quantity FROM items WHERE campaign_id = ? AND owner_character_id IS NULL AND name = ?", (denton, n))["quantity"]
+    clock = lambda: one(conn, "SELECT game_time_minutes FROM campaigns WHERE id = ?", (denton,))["game_time_minutes"]
+    bad = tool([10], action="deploy", trap="Cinch Trap", location="gate")
+    assert not bad["ok"] and "no trap record" in bad["result"]["error"]
+    status = {t["name"]: t for t in tool([1], action="status")["result"]["traps"]}
+    assert status["Cinch Trap"]["recorded"] is False and "Scatterburst Trap" in status
+    spec = {"components": "spring housing, one paralytic dart", "ammunition": {"item": "Paralytic Dart", "per_trigger": 1},
+            "deploy": {"actions": 1, "minutes": 10}, "trigger": "pressure plate", "area": "one 5-foot square", "check": {"kind": "attack", "attack_bonus": 6},
+            "damage": "1d4 Piercing", "effects": "Paralyzed until it succeeds on a CON Stat Check (GM)", "reset": {"actions": 2, "minutes": 5},
+            "reset_notes": "reload a dart and re-cock the spring", "bulk": "Small", "label": "INTERPRETATION", "source": "test ruling"}
+    assert tool([1], action="record", trap="Porcupine Pod", spec=spec)["ok"]
+    darts = qty("Paralytic Dart")
+    Combat(conn, denton, None, DiceRoller(source=scripted([1]))).start(StartCombat(
+        name="gate", party=["Cliff", "Marcus"], setup="test", foes=[StatBlock(name="Warden", health_bar=[4] * 10, evade=12, attacks=[MobAttack(name="Swipe", to_hit=10, damage="1d4")])]))
+    Combat(conn, denton, None, DiceRoller()).declare([])
+    Combat(conn, denton, None, DiceRoller(source=scripted([1]))).resolve()
+    t0 = clock()
+    dep = tool([1], action="deploy", trap="Porcupine Pod", location="gate lane", by="Cliff")
+    assert dep["ok"] and "spends 1 Action" in dep["result"]["summary"] and clock() == t0   # in combat it costs Actions, not time
+    locked = tool([1], action="record", trap="Porcupine Pod", spec={**spec, "damage": "3d6 Piercing"})
+    assert not locked["ok"] and "locked" in locked["result"]["error"]
+    hit = tool([15, 4], action="trigger", trap="Porcupine Pod", target="Warden")
+    assert hit["ok"] and hit["result"]["hit"] and hit["result"]["condition"] == "triggered" and qty("Paralytic Dart") == darts - 1
+    assert "Paralyzed" in hit["result"]["summary"]
+    again = tool([15], action="trigger", trap="Porcupine Pod", target="Warden")
+    assert not again["ok"] and "only an armed trap" in again["result"]["error"]
+    short = tool([1], action="reset", trap="Porcupine Pod", by="Cliff")   # 2 Actions needed, Cliff has 1 left
+    assert not short["ok"] and "no Actions left" in short["result"]["error"]
+    enc = one(conn, "SELECT combatants_json FROM encounters WHERE campaign_id = ? AND status = 'active'", (denton,))["combatants"]
+    assert next(c for c in enc["combatants"] if c["name"].startswith("Cliff"))["actions_left"] == 1   # the refused reset spent nothing
+    Combat(conn, denton, None, DiceRoller()).end_round()
+    assert tool([1], action="reset", trap="Porcupine Pod", by="Cliff")["result"]["summary"].endswith("re-armed at gate lane")
+    Combat(conn, denton, None, DiceRoller()).end("done")
+    assert "ready" in tool([1], action="stow", trap="Porcupine Pod")["result"]["summary"]
+    t1 = clock()
+    assert tool([1], action="deploy", trap="Porcupine Pod", location="saferoom door")["ok"] and clock() == t1 + 10   # out of combat: time
