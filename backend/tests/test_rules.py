@@ -106,3 +106,22 @@ def test_advancement_checkpoint(conn, demo_id):
 def test_checkpoint_not_due_is_rejected(conn, demo_id):
     with pytest.raises(ChangeError):
         resolve_advancement_checkpoint(conn, conn, DiceRoller(), demo_id, None, "early")
+
+
+def test_party_check_tally_half_succeeds_with_conversions():
+    from app.rules.party import tally
+    r = lambda name, degree, margin: {"character": name, "id": name, "degree": degree, "margin": margin,
+                                      "success": degree in ("Critical Hit", "Amazing Success", "Success")}
+    # BOOK p. 91 example: 2 of 5 met the Difficulty -> Failure
+    assert tally([r("a", "Success", 1), r("b", "Success", 0), r("c", "Fail", -3), r("d", "Near Miss", -1), r("e", "Fail", -5)])[2] is False
+    # half or more: 2 of 4 succeeds
+    assert tally([r("a", "Success", 1), r("b", "Success", 0), r("c", "Fail", -3), r("d", "Fail", -4)]) == (2, 2, True)
+    # an Amazing Success lifts the failure that missed by least
+    res = [r("a", "Amazing Success", 11), r("b", "Fail", -6), r("c", "Near Miss", -1), r("d", "Major Fail", -12)]
+    s, need, ok = tally(res)
+    assert res[2]["final"] and not res[1]["final"]
+    # ...and the Major Fail drags down another's Success (the weakest one that was not converted, never its own roll)
+    assert res[0]["converted"].startswith("Failure") and (s, ok) == (1, False)
+    # a Critical Fail with no Success to drag down changes nothing; a Critical Hit with no failure to lift changes nothing
+    assert tally([r("a", "Critical Fail", -15), r("b", "Fail", -3)]) == (0, 1, False)
+    assert tally([r("a", "Critical Hit", 9), r("b", "Success", 2)]) == (2, 1, True)

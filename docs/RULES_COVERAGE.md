@@ -4,22 +4,20 @@ Generated from `backend/app/rules/coverage.py` (`python -m app.rules.coverage`);
 
 | Status | Rules | Meaning |
 |---|---|---|
-| implemented and tested | 42 | the console enforces it and a test exercises it |
+| implemented and tested | 44 | the console enforces it and a test exercises it |
 | implemented, untested | 2 | enforced, but no test yet |
 | partly implemented | 11 | part is enforced; the gap column says what is not |
-| GM ruling | 37 | table procedure the GM applies with the existing tools |
+| GM ruling | 36 | table procedure the GM applies with the existing tools |
 | reference only | 7 | history, authority or bibliography |
-| missing | 5 | a mechanic the console should enforce and does not |
+| missing | 4 | a mechanic the console should enforce and does not |
 
 ## Gaps by priority
 
-### P1 (6)
-- **§7.8 Party Skill Checks** (missing): no party Skill Check: each crawler is rolled separately; 'half succeed' and the Amazing/Major conversions are not computed
+### P1 (4)
 - **§10.7 Evade and Interrupts** (partly implemented): Catcher and the other class Interrupts are not tools (Marcus and Terri have Catcher +3)
 - **§10.8 Attacks** (partly implemented): firing does not spend ammunition (64 shared bolts, 22 pistol rounds are now counted)
 - **§10.9 Call a Play** (missing): Call a Play (2d6 keep high, bonus to the proposed Action's Check or damage) is not a tool
 - **§13.7 Traps** (missing): traps are items with a status; deploy, trigger, Check, damage and reset are not modelled
-- **§15.2 Off-screen resolution** (GM ruling): needs the party Skill Check (7.8) for a group's outcome
 
 ### P2 (6)
 - **§— Ai Favor Rerolls** (partly implemented): the reroll itself is not a tool: no reroll window, no 'Natural 1 cannot be rerolled' check, and the Favor is not spent automatically
@@ -92,7 +90,7 @@ Generated from `backend/app/rules/coverage.py` (`python -m app.rules.coverage`);
 | 7.5 | Untrained Skills | implemented and tested | untrained: Disadvantage, Stat Mod only | `test_untrained_check_rolls_disadvantage_without_rank` |  |  |
 | 7.6 | Advantage and Disadvantage | implemented and tested | Advantage and Disadvantage cancel one for one | `test_advantage_cancels_disadvantage` |  |  |
 | 7.7 | Help and Intervene | partly implemented | Help: 1d6 with Ranks, 1d2 without, rolled per helper | `test_stat_check_cannot_receive_help` | Intervene (an Action after the roll, +1d6) is not a tool | P2 |
-| 7.8 | Party Skill Checks | missing |  |  | no party Skill Check: each crawler is rolled separately; 'half succeed' and the Amazing/Major conversions are not computed | P1 |
+| 7.8 | Party Skill Checks | implemented and tested | party_check tool: everyone rolls vs one Difficulty, no Help, half or more succeed; Amazing/Critical lifts one failure, Major/Critical Fail drags down another's Success (applied at once: INTERPRETATION) | `test_party_check_tally_half_succeeds_with_conversions`, `test_onscreen_party_check_rolls_everyone_and_shows_the_result` |  |  |
 | 7.9 | Degrees of outcome | implemented and tested | degree_of: Critical Hit to Critical Fail | `test_degrees_of_outcome` |  |  |
 | 7.9 | Crazy Dungeon critical flourish | GM ruling | the flourish is narration on a natural 1 or 20 the server rolled |  |  |  |
 | 7.10 | Failing forward | GM ruling |  |  |  |  |
@@ -139,7 +137,7 @@ Generated from `backend/app/rules/coverage.py` (`python -m app.rules.coverage`);
 | 14.7 | Leveling through grinding | partly implemented | level-grind counter and reset | `test_grinding_triggers_one_check_per_day_and_level_progress` | the sole-lowest-Level 1d2 catch-up is not applied | P3 |
 | 14.8 | Mandatory pre-Floor-3 audit | reference only | one-time pre-Floor-3 audit, completed |  |  |  |
 | 15.1 | Declare groups and objectives | implemented and tested | group op: members, location, activity | `test_groups_move_only_their_members`, `test_group_departure_moves_only_that_group` |  |  |
-| 15.2 | Off-screen resolution | GM ruling | off-screen groups resolved with checks |  | needs the party Skill Check (7.8) for a group's outcome | P1 |
+| 15.2 | Off-screen resolution | implemented and tested | party_check offscreen: only a group without the player character; objective and stakes declared before the roll; secret rolls; outcome logged for the GM | `test_offscreen_recon_is_resolved_secretly_with_declared_stakes` |  |  |
 | 15.3 | Rewards and advancement | GM ruling |  |  |  |  |
 | 16.1 | Write immediately after consequence | implemented and tested | every turn commits its validated changes at once | `test_turn_persists_transcript_and_state` |  |  |
 | 16.2 | Persistence cadence | implemented and tested | autosave per turn; manual save points | `test_autosaves_are_pruned`, `test_save_change_restore_and_undo_restore` |  |  |

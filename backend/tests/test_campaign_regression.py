@@ -451,7 +451,7 @@ def test_rule_labels_come_from_the_matrix(conn, denton):
     refresh_mechanical_status(conn)
     label = {r["title"]: r["mechanical_status"] for r in rows(conn, "SELECT title, mechanical_status FROM house_rules WHERE campaign_id = ?", (denton,))}
     assert label["Mending"] == "implemented" and label["Rest"] == "implemented"      # import labelled both pending
-    assert label["Party Skill Checks"] == "pending" and label["Call a Play"] == "pending"
+    assert label["Party Skill Checks"] == "implemented" and label["Call a Play"] == "pending" and label["Traps"] == "pending"
     assert classify({"section": "7.9", "title": "Crazy Dungeon critical flourish"})["status"] == "gm_ruling"
 
 
@@ -514,6 +514,49 @@ def test_gm_turn_crafts_the_siphon_once_with_one_set_of_rolls(client, conn, dent
                                                             "idempotency_key": uuid.uuid4().hex})
     assert r.status_code == 200, r.text
     assert state(conn, denton)[0] == t0 + 480
-    assert one(conn, "SELECT quantity FROM items WHERE campaign_id = ? AND owner_character_id IS NULL AND name = 'Miscellaneous Junk'", (denton,))["quantity"] == j0 - 8
-    rolls = rows(conn, "SELECT reason FROM dice_rolls WHERE campaign_id = ? AND reason LIKE 'Craft %' AND rolled_back = 0", (denton,))
+    rolls = rows(conn, "SELECT total, target, outcome FROM dice_rolls WHERE campaign_id = ? AND reason LIKE 'Craft %' AND rolled_back = 0", (denton,))
     assert len(rolls) == 1  # dice drawn once and reused by the staged replay, never re-rolled
+    from app.rules.crafting import _salvaged
+    r = rolls[0]  # real dice here: check the result follows the rule for whatever was rolled
+    back = 0 if r["outcome"] == "success" else _salvaged(8, r["target"] - r["total"])
+    assert one(conn, "SELECT quantity FROM items WHERE campaign_id = ? AND owner_character_id IS NULL AND name = 'Miscellaneous Junk'", (denton,))["quantity"] == j0 - 8 + back
+    built = one(conn, "SELECT 1 FROM items WHERE campaign_id = ? AND name = 'Pass-Pulse Gold Siphon'", (denton,))
+    assert bool(built) == (r["outcome"] == "success")
+
+
+def _party(conn, cid, dice, **a):
+    from app.gm.tools import ToolRunner
+    from app.rules.dice import DiceRoller
+    from tests.conftest import scripted
+    run = ToolRunner(conn, None, DiceRoller(source=scripted(dice)), cid, 0)
+    return run.run("party_check", a), run
+
+
+def test_offscreen_recon_is_resolved_secretly_with_declared_stakes(conn, denton):
+    rolls_before = one(conn, "SELECT count(*) AS n FROM dice_rolls WHERE campaign_id = ?", (denton,))["n"]
+    for bad, why in ((dict(group="training-market", offscreen=True, objective="x", stakes="y"), "includes the player character"),
+                     (dict(group="prison-recon", offscreen=True, objective="Scout Fallen Watch"), "declare the group's objective and the stakes"),
+                     (dict(participants=["Cliff"]), "at least two participants"),
+                     (dict(group="prison-recon", participants=["Cliff", "Scout"]), "only members of")):
+        res, _ = _party(conn, denton, [10], skill="Stealth", stat="dex", reason="test", **bad)
+        assert not res["ok"] and why in res["result"]["error"], (bad, res)
+    assert one(conn, "SELECT count(*) AS n FROM dice_rolls WHERE campaign_id = ?", (denton,))["n"] == rolls_before  # refused: nothing rolled
+    res, run = _party(conn, denton, [20], group="prison-recon", offscreen=True, skill="Stealth", stat="dex", dc_kind="opposed",
+                      antagonist_mod=3, reason="Fallen Watch reconnaissance",
+                      objective="Map the Fallen Watch guard rotation without being seen",
+                      stakes="They are spotted and must withdraw; the prison is alerted", on_success="They map the rotation and withdraw unseen")
+    out = res["result"]
+    assert res["ok"] and out["participants"] == 6 and out["success"] and out["hidden"] and run.effects.rolls == []  # secret rolls
+    ev = one(conn, "SELECT summary, visibility, payload_json FROM events WHERE campaign_id = ? AND type = 'offscreen_resolved' ORDER BY id DESC", (denton,))
+    assert ev["visibility"] == "gm" and ev["payload"]["outcome"].startswith("They map") and len(ev["payload"]["roll_ids"]) == 6
+    res, _ = _party(conn, denton, [1], group="prison-recon", offscreen=True, skill="Stealth", stat="dex", reason="second pass",
+                    objective="Check the east wall", stakes="They are spotted and must withdraw")
+    assert res["ok"] and not res["result"]["success"] and res["result"]["outcome"] == "They are spotted and must withdraw"
+
+
+def test_onscreen_party_check_rolls_everyone_and_shows_the_result(conn, denton):
+    res, run = _party(conn, denton, [15], participants=["Cliff", "Vada", "Nate", "Priya"], skill="Climbing", stat="dex", dc=12,
+                      reason="climb down to the market roofs together")
+    out = res["result"]
+    assert res["ok"] and out["participants"] == 4 and len(run.effects.rolls) == 4 and not out["hidden"]
+    assert out["summary"].startswith("Party ") and out["summary"] in run.effects.changes

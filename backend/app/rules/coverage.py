@@ -84,8 +84,9 @@ MATRIX: dict[str, dict] = {
     "7.6": R("tested", "Advantage and Disadvantage cancel one for one", ("test_advantage_cancels_disadvantage",)),
     "7.7": R("partial", "Help: 1d6 with Ranks, 1d2 without, rolled per helper", ("test_stat_check_cannot_receive_help",),
              gap="Intervene (an Action after the roll, +1d6) is not a tool", priority="P2"),
-    "7.8": R("missing", gap="no party Skill Check: each crawler is rolled separately; 'half succeed' and the Amazing/Major conversions "
-                            "are not computed", priority="P1"),
+    "7.8": R("tested", "party_check tool: everyone rolls vs one Difficulty, no Help, half or more succeed; Amazing/Critical lifts one "
+             "failure, Major/Critical Fail drags down another's Success (applied at once: INTERPRETATION)",
+             ("test_party_check_tally_half_succeeds_with_conversions", "test_onscreen_party_check_rolls_everyone_and_shows_the_result")),
     "7.9": R("tested", "degree_of: Critical Hit to Critical Fail", ("test_degrees_of_outcome",)),
     "7.9 Crazy Dungeon critical flourish": R("gm_ruling", "the flourish is narration on a natural 1 or 20 the server rolled"),
     "7.10": R("gm_ruling"),
@@ -148,7 +149,8 @@ MATRIX: dict[str, dict] = {
               gap="the sole-lowest-Level 1d2 catch-up is not applied", priority="P3"),
     "14.8": R("reference", "one-time pre-Floor-3 audit, completed"),
     "15.1": R("tested", "group op: members, location, activity", ("test_groups_move_only_their_members", "test_group_departure_moves_only_that_group")),
-    "15.2": R("gm_ruling", "off-screen groups resolved with checks", gap="needs the party Skill Check (7.8) for a group's outcome", priority="P1"),
+    "15.2": R("tested", "party_check offscreen: only a group without the player character; objective and stakes declared before "
+              "the roll; secret rolls; outcome logged for the GM", ("test_offscreen_recon_is_resolved_secretly_with_declared_stakes",)),
     "15.3": R("gm_ruling"),
     "16.1": R("tested", "every turn commits its validated changes at once", ("test_turn_persists_transcript_and_state",)),
     "16.2": R("tested", "autosave per turn; manual save points", ("test_autosaves_are_pruned", "test_save_change_restore_and_undo_restore")),

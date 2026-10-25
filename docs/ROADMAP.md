@@ -6,7 +6,7 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 |---|---|---|---|---|---|---|---|
 | M0 Safe upgrade workflow | P0 | Done | none | 385d7dd | 155 backend; typecheck/build; isolation probe PASS | Settings passcode masked | ledger behind by 2 (see below) |
 | M1 Canonical-state reconciliation | P0 | Exit gate met | M0 | (pending) | 166 backend; consistency 21/21 | HUD roster + objectives | 7 uncounted-gear items stay open for owner counts; 44 house rules move to M2/M7 |
-| M2 Mechanics reliability & GM gates | P0 | In progress | M1 | | 171 backend | n/a | coverage matrix done; crafting done; next P1: party checks, combat completion, traps |
+| M2 Mechanics reliability & GM gates | P0 | In progress | M1 | | 174 backend | n/a | coverage matrix, crafting, party checks done; next P1: combat completion, traps |
 | M3 Main story HUD | P1 | Backlog | M1 underway | | | | |
 | M4 Characters, party, people | P1 | Backlog | M3 | | | | |
 | M5 Inventory, crafting, economy | P1 | Backlog | M3 | | | | |
@@ -196,3 +196,15 @@ household items cost 1 Misc. Junk; magical crafting is refused below Floor 4. Te
 cover the Siphon build, a wrong lead, a second build, half salvage, a natural 1, a short stash (nothing spent, no time
 passes), and a full GM turn that crafts once with one set of rolls. Live campaign state was not touched. Coverage:
 42 tested, 5 missing; P1 now 6.
+
+**Party Skill Checks and off-screen groups (7.8, 15.2).** New GM tool `party_check` (`backend/app/rules/party.py`; Core
+Rulebook p. 59, Rules for Survival p. 18). Every participant (a list, or a party group's members) rolls the Skill against
+one Difficulty, with no Help; the party succeeds when half or more succeed; each Amazing Success or Critical Hit lifts one
+teammate's failure, each Major or Critical Fail drags down another teammate's Success. INTERPRETATION (the book does not
+order them): both apply at once against the original results, lifting the narrowest miss and dragging down the narrowest
+success. `offscreen` resolves a group without the player character: its objective and the stakes of Failure must be
+declared before the roll, the rolls are secret by default, and the outcome is logged as a GM-only event for the GM to
+apply with the ordinary ops. Refused calls roll nothing. Tests: the book's own example (2 of 5 fails), the conversion
+edge cases, the recon group resolved secretly on the disposable copy, and the guards (Cliff's group, undeclared stakes,
+one participant, outsiders). Also fixed a flaky crafting test that assumed the real-dice Check always succeeded.
+Coverage: 44 tested, 4 missing; P1 now 4 (ammunition, Call a Play, Catcher/Interrupts, traps).

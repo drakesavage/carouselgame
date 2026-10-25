@@ -119,6 +119,17 @@ TOOL_SPECS.extend([
                     "dungeon day) roll the advancement check; also adds Level-grind progress. map_bonus: +1 hour for 5+ hour sessions with a "
                     "Neighborhood Map. Does not advance time: also call advance_time.",
      "parameters": {"character": "str", "skill": "str", "hours": "int", "map_bonus": "bool?"}},
+    {"name": "party_check",
+     "description": "Party Skill Check (CORE 7.8; BOOK p. 59) when the whole group performs one task together (sneaking past a post, "
+                    "climbing down together); not when one qualified character can do it for everyone. Every participant rolls the Skill "
+                    "vs the same Difficulty (no Help); the party succeeds if half or more succeed; each Amazing Success/Critical Hit turns "
+                    "one teammate's failure into a Success, each Major/Critical Fail turns another's Success into a Failure. Give "
+                    "participants, or group (a party group key) for its members. members: per-character Skill/Stat/Advantage overrides. "
+                    "offscreen=true resolves a group the player character is NOT in (CORE 15.2): declare objective and stakes (what Failure "
+                    "means) before the roll; rolls are secret by default and the outcome is logged; then apply its consequences with apply_changes.",
+     "parameters": {"skill": "str", "stat": "str", "participants": "[str]?", "group": "str?", "members": "[{character, skill?, stat?, advantage?, disadvantage?, modifiers?}]?",
+                    "dc": "int?", "dc_kind": "unopposed|opposed|stat?", "antagonist_mod": "int?", "modifiers": "[{source, value}]?", "reason": "str",
+                    "hidden": "bool?", "offscreen": "bool?", "objective": "str?", "stakes": "str?", "on_success": "str?"}},
     {"name": "craft",
      "description": "One crafting attempt (CORE 13.1-13.6; BOOK pp. 221-227), declared in full first: nothing is spent unless every "
                     "material is on hand with an established count. kind common: 1 Misc. Junk, no Check. kind mundane: give size "
@@ -237,6 +248,22 @@ class ToolRunner:
                     bool(a.get("map_bonus")))
         self._card_new_rolls()
         self.effects.changes.extend(out["lines"][:-1])
+        return out
+
+    def t_party_check(self, a: dict) -> dict:
+        from ..rules.party import PartyCheckRequest, party_check
+        req = PartyCheckRequest.model_validate(a)
+        self.conn.execute("SAVEPOINT party")  # all participants roll, or none do
+        try:
+            out = party_check(self.conn, self.roller, self.cid, self.turn_id, req)
+        except Exception:
+            self.conn.execute("ROLLBACK TO party")
+            self.conn.execute("RELEASE party")
+            raise
+        self.conn.execute("RELEASE party")
+        self._card_new_rolls()
+        if not out["hidden"]:
+            self.effects.changes.append(out["summary"])
         return out
 
     def t_craft(self, a: dict) -> dict:
