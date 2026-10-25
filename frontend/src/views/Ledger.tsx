@@ -56,7 +56,7 @@ export function LedgerView({ cid, version, onChanged }: { cid: number; version: 
     setBusy("write"); setErr(null);
     try {
       try { localStorage.setItem("ledgerAuthor", JSON.stringify(author)); } catch { /* ignore */ }
-      const r = await api.ledgerApply(cid, { fingerprint: pv.fingerprint, selected: [...selected], message, author_name: author.name, author_email: author.email, regenerate_checkpoint: checkpoint });
+      const r = await api.ledgerApply(cid, { fingerprint: pv.fingerprint, selected: [...selected], message, author_name: author.name, author_email: author.email, regenerate_checkpoint: checkpoint && !pv.checkpoint_curated });
       setDone(`Committed ${short(r.commit)} — ${r.summary.changes} changes in ${r.summary.files.length} files. Validator passed.${r.summary.skipped ? ` ${r.summary.skipped} change(s) left for later.` : ""}`);
       await load(false);
       onChanged();
@@ -160,11 +160,11 @@ export function LedgerView({ cid, version, onChanged }: { cid: number; version: 
                 <label className="grow">Email<input className="input" value={author?.email ?? ""} onChange={(e) => setAuthor({ ...author, email: e.target.value })} /></label>
               </div>
               <label className="row" style={{ marginTop: 10, fontSize: 13 }}>
-                <input type="checkbox" checked={checkpoint} onChange={(e) => setCheckpoint(e.target.checked)} /> Regenerate checkpoints/latest.md (save-point protocol)
+                <input type="checkbox" checked={checkpoint && !pv.checkpoint_curated} disabled={!!pv.checkpoint_curated} onChange={(e) => setCheckpoint(e.target.checked)} /> Regenerate checkpoints/latest.md (save-point protocol)
               </label>
               {pv.checkpoint_curated && (
                 <div className="sub" style={{ color: "var(--amber)", marginTop: 4 }}>
-                  <AlertTriangle size={12} /> The current checkpoint contains hand-written sections that tools/build_checkpoint.py does not produce. Regenerating would replace them.
+                  <AlertTriangle size={12} /> The current checkpoint contains hand-written sections that tools/build_checkpoint.py does not produce. Regeneration is blocked so they can't be replaced; update the checkpoint by hand.
                 </div>
               )}
               <div className="sub" style={{ margin: "8px 0" }}>Runs the ledger's own tools/validate_state.py first. If validation fails, every file is restored and nothing is committed.</div>

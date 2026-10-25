@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { AlertTriangle, Bot, Database, Download, History, KeyRound, Save, Smartphone } from "lucide-react";
+import { AlertTriangle, Bot, Copy, Database, Download, Eye, EyeOff, History, KeyRound, Save, Smartphone } from "lucide-react";
 import { api, Prefs, SavePoint } from "../api";
 import { Chip, Empty, Panel } from "../ui";
 import { Diagnostics } from "./Diagnostics";
@@ -16,6 +16,7 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
 
   const [access, setAccess] = useState<Awaited<ReturnType<typeof api.access>> | null>(null);
   useEffect(() => { api.settings().then(setPrefs); api.importReports().then(setReports); api.access().then(setAccess).catch(() => setAccess(null)); }, []);
+  const [showCode, setShowCode] = useState(false);  // the device passcode stays masked until deliberately revealed
   useEffect(() => { api.saves(cid).then(setSaves); }, [cid, version]);
 
   const update = async (p: Partial<Prefs>) => { setPrefs(await api.saveSettings(p)); setMsg("Settings saved."); };
@@ -100,10 +101,16 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
             ))}
             <div className="row" style={{ marginTop: 10 }}>
               <span className="sub">Passcode</span>
-              <span className="mono" style={{ fontSize: 22, letterSpacing: "0.12em", color: "var(--cyan)" }}>{access.passcode}</span>
+              <span className="mono" style={{ fontSize: 22, letterSpacing: "0.12em", color: "var(--cyan)" }} aria-live="polite">
+                {showCode ? access.passcode : "•".repeat(Math.max(6, access.passcode.length))}</span>
+              <button className="btn small ghost" onClick={() => setShowCode((v) => !v)} aria-pressed={showCode}>{showCode ? <><EyeOff size={12} /> Hide</> : <><Eye size={12} /> Show</>}</button>
+              <button className="btn small ghost" onClick={async () => { try { await navigator.clipboard.writeText(access.passcode); setMsg("Passcode copied."); } catch { setMsg("Copy failed; use Show instead."); } }}><Copy size={12} /> Copy</button>
               <span className="spacer" />
               {!access.fixed_by_env && (
-                <button className="btn small" onClick={async () => { const r = await api.regeneratePasscode(); setAccess({ ...access, passcode: r.passcode }); setMsg("New passcode set; every other device must sign in again."); }}>
+                <button className="btn small" onClick={async () => {
+                  if (!window.confirm("Make a new passcode? Every other device will need the new one to sign in again.")) return;
+                  const r = await api.regeneratePasscode(); setAccess({ ...access, passcode: r.passcode }); setShowCode(false); setMsg("New passcode set; every other device must sign in again.");
+                }}>
                   <KeyRound size={12} /> New passcode
                 </button>
               )}

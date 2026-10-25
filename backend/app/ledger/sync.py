@@ -283,6 +283,10 @@ def apply(conn: sqlite3.Connection, cid: int, *, fingerprint: str, selected: lis
     if not chosen:
         raise LedgerError("No changes selected.")
     root = Path(pv["ledger_path"])
+    if regenerate_checkpoint and checkpoint_is_curated(root):
+        # The generator only knows its own sections; a hand-written checkpoint would be silently overwritten.
+        raise LedgerError("checkpoints/latest.md has hand-written sections that regeneration would replace; "
+                          "write without regenerating, or update the checkpoint by hand.")
     rendered = _render_files(root, changes, chosen)
     written: list[str] = []
     try:

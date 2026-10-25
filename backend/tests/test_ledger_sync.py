@@ -197,9 +197,11 @@ def test_real_ledger_round_trip_passes_its_own_validator(conn, real_repo):
     assert pv["blockers"] == [] and all(c["status"] == "clean" for c in pv["changes"])
     assert pv["checkpoint_curated"] is True  # the real checkpoint has hand-written sections the generator would drop
     before = {p: (real_repo / p).read_text(encoding="utf-8") for p in ("state/characters/vada.yaml", "state/campaign.yaml")}
-    out = _apply(conn, cid, pv, regenerate_checkpoint=True)
+    with pytest.raises(sync.LedgerError, match="hand-written sections"):  # curated checkpoint is never regenerated
+        _apply(conn, cid, pv, regenerate_checkpoint=True)
+    out = _apply(conn, cid, pv)
     stat = git(real_repo, "show", "--stat", "--format=", out["commit"])
-    assert "state/characters/cliff.yaml" in stat and "checkpoints/latest.md" in stat and "vada.yaml" not in stat
+    assert "state/characters/cliff.yaml" in stat and "checkpoints/latest.md" not in stat and "vada.yaml" not in stat
     assert (real_repo / "state/characters/vada.yaml").read_text(encoding="utf-8") == before["state/characters/vada.yaml"]
     camp = yaml.safe_load((real_repo / "state/campaign.yaml").read_text(encoding="utf-8"))
     assert camp["floor_clock"]["remaining_minutes"] == 12951 - 60
