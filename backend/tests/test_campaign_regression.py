@@ -181,6 +181,32 @@ def test_uncounted_items_ruling_counts_everything_and_writes_back(conn, denton, 
     assert not any("unquantified_items entries have no quantity" in w for w in pv["warnings"])
 
 
+def test_story_threads_are_findable_scoped_and_in_gm_context(client, conn, denton):
+    from app import reconcile
+    from app.memory.context import build_context
+    root = Path(one(conn, "SELECT source_path FROM import_reports WHERE campaign_id = ?", (denton,))["source_path"])
+    # the importer now brings in what the ledger marks player-known: companion 'known' lists, completed events, intelligence
+    lore = client.get(f"/api/campaigns/{denton}/lore-notebook").json()
+    assert any(f["topic"] == "Marcus" and "Cliff promised to help find them" in f["fact"] for f in lore)
+    assert client.get(f"/api/campaigns/{denton}/chronology").json()["imported_history"]
+    reconcile.story_known_correction(conn, denton, root, "owner (proxy-GM delegation)")
+    top = lambda q: client.get(f"/api/campaigns/{denton}/search", params={"q": q}).json()[:3]
+    assert any(h["type"] == "quest" and "Scout" in h["title"] and "stabber" in h["title"] for h in top("Scout promise"))
+    assert any(h["type"] == "quest" and "Marcus find his wife" in h["title"] for h in top("Marcus family"))
+    assert any(h["type"] == "quest" and "Margit" in h["title"] for h in top("Margit cooperation"))
+    assert any(h["type"] in ("group", "quest") and "econ" in h["title"] for h in top("prison recon"))
+    ctx = build_context(conn, denton, "I sit down with Marcus and ask about his family")["text"]
+    assert "help Marcus find his wife and daughter" in ctx and "without a labor fee" in ctx
+    # scope: the companion sheet's private lines and other GM-only material never reach player search, journal or lore
+    private = "ashamed that relief at belonging"
+    assert private in one(conn, "SELECT content FROM gm_secrets WHERE campaign_id = ? AND subject = 'marcus'", (denton,))["content"]
+    do(conn, denton, {"op": "remember", "subject": "marcus", "content": "GMONLY-M6-BEAT-9911 Marcus family", "visibility": "gm"})
+    for url, params in ((f"/api/campaigns/{denton}/search", {"q": "Marcus family ashamed belonging"}), (f"/api/campaigns/{denton}/journal", None),
+                        (f"/api/campaigns/{denton}/lore-notebook", None), (f"/api/campaigns/{denton}/chronology", None)):
+        body = client.get(url, params=params).text
+        assert private not in body and "GMONLY-M6-BEAT-9911" not in body and "find-my-family-promise" not in body, url
+
+
 def test_reserved_gear_cannot_be_handed_over_until_the_reservation_is_resolved(client, conn, denton):
     do(conn, denton, {"op": "quest", "title": "Reserved: Brass Lantern", "kind": "reservation",
                       "details": {"payment": "paid", "paid_gold": 5, "held_by": "Gilded Feathers", "owned": False}})

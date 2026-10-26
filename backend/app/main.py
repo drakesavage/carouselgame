@@ -31,7 +31,7 @@ from .gm.providers import make_provider, prune_jobs, secure_dir
 from .importer.ledger import import_ledger, refresh_mechanical_status, report_markdown
 from .ledger import sync as ledger_sync
 from .ledger.sync import LedgerError
-from .memory import snapshots, views
+from .memory import journal, snapshots, views
 from .reference import rulebooks
 from .seed.demo import seed_demo
 
@@ -620,7 +620,8 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         return FileResponse(path)
 
     for route, fn in {"inventory": views.inventory, "quests": views.quests, "npcs": views.npcs, "timeline": views.timeline,
-                      "rolls": views.player_rolls, "house-rules": views.house_rules, "rulings": views.rulings, "lore": views.lore}.items():
+                      "rolls": views.player_rolls, "house-rules": views.house_rules, "rulings": views.rulings, "lore": views.lore,
+                      "journal": journal.journal, "lore-notebook": journal.lore_notebook, "chronology": journal.chronology}.items():
         def make(fn=fn):
             def handler(cid: int, c=Depends(db)):
                 campaign_or_404(c, cid)
@@ -632,6 +633,12 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     def messages(cid: int, before: int | None = None, limit: int = Query(80, le=300), c=Depends(db)):
         campaign_or_404(c, cid)
         return views.messages(c, cid, before, limit)
+
+    @app.get("/api/campaigns/{cid}/search")
+    def search(cid: int, q: str = Query(..., min_length=2, max_length=200), c=Depends(db)):
+        """In-game search over player-known story, people, quests, lore, items, events and records (never GM text)."""
+        campaign_or_404(c, cid)
+        return journal.search(c, cid, q)
 
     @app.get("/api/campaigns/{cid}/records")
     def records(cid: int, q: str | None = None, c=Depends(db)):

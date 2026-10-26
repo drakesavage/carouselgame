@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { Backpack, BookOpen, Clock3, FileText, Flag, GitCommitHorizontal, MessageSquareText, Settings2, UserRound, Users } from "lucide-react";
+import { Backpack, BookOpen, Clock3, FileText, Flag, GitCommitHorizontal, MessageSquareText, Search, Settings2, UserRound, Users } from "lucide-react";
 import { api, Campaign, CampaignListItem, fmtMinutes, Manifest } from "./api";
 import { ManifestContext } from "./views/Hud";
 import { Chip } from "./ui";
 import { StoryView, SystemNotice } from "./views/Story";
 import { CharacterSheetDialog } from "./views/Sheet";
-import { CharactersView, QuestsView, TimelineView } from "./views/Journals";
+import { CharactersView } from "./views/Journals";
+import { ChronicleView, QuestsView } from "./views/Journal";
+import { SearchDialog } from "./views/Search";
 import { InventoryView } from "./views/Inventory";
 import { PeopleView } from "./views/People";
 import { RecordsView, RulesView } from "./views/Reference";
@@ -18,7 +20,7 @@ const TABS = [
   { id: "inventory", label: "Inventory", icon: Backpack },
   { id: "quests", label: "Quests", icon: Flag },
   { id: "people", label: "People", icon: Users },
-  { id: "timeline", label: "Timeline", icon: Clock3 },
+  { id: "timeline", label: "Chronicle", icon: Clock3 },
   { id: "rules", label: "Rules", icon: BookOpen },
   { id: "records", label: "Records", icon: FileText },
   { id: "ledger", label: "Ledger", icon: GitCommitHorizontal },
@@ -36,6 +38,15 @@ export default function App() {
   const [version, setVersion] = useState(0);
   const [sheet, setSheet] = useState<number | null>(null);
   const [focusQuest, setFocusQuest] = useState<number | null>(null);
+  const [searching, setSearching] = useState(false);
+  useEffect(() => { // Ctrl+K anywhere, or "/" when not typing, opens search
+    const onKey = (e: KeyboardEvent) => {
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement)?.tagName ?? "") || (e.target as HTMLElement)?.isContentEditable;
+      if ((e.key.toLowerCase() === "k" && (e.ctrlKey || e.metaKey)) || (e.key === "/" && !typing)) { e.preventDefault(); setSearching(true); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [provider, setProvider] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -93,6 +104,7 @@ export default function App() {
           ))}
         </nav>
         <div className="top-right">
+          {campaign && <button className="btn small ghost top-search" onClick={() => setSearching(true)} title="Search what the party knows (Ctrl+K)"><Search size={14} /> Search</button>}
           {campaign && (
             <>
               {campaign.is_demo ? <span className="demo-ribbon">DEMO DATA</span> : null}
@@ -116,10 +128,10 @@ export default function App() {
           <div className="view">
             {tab === "characters" && <CharactersView cid={cid} version={version} openCharacter={setSheet} />}
             {tab === "inventory" && <InventoryView cid={cid} version={version} openQuest={openQuest} />}
-            {tab === "quests" && <QuestsView cid={cid} version={version} focus={focusQuest} />}
+            {tab === "quests" && <QuestsView cid={cid} version={version} focus={focusQuest} openCharacter={setSheet} />}
             {tab === "people" && <PeopleView cid={cid} version={version} openCharacter={setSheet} openQuest={openQuest}
               pcAssignment={campaign.roster.find((c) => c.id === campaign.active_character_id)?.assignment} />}
-            {tab === "timeline" && <TimelineView cid={cid} version={version} />}
+            {tab === "timeline" && <ChronicleView cid={cid} version={version} openCharacter={setSheet} />}
             {tab === "rules" && <RulesView cid={cid} />}
             {tab === "records" && <RecordsView cid={cid} />}
             {tab === "ledger" && <LedgerView cid={cid} version={version} onChanged={refresh} />}
@@ -127,6 +139,13 @@ export default function App() {
           </div>
         )}
       </main>
+      {cid != null && (
+        <SearchDialog cid={cid} open={searching} onClose={() => setSearching(false)} go={(h) => {
+          if (h.type === "quest" && h.id != null) openQuest(h.id);
+          else if (h.type === "person" && h.id != null) setSheet(h.id);
+          else setTab(h.type === "item" ? "inventory" : h.type === "record" ? "records" : h.type === "story" || h.type === "group" ? "story" : "timeline");
+        }} />
+      )}
       {cid != null && <CharacterSheetDialog cid={cid} charId={sheet} onClose={() => setSheet(null)} onChanged={refresh} />}
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => <div key={t.id} className="toast" onClick={() => dismiss(t.id)} title="Click to dismiss"><SystemNotice text={t.text} style={t.style} /></div>)}

@@ -447,6 +447,10 @@ def import_ledger(conn: sqlite3.Connection, root: Path, *, name_suffix: str = ""
             conn.execute("INSERT INTO lore_facts (campaign_id, subject, fact, certainty, visibility, source, created_at) VALUES (?,?,?,?,?,?,?)",
                          (cid, "world state", str(note), "canonical", "player", "state/campaign.yaml world_state_notes", now_iso()))
             rep.count("lore_facts")
+        # what the ledger marks as player-known elsewhere: companion sheets' known lists, completed events, known intelligence
+        from ..memory.journal import add_player_known, player_known
+        for _ in range(add_player_known(conn, cid, player_known(src.root))):
+            rep.count("lore_facts_player_known")
 
         # house rules
         for key, val in (camp.get("campaign_rulings") or {}).items():

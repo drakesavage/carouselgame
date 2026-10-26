@@ -32,7 +32,10 @@ def _player_urls(client, cid):
             f"/api/campaigns/{cid}/inventory", f"/api/campaigns/{cid}/quests", f"/api/campaigns/{cid}/npcs", f"/api/campaigns/{cid}/timeline",
             f"/api/campaigns/{cid}/messages", f"/api/campaigns/{cid}/rolls", f"/api/campaigns/{cid}/house-rules", f"/api/campaigns/{cid}/rulings",
             f"/api/campaigns/{cid}/lore", f"/api/campaigns/{cid}/records", f"/api/campaigns/{cid}/saves", "/api/import/reports",
-            f"/api/campaigns/{cid}/records?q=secret debt syndicate hidden plans", f"/api/rules/search?q=secret&cid={cid}"]
+            f"/api/campaigns/{cid}/records?q=secret debt syndicate hidden plans", f"/api/rules/search?q=secret&cid={cid}",
+            f"/api/campaigns/{cid}/journal", f"/api/campaigns/{cid}/lore-notebook", f"/api/campaigns/{cid}/chronology",
+            f"/api/campaigns/{cid}/search?q=gmsecret alpha bravo charlie delta echo foxtrot secret plot",
+            f"/api/campaigns/{cid}/inventory"]
     for ch in client.get(f"/api/campaigns/{cid}/characters").json():
         urls.append(f"/api/campaigns/{cid}/characters/{ch['id']}")
         urls.append(f"/api/campaigns/{cid}/characters/{ch['id']}/dossier")

@@ -48,7 +48,7 @@ def apply_correction(conn: sqlite3.Connection, cid: int, *, subject: str, decisi
                      decided_by: str, ledger_edits: list[dict] | None = None, sheet_edits: list[dict] | None = None,
                      resolves: list[str] | None = None, position_edits: list[dict] | None = None,
                      rulings: list[dict] | None = None, trap_records: list[dict] | None = None,
-                     item_edits: list[dict] | None = None) -> dict:
+                     item_edits: list[dict] | None = None, lore: list[tuple[str, str, str]] | None = None) -> dict:
     if not evidence:
         raise ValueError("a correction needs evidence")
     if not decided_by.strip():
@@ -60,6 +60,9 @@ def apply_correction(conn: sqlite3.Connection, cid: int, *, subject: str, decisi
         results += [_sheet_edit(conn, cid, e) for e in sheet_edits or []]
         results += [_position_edit(conn, cid, e) for e in position_edits or []]
         results += [_item_edit(conn, cid, e) for e in item_edits or []]
+        if lore:  # player-known facts (subject, fact, source); duplicates are skipped
+            from .memory.journal import add_player_known
+            results.append({"summary": f"{add_player_known(conn, cid, lore)} player-known facts added"})
         if trap_records:  # trap records (CORE 13.7), validated by the trap tool's own model
             from .rules import traps
             results += [traps.record(conn, cid, t["trap"], t["spec"]) for t in trap_records]
@@ -691,3 +694,46 @@ def uncounted_correction(conn: sqlite3.Connection, cid: int, ledger_root, decide
                             decided_by=decided_by, ledger_edits=edits, item_edits=item_edits,
                             rulings=[{"topic": "Counts for previously uncounted items", "ruling": UNCOUNTED_RULING, "label": "CAMPAIGN",
                                       "sources": ["owner delegation 2026-10-26"]}])
+
+
+MARCUS_PROMISE = "Promise: Cliff will help Marcus find his wife and daughter"
+MARGIT_HELP = "Commitment: Margit helps build the Pass-Pulse Gold Siphon without a labor fee"
+
+
+def story_known_correction(conn: sqlite3.Connection, cid: int, ledger_root, decided_by: str) -> dict:
+    """M6 (owner delegation 2026-10-26): import what the ledger marks player-known, and record the two promises it describes
+    but no quest holds. Only player-known statements and player-visible sheet text are used; GM-only beats stay GM-only."""
+    from pathlib import Path
+    from .memory.journal import player_known
+    have = {r["title"] for r in rows(conn, "SELECT title FROM quests WHERE campaign_id = ?", (cid,))}
+    if MARCUS_PROMISE in have or MARGIT_HELP in have:
+        raise ValueError("the promise records already exist; re-review")
+    facts = player_known(Path(ledger_root))
+    ops = [
+        {"op": "quest", "title": MARCUS_PROMISE, "kind": "commitment", "owner": "Cliff", "giver": "Marcus", "priority": 1,
+         "description": "Marcus's wife was at work and his daughter should have been at school when the world collapsed; finding them remains his "
+                        "major personal motivation, and Cliff promised to help find them.",
+         "progress": "Open: no concrete search step has been taken yet.",
+         "details": {"made_by": "Cliff", "made_to": "Marcus", "known_since": "before Floor 3",
+                     "source": "state/characters/marcus.yaml narrative; gm_state/characters/marcus.yaml player_observation_state.known (player-known)"}},
+        {"op": "quest", "title": MARGIT_HELP, "kind": "commitment", "giver": "Margit Winchgrinder", "priority": 2,
+         "description": "Margit accepted the party's no-strings stout and agreed to help build the Pass-Pulse Gold Siphon without a labor fee; "
+                        "the build is deferred until nightfall.",
+         "details": {"made_by": "Margit Winchgrinder", "made_to": "Cliff and the party", "terms": "no labor fee",
+                     "linked_project": "Build the Margit-assisted Pass-Pulse Gold Siphon after nightfall.",
+                     "source": "state/campaign.yaml world_state_notes; floor_3_molting_pigeon_checkpoint.pass_pulse_gold_siphon"}},
+    ]
+    evidence = [
+        {"source": "gm_state/characters/*.yaml player_observation_state.known",
+         "says": "Each GM companion sheet lists what the party has observed ('known'); the importer had filed the whole sheet as a GM secret, so these "
+                 "player-known facts were hidden. Only the 'known' lists are imported; everything else in those sheets stays GM-only."},
+        {"source": "state/campaign.yaml completed_events, known_intelligence", "says": "Player-known history (no dates recorded) and area intelligence, never imported."},
+        {"source": "state/characters/marcus.yaml narrative; gm_state/characters/marcus.yaml known",
+         "says": "'His wife was at work and his daughter should have been at school; finding them remains a major personal motivation.' "
+                 "Known: 'Cliff promised to help find them.' No quest held the promise."},
+        {"source": "state/campaign.yaml world_state_notes", "says": "Margit accepted the no-strings stout and agreed to help build the Siphon without a labor fee."},
+        {"source": "owner, 2026-10-26", "says": "'I trust you to make decisions as a proxy GM.' (M6: promises and relationships retrievable and visible when player-known)"},
+    ]
+    return apply_correction(conn, cid, subject="Player-known story records", evidence=evidence, ops=ops, decided_by=decided_by, lore=facts,
+                            decision=f"Imported {len(facts)} player-known statements (companion sheets' known lists, completed events, known "
+                                     "intelligence) and recorded Marcus's family-search promise and Margit's no-fee build help as commitments.")

@@ -74,6 +74,15 @@ export type RollCard = { roll_id: number; expression: string; dice: { sides: num
 export type Message = { id: number; turn_id: number | null; role: "player" | "gm" | "system"; content: string; created_at: string;
   meta: { rolls?: RollCard[]; changes?: string[]; rules_cited?: string[]; provider?: string; floor_clock?: FloorClock; style?: string;
     cards?: { type: string; summary: string }[] } };
+/** The quest journal (memory/journal.py): canonical quests, promises, reservations and projects with their people and places. */
+export type JournalQuest = { id: number; kind: string; status: string; priority: number; title: string; description: string | null; progress: string | null;
+  giver: string | null; details: Record<string, unknown>; immediate: boolean; holder: string | null; people: { id: number; name: string }[];
+  places: string[]; due_in_minutes: number | null; depends_on: unknown; source: string | null; updated_at: string };
+export type LoreFact = { id: number; subject: string; fact: string; certainty: string; source: string | null; category: string; topic: string | null; character_id: number | null };
+export type Chronology = { day_length: number; days: { day: number | null; events: (EventRow & { bookkeeping: boolean })[] }[];
+  imported_history: { id: number; fact: string; source: string | null }[] };
+export type SearchHit = { type: "person" | "quest" | "group" | "lore" | "history" | "item" | "event" | "story" | "record"; id?: number; key?: string;
+  title: string; snippet: string; score: number; status?: string; kind?: string; owner?: string | null; role?: string; document?: string };
 export type Manifest = { locations: Record<string, string>; characters: Record<string, string> };
 export type DiagnosticsRow = { turn_id: number; status: string; input: string; created_at: string; rounds: number; flags: number; input_tokens: number };
 export type TurnStatus = { turn_id: number; status: "processing" | "completed" | "failed"; replayed: boolean; error: string | null;
@@ -136,6 +145,10 @@ export const api = {
   quests: (id: number) => req<Quest[]>(`api/campaigns/${id}/quests`),
   npcs: (id: number) => req<Person[]>(`api/campaigns/${id}/npcs`),
   timeline: (id: number) => req<EventRow[]>(`api/campaigns/${id}/timeline`),
+  journal: (id: number) => req<{ kinds: { id: string; label: string }[]; quests: JournalQuest[] }>(`api/campaigns/${id}/journal`),
+  loreNotebook: (id: number) => req<LoreFact[]>(`api/campaigns/${id}/lore-notebook`),
+  chronology: (id: number) => req<Chronology>(`api/campaigns/${id}/chronology`),
+  search: (id: number, q: string) => req<SearchHit[]>(`api/campaigns/${id}/search?q=${encodeURIComponent(q)}`),
   messages: (id: number, before?: number) => req<Message[]>(`api/campaigns/${id}/messages${before ? `?before=${before}` : ""}`),
   houseRules: (id: number) => req<HouseRule[]>(`api/campaigns/${id}/house-rules`),
   rulings: (id: number) => req<{ id: number; topic: string; ruling: string; certainty: string; label: string; created_at: string }[]>(`api/campaigns/${id}/rulings`),
