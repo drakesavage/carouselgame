@@ -400,7 +400,7 @@ class Builder:
             if key not in EQUIPMENT_KEYS or not isinstance(entries, list):
                 continue
             for e in entries:
-                if isinstance(e, dict) and e.get("id") and not one(self.conn, "SELECT id FROM items WHERE owner_character_id = ? AND item_key = ?", (c["id"], e["id"])):
+                if isinstance(e, dict) and e.get("id") and _int(e.get("quantity")) != 0 and not one(self.conn, "SELECT id FROM items WHERE owner_character_id = ? AND item_key = ?", (c["id"], e["id"])):
                     self.warnings.append(f"{g}: '{e.get('name')}' ({key}) is no longer carried in the console; equipment lists are not edited automatically.")
 
     def shared(self) -> None:

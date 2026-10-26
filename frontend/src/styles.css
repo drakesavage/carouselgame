@@ -45,7 +45,7 @@ a { color: var(--cyan); }
 ::-webkit-scrollbar-track { background: transparent; }
 
 /* ---------- shell ---------- */
-.app { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+.app { display: grid; grid-template-rows: auto 1fr; height: 100vh; height: 100dvh; } /* dvh: the visible height on phones, where 100vh runs under the browser bars */
 .topbar {
   display: flex; align-items: center; gap: 16px; padding: 8px 16px;
   border-bottom: 1px solid var(--line); background: linear-gradient(180deg, #0c1219, #090d12);
@@ -327,6 +327,8 @@ mark { background: rgba(255, 181, 71, 0.25); color: var(--text); border-radius: 
   .combat-top .panel-body { padding: 8px 10px; }
   .topbar { flex-wrap: wrap; padding: 8px; }
   .nav { order: 3; flex-basis: 100%; }
+  .top-right { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+  .top-right .select { min-width: 0; max-width: 100%; flex: 1 1 140px; }
   .view { padding: 12px; }
   .sheet-head { grid-template-columns: 84px 1fr; }
   .statgrid { grid-template-columns: repeat(3, 1fr); }

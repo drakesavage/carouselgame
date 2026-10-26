@@ -113,6 +113,7 @@ def journal(conn: sqlite3.Connection, cid: int) -> dict:
                     "due_in_minutes": q["due_at_minutes"] - now if q.get("due_at_minutes") is not None else None,
                     "depends_on": d.get("depends_on") or d.get("requires") or d.get("timing"),
                     "source": (q.get("details") or {}).get("ledger_source")})
+    out.sort(key=lambda q: (q["status"] != "active", not q["immediate"]))  # the immediate objective leads; stable otherwise
     return {"kinds": [{"id": k, "label": label} for k, label in JOURNAL_KINDS], "quests": out}
 
 
