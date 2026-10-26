@@ -46,7 +46,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
 
 def apply_correction(conn: sqlite3.Connection, cid: int, *, subject: str, decision: str, evidence: list[dict], ops: list[dict],
                      decided_by: str, ledger_edits: list[dict] | None = None, sheet_edits: list[dict] | None = None,
-                     resolves: list[str] | None = None, position_edits: list[dict] | None = None) -> dict:
+                     resolves: list[str] | None = None, position_edits: list[dict] | None = None,
+                     rulings: list[dict] | None = None, trap_records: list[dict] | None = None) -> dict:
     if not evidence:
         raise ValueError("a correction needs evidence")
     if not decided_by.strip():
@@ -57,6 +58,13 @@ def apply_correction(conn: sqlite3.Connection, cid: int, *, subject: str, decisi
         results = [apply_change(conn, cid, None, op) for op in ops]  # validated; any failure rolls everything back
         results += [_sheet_edit(conn, cid, e) for e in sheet_edits or []]
         results += [_position_edit(conn, cid, e) for e in position_edits or []]
+        if trap_records:  # trap records (CORE 13.7), validated by the trap tool's own model
+            from .rules import traps
+            results += [traps.record(conn, cid, t["trap"], t["spec"]) for t in trap_records]
+        for r in rulings or []:  # an owner's standing ruling, found by search_rules and written back to campaign_rulings
+            conn.execute("INSERT INTO rulings (campaign_id, turn_id, topic, ruling, certainty, label, sources_json, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                         (cid, None, r["topic"], r["ruling"], "canonical", r.get("label", "CAMPAIGN"), json.dumps(r.get("sources") or []), now_iso()))
+            results.append({"summary": f"Ruling recorded ({r.get('label', 'CAMPAIGN')}): {r['topic']}"})
         cor_id = conn.execute(
             """INSERT INTO corrections (campaign_id, subject, decision, evidence_json, ops_json, results_json, ledger_edits_json, resolves_json,
                                         decided_by, save_point_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
@@ -482,3 +490,126 @@ def objective_correction(conn: sqlite3.Connection, cid: int, decided_by: str) ->
                             decision="The immediate objective is quests " + ", ".join(f"#{q['id']}" for q in found) + " in that order; the "
                                      "hand-written string stays as history. Finishing a quest drops it from the objective.",
                             evidence=evidence, ops=ops, decided_by=decided_by)
+
+
+def erin_arrows_correction(conn: sqlite3.Connection, cid: int, ledger_root, decided_by: str) -> dict:
+    """Owner decision 2026-10-25: Erin's arrows are the 15-arrow recovered cache, the only count the records support."""
+    cache = one(conn, "SELECT id, quantity FROM items WHERE campaign_id = ? AND owner_character_id IS NULL AND name = 'Recovered Arrow Cache'", (cid,))
+    if not cache or cache["quantity"] != 15:
+        raise ValueError(f"the shared Recovered Arrow Cache is {cache and cache['quantity']!r}, not the 15 this was decided against; re-review")
+    if one(conn, "SELECT 1 AS x FROM items i JOIN characters c ON c.id = i.owner_character_id WHERE c.campaign_id = ? AND c.name = 'Erin' AND i.name = 'Arrow'", (cid,)):
+        raise ValueError("Erin already has an Arrow item; re-review")
+    note = "Arrow supply: 15 arrows, the recovered Floor 2 arrow cache, assigned to Erin by owner ruling 2026-10-25."
+    sheet = _ledger_yaml(ledger_root, "state/characters/erin.yaml")
+    old = (sheet.get("equipment") or {}).get("ammunition_note")
+    edits = [{"file": "state/characters/erin.yaml", "path": ["equipment", "ammunition_note"], "expect": old, "value": note}] if old else []
+    evidence = [
+        {"source": "state/characters/erin.yaml (since DCC-DENTON-009)", "says": "'Arrow supply'; 'exact arrow count was not preserved and is not being invented'; fights record only 'all recovered'."},
+        {"source": "state/shared_inventory.yaml historical_floor_2_assets (0374b26)", "says": "Recovered Arrow Cache, quantity 15: arrows found in the marked Floor 2 treasure."},
+        {"source": "rulebooks", "says": "No default arrow supply; the pre-generated archers carry 16-20; Gilded Feathers sells 20 arrows for 10 Gold."},
+    ]
+    ops = [{"op": "remove_item", "item_id": cache["id"], "name": "Recovered Arrow Cache", "character": "shared", "quantity": 15, "cause": "becomes Erin's arrows"},
+           {"op": "add_item", "character": "Erin", "name": "Arrow", "quantity": 15, "description": "Erin's arrows: the recovered Floor 2 arrow cache (owner ruling 2026-10-25)."}]
+    return apply_correction(conn, cid, subject="Erin's arrow supply",
+                            decision="Erin's arrows are the 15-arrow recovered cache; she can buy more in play (Gilded Feathers: 20 for 10 Gold).",
+                            evidence=evidence, ops=ops, decided_by=decided_by, ledger_edits=edits)
+
+
+TRAINING_RULING = ("Paid training at a guild that teaches the Skill: +1 Rank costs 4 hours and 500 Gold (the Core Rulebook's Floor 3 guild rate, "
+                   "p. 333), within the Rank cap (skill op, source training). A shorter or cheaper paid block is safe grinding: its hours count "
+                   "as grinding hours toward the Skill's advancement check (grind tool) with no Mob or complication risk, and they count toward "
+                   "the 5-hour daily safe-grinding limit. Deathstroke Hall is a training guild for melee and nonmagical warriors (p. 340).")
+
+
+def training_ruling(conn: sqlite3.Connection, cid: int, decided_by: str) -> dict:
+    """Owner decision 2026-10-25: how paid training works."""
+    if one(conn, "SELECT 1 AS x FROM rulings WHERE campaign_id = ? AND topic = 'Paid training at guilds'", (cid,)):
+        raise ValueError("the paid-training ruling is already recorded")
+    evidence = [
+        {"source": "Core Rulebook p. 340", "says": "'Deathstroke Hall is a training guild for all manner of melee and nonmagical warriors to gather and train their skills.'"},
+        {"source": "Core Rulebook p. 333 (Table 76, Third Floor)", "says": "a guild: 'four hours training and haggling and 500 gold' gains or advances one Rank."},
+        {"source": "CORE_MECHANICS 14.6", "says": "Up to 5 grinding hours per 30-hour day are safe; grinding hours equal to the Skill's Rank trigger its advancement check."},
+        {"source": "playtest 2, turn 8", "says": "The GM ruled a 2-hour, 40-Gold block as 2 grinding hours (ONE-SCENE); the owner made it standing."},
+    ]
+    return apply_correction(conn, cid, subject="Paid training at guilds", decision=TRAINING_RULING, evidence=evidence, ops=[],
+                            decided_by=decided_by, rulings=[{"topic": "Paid training at guilds", "ruling": TRAINING_RULING, "label": "CAMPAIGN",
+                                                             "sources": ["Core Rulebook pp. 333, 340", "CORE_MECHANICS 14.6"]}])
+
+
+SOURCE = "owner ruling 2026-10-25 (docs/trap-records-draft.md, approved as written)"
+LEDGER = "from the ledger build record (state/shared_inventory.yaml murder-drum-battery)"
+STAKES = {"item": "Recovered Trap Stake Cache", "per_trigger": 1}
+TRAP_RECORDS = [
+    {"trap": "Snap-Deploy Stake Thrower", "spec": {
+        "components": "spring-loaded stake launcher (two loose units)", "ammunition": STAKES, "deploy": {"actions": 1, "minutes": 10},
+        "trigger": "tripline or remote pull", "area": "one 30-ft lane", "check": {"kind": "attack", "attack_bonus": 10},
+        "damage": "1d8 Piercing", "effects": None, "reset": {"actions": 1, "minutes": 1}, "reset_notes": "reload one stake",
+        "bulk": "Small", "label": "CAMPAIGN", "source": SOURCE}},
+    {"trap": "Porcupine Pod", "spec": {
+        "components": "spring pod with one paralytic dart", "ammunition": {"item": "Paralytic Dart", "per_trigger": 1},
+        "deploy": {"actions": 1, "minutes": 10}, "trigger": "pressure plate", "area": "one 5-ft square",
+        "check": {"kind": "attack", "attack_bonus": 10}, "damage": "1d4 Piercing",
+        "effects": "on a hit the target makes a CON Stat Check vs 13 (10 + Floor) or is Paralyzed until it succeeds at the end of a later round",
+        "reset": {"actions": 2, "minutes": 5}, "reset_notes": "load a dart and re-cock the spring", "bulk": "Small", "label": "CAMPAIGN", "source": SOURCE}},
+    {"trap": "Scatterburst Trap", "spec": {
+        "components": "tripwire shrapnel charge (two units)", "ammunition": {"item": "Miscellaneous Junk", "per_trigger": 1},
+        "deploy": {"actions": 1, "minutes": 10}, "trigger": "tripwire", "area": "10-ft burst (Area: a successful Evade halves)",
+        "check": {"kind": "attack", "attack_bonus": 10}, "damage": "2d6 Piercing", "effects": "Area Attack: a target that Evades takes half",
+        "reset": {"actions": 0, "minutes": 10}, "reset_notes": "repack shrapnel: 1 Misc. Junk per firing", "bulk": "Small", "label": "CAMPAIGN", "source": SOURCE}},
+    {"trap": "Cinch Trap", "spec": {
+        "components": "ground snare loop", "ammunition": None, "deploy": {"actions": 1, "minutes": 10}, "trigger": "a foot in the loop",
+        "area": "one 5-ft square", "check": {"kind": "attack", "attack_bonus": 10}, "damage": None,
+        "effects": "Held (a limb snared) until the target escapes with Escape Artist or a STR Stat Check vs 16 as an Action",
+        "reset": {"actions": 1, "minutes": 1}, "reset_notes": "re-lay the loop", "bulk": "Tiny", "label": "CAMPAIGN", "source": SOURCE}},
+    {"trap": "Snapweb Bloom", "spec": {
+        "components": "spring-deployed cable web (two units)", "ammunition": None, "deploy": {"actions": 1, "minutes": 1},
+        "trigger": "thrown or spring-deployed across an opening", "area": "one 10-ft opening", "check": {"kind": "none"}, "damage": None,
+        "effects": "a creature crossing must succeed on Escape Artist or a STR Stat Check vs 16 or its movement stops there; a Major Fail "
+                   "leaves it Held (it does not Hold automatically)",
+        "reset": {"actions": 0, "minutes": 5}, "reset_notes": "re-tension the web", "bulk": "Small", "label": "CAMPAIGN", "source": SOURCE}},
+    {"trap": "Caltrop/Wedge Bundle", "spec": {
+        "components": "caltrops and wedges (two bundles)", "ammunition": None, "deploy": {"actions": 1, "minutes": 1},
+        "trigger": "scattered on the ground", "area": "one 10-ft area", "check": {"kind": "none"}, "damage": None,
+        "effects": "ground creatures entering at more than half Move take 1d4 Piercing and their Move is halved this round",
+        "reset": {"actions": 0, "minutes": 10}, "reset_notes": "gather them up", "bulk": "Tiny", "label": "CAMPAIGN", "source": SOURCE}},
+    {"trap": "Mechanical Trip Alarm", "spec": {
+        "components": "tripwire noisemaker (two units)", "ammunition": None, "deploy": {"actions": 1, "minutes": 5},
+        "trigger": "tripwire", "area": "one doorway or lane", "check": {"kind": "none"}, "damage": None,
+        "effects": "a loud alarm the party hears; no damage", "reset": {"actions": 1, "minutes": 1}, "reset_notes": "re-string the wire",
+        "bulk": "Tiny", "label": "CAMPAIGN", "source": SOURCE}},
+    {"trap": "Accordion Barricade", "spec": {
+        "components": "repaired folding wall", "ammunition": None, "deploy": {"actions": 2, "minutes": 5}, "trigger": "set across a lane",
+        "area": "one 10-ft lane", "check": {"kind": "none"}, "damage": None,
+        "effects": "cover behind it (Core Rulebook cover rules); to pass, a creature climbs it (Climbing vs 16) or breaks it (the GM sets its "
+                   "sturdiness when it first matters, and records it)",
+        "reset": {"actions": 0, "minutes": 5}, "reset_notes": "fold it back", "bulk": "Medium", "label": "CAMPAIGN", "source": SOURCE}},
+    {"trap": "Murder Drum Stake Battery Mk II", "spec": {
+        "components": "Crib Daddy's damage-immune drum-kit chassis, three mounted Snap-Deploy Stake Throwers, forward Anti-Air Net Launcher "
+                      "(Selina's Net loaded), Skyhook Harpoon, Kill-Lane Wings", "ammunition": STAKES, "deploy": {"actions": 1, "minutes": 10},
+        "trigger": "Cliff's prepared Portable Trap package; quick deployment places the drum (it does not fire the Skyhook or the Wings)",
+        "area": "spread: three approach lanes; converged: one kill zone", "check": {"kind": "attack", "attack_bonus": 10}, "damage": "1d8 Piercing",
+        "effects": "Volley: trigger once per mounted stake thrower (3), one stake each. Anti-Air Net Launcher: attack +10, on a hit the target is "
+                   "Held under Selina's Net. Skyhook Harpoon (" + LEDGER + "): an Action, operator's Crossbow + DEX (Cliff +10), range 40 ft, 1d6 "
+                   "Piercing, on a hit Tethered; a later Action, Engineering (INT) opposed by the target's STR, winches it 10 ft closer; a grounded "
+                   "flyer can become Held; rewind 1 Action. Kill-Lane Wings (" + LEDGER + "): from a deployed drum, 1 Action fires and tensions two "
+                   "cable fences up to 30 ft on suitable anchors; no damage; a creature crossing must defeat it (Escape Artist or STR), on a Fail its "
+                   "movement stops, a bad failure may leave it Held; very strong or large creatures may break anchors.",
+        "reset": {"actions": 1, "minutes": 5}, "reset_notes": "reload: 1 Action per mounted thrower", "bulk": "Large", "label": "CAMPAIGN", "source": SOURCE}},
+]
+
+
+def trap_records_correction(conn: sqlite3.Connection, cid: int, decided_by: str) -> dict:
+    """Owner approval 2026-10-25: the drafted trap records (docs/trap-records-draft.md) as written."""
+    for t in TRAP_RECORDS:
+        it = one(conn, "SELECT properties_json FROM items WHERE campaign_id = ? AND owner_character_id IS NULL AND name = ?", (cid, t["trap"]))
+        if not it:
+            raise ValueError(f"no shared {t['trap']!r}; re-review")
+        if (it.get("properties") or {}).get("trap"):
+            raise ValueError(f"{t['trap']} already has a trap record; re-review")
+    evidence = [
+        {"source": "state/shared_inventory.yaml deployed_assets (since DCC-DENTON-009)", "says": "the traps are recorded by name and 'ready' only; no trigger, Check, damage or reset."},
+        {"source": "state/shared_inventory.yaml murder-drum-battery", "says": "full build records for the Skyhook Harpoon and the Kill-Lane Wings (copied as written)."},
+        {"source": "docs/trap-records-draft.md", "says": "the drafted records, anchored on Difficulty 10 + 2 x Floor, a +10 trap attack and the published weapon dice; approved as written."},
+    ]
+    return apply_correction(conn, cid, subject="Trap records", decision="The party's traps get the approved records (CORE 13.7): deployable, locked while deployed.",
+                            evidence=evidence, ops=[], decided_by=decided_by, trap_records=TRAP_RECORDS)

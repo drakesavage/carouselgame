@@ -21,7 +21,7 @@ Generated from `backend/app/rules/coverage.py` (`python -m app.rules.coverage`);
 - **§10.2 Surprise** (implemented, untested): no test of either surprise case
 - **§10.7 Evade and Interrupts** (partly implemented): Taunt (INT-Opposed redirect) and the Healing Interrupt are not tools
 - **§12.3 Looting and salvage** (GM ruling): no salvage step and no 'looted or salvaged once' guard
-- **§13.7 Traps** (partly implemented): trap condition is not written back to the ledger yet, and the party's existing traps have no records until the owner rules them
+- **§13.7 Traps** (partly implemented): trap records and condition are not written back to the ledger yet (the party's nine traps have approved records in the console, correction #13)
 - **§14.2 Level awards** (partly implemented): award sizes (Quest >= 1; Boss tiers 1-6) are not checked
 
 ### P3 (12)
@@ -125,7 +125,7 @@ Generated from `backend/app/rules/coverage.py` (`python -m app.rules.coverage`);
 | 13.4 | Legacy System-recognized equipment | GM ruling | grandfathered gear keeps its recorded effect on the sheet |  |  |  |
 | 13.5 | Failure and salvage | implemented and tested | craft consumes materials on the attempt; Failure salvages by margin (Table 47: 1-2 all, 3-9 half, 10+ none) | `test_failed_crafting_consumes_then_salvages_by_margin_and_nothing_is_spent_when_short` |  |  |
 | 13.6 | Assistance | implemented and tested | the lead crafter makes the one Check, with Help dice from assistants; a project's lead is enforced | `test_gold_siphon_is_built_from_its_declared_design` |  |  |
-| 13.7 | Traps | partly implemented | trap tool: a full record (components, ammunition, deploy cost, trigger, area, Check, damage, effects, reset, bulk) is required before deployment and locked while deployed; deploy/trigger/reset/stow spend Actions in combat or time, and ammunition per trigger | `test_traps_need_a_record_lock_while_deployed_and_spend_real_costs` | trap condition is not written back to the ledger yet, and the party's existing traps have no records until the owner rules them | P2 |
+| 13.7 | Traps | partly implemented | trap tool: a full record (components, ammunition, deploy cost, trigger, area, Check, damage, effects, reset, bulk) is required before deployment and locked while deployed; deploy/trigger/reset/stow spend Actions in combat or time, and ammunition per trigger | `test_traps_need_a_record_lock_while_deployed_and_spend_real_costs` | trap records and condition are not written back to the ledger yet (the party's nine traps have approved records in the console, correction #13) | P2 |
 | 14.1 | No experience-point total | reference only | there is no XP pool by design |  |  |  |
 | 14.2 | Level awards | partly implemented | level op records source (quest, boss, grind, crawler kill) | `test_level_award_banks_stat_points_and_resets_grind_progress` | award sizes (Quest >= 1; Boss tiers 1-6) are not checked | P2 |
 | 14.3 | Correspondence-play advancement checkpoints | implemented and tested | count_cycle with server-side eligibility (no recaps, bookkeeping, travel or rest turns; one per turn; one per combat), audited; checkpoint at 12 leaves an explicit Level-up task; overflow carries | `test_advancement_checkpoint`, `test_checkpoint_not_due_is_rejected`, `test_advancement_cycles_need_a_consequential_decision_and_one_combat_earns_one` |  |  |

@@ -830,3 +830,51 @@ def test_explicit_save_creates_a_save_point_and_a_checkpoint_leaves_level_up_wor
         resolve_advancement_checkpoint(conn, conn, DiceRoller(), denton, None, "test checkpoint")
     q = one(conn, "SELECT status, details_json FROM quests WHERE campaign_id = ? AND title = 'Level-up benefits: test checkpoint'", (denton,))
     assert q["status"] == "active" and q["details"]["crawlers"]
+
+
+def test_erin_fires_her_arrows_and_the_training_ruling_is_found_and_written_back(conn, denton):
+    from app.ledger import sync
+    from app.reconcile import erin_arrows_correction, floor_2_assets_correction, training_ruling
+    from app.rules.combat import Combat, StartCombat, StatBlock
+    from app.rules.dice import DiceRoller
+    from tests.conftest import scripted
+    root = sync.link(conn, denton)["root"]
+    floor_2_assets_correction(conn, denton, root, decided_by="owner (test)")   # puts the 15-arrow cache in the shared stash, as live
+    erin_arrows_correction(conn, denton, root, decided_by="owner (test)")
+    arrows = lambda: one(conn, "SELECT i.quantity FROM items i JOIN characters c ON c.id = i.owner_character_id WHERE c.campaign_id = ? AND c.name = 'Erin' AND i.name = 'Arrow'", (denton,))["quantity"]
+    assert arrows() == 15 and not one(conn, "SELECT 1 FROM items WHERE campaign_id = ? AND name = 'Recovered Arrow Cache' AND quantity > 0", (denton,))
+    Combat(conn, denton, None, DiceRoller(source=scripted([1]))).start(StartCombat(name="t", party=["Erin", "Cliff"], setup="t", foes=[StatBlock(name="Rat", health_bar=[1], evade=5)]))
+    Combat(conn, denton, None, DiceRoller()).declare([])
+    Combat(conn, denton, None, DiceRoller(source=scripted([1]))).resolve()
+    Combat(conn, denton, None, DiceRoller(source=scripted([15, 3]))).attack("Erin", "Rat", attack="Shortbow", stat="dexterity")   # her sheet's "Arrow supply"
+    assert arrows() == 14
+    Combat(conn, denton, None, DiceRoller()).end("done")
+    training_ruling(conn, denton, decided_by="owner (test)")
+    from app.gm.tools import ToolRunner
+    found = ToolRunner(conn, None, DiceRoller(), denton, 0).run("search_rules", {"queries": ["paid training guild Rank cost"]})
+    assert found["ok"] and "500 Gold" in json.dumps(found["result"])
+    pv = sync.preview(conn, denton, fetch=False)
+    assert pv["blockers"] == [] and all(c["status"] == "clean" for c in pv["changes"])
+    assert any(c["summary"].startswith("Ruling: Paid training") for c in pv["changes"])
+    assert any("ammunition_note" in json.dumps(c) or "Correction" in c["summary"] for c in pv["changes"] if c["file"] == "state/characters/erin.yaml")
+
+
+def test_approved_trap_records_make_the_traps_deployable(conn, denton):
+    from app.ledger import sync
+    from app.reconcile import floor_2_assets_correction, trap_records_correction
+    from app.rules import traps
+    from app.rules.dice import DiceRoller
+    from tests.conftest import scripted
+    floor_2_assets_correction(conn, denton, sync.link(conn, denton)["root"], decided_by="owner (test)")   # the stake cache, as live
+    trap_records_correction(conn, denton, decided_by="owner (test)")
+    st = {t["name"]: t for t in traps.status(conn, denton)}
+    for name in ("Cinch Trap", "Scatterburst Trap", "Snap-Deploy Stake Thrower", "Porcupine Pod", "Accordion Barricade", "Murder Drum Stake Battery Mk II"):
+        assert st[name]["recorded"] and st[name]["condition"] == "ready", name
+    stakes = lambda: one(conn, "SELECT quantity FROM items WHERE campaign_id = ? AND name = 'Recovered Trap Stake Cache'", (denton,))["quantity"]
+    s0 = stakes()
+    with transaction(conn):
+        traps.deploy(conn, DiceRoller(), denton, None, "Snap-Deploy Stake Thrower", "the alley mouth")
+        out = traps.trigger(conn, DiceRoller(source=scripted([15, 5])), denton, None, "Snap-Deploy Stake Thrower", "a Brain Boiler", target_number=16)
+    assert out["hit"] and stakes() == s0 - 1 and "Damage 1d8 Piercing" in out["summary"]
+    with pytest.raises(ValueError, match="already has a trap record"):
+        trap_records_correction(conn, denton, decided_by="owner (test)")

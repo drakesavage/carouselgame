@@ -6,7 +6,7 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 |---|---|---|---|---|---|---|---|
 | M0 Safe upgrade workflow | P0 | Done | none | 385d7dd | 155 backend; typecheck/build; isolation probe PASS | Settings passcode masked | ledger behind by 2 (see below) |
 | M1 Canonical-state reconciliation | P0 | Exit gate met | M0 | (pending) | 166 backend; consistency 21/21 | HUD roster + objectives | 7 uncounted-gear items stay open for owner counts; 44 house rules move to M2/M7 |
-| M2 Mechanics reliability & GM gates | P0 | In progress | M1 | | 185 backend | n/a | M2.1 fixes done; playtest 2 met the state-integrity gate; owner rulings pending (arrows, training, traps) |
+| M2 Mechanics reliability & GM gates | P0 | In progress | M1 | | 187 backend | n/a | M2.1 done; owner rulings applied (arrows, training, trap records) |
 | M3 Main story HUD | P1 | Backlog | M1 underway | | | | |
 | M4 Characters, party, people | P1 | Backlog | M3 | | | | |
 | M5 Inventory, crafting, economy | P1 | Backlog | M3 | | | | |
@@ -252,3 +252,14 @@ offers no longer flagged; a sheet's named ammunition cannot be swapped without a
 is reported plainly. Playtest 2 (`docs/playtests/M2-playtest-2.md`, 30 turns including inventive non-linear play,
 save/load and restarts): zero unexplained changes to Gold, items, ammunition, HP, Mana, location, time, cycles or
 Levels, and no fabricated canonical outcomes. Pending owner rulings: Erin's arrows, paid training, trap records.
+
+**Owner rulings (2026-10-25).** Erin's arrows: the 15-arrow recovered cache becomes her supply (correction #11, save
+point #23); her bow now fires from it. Paid training (correction #12, save point #24, a CAMPAIGN ruling found by
+search_rules and written back to campaign_rulings): +1 Rank costs 4 hours and 500 Gold at a guild that teaches the
+Skill (Core Rulebook p. 333, within the Rank cap); a shorter paid block counts as safe grinding hours within the 5-hour
+daily limit. Trap records: the Skyhook Harpoon and Kill-Lane Wings come from the ledger; the other traps are drafted
+in `docs/trap-records-draft.md` for the owner's approval. Pending ledger write-back: 77 clean changes.
+
+**Trap records approved** as drafted and applied as correction #13 (save point #25): all nine traps are now deployable
+under CORE 13.7; out of combat a trap's attack takes the target's Evade (`target_number`). Records and condition live in
+the console; writing them back to the ledger is the remaining P2 gap.

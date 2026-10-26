@@ -159,7 +159,7 @@ TOOL_SPECS.extend([
                     "armed, spending its deploy cost (Actions in combat, else time). action trigger (trap, target, operator?): its Check and "
                     "damage, ammunition spent. action reset (trap, by). action stow (trap). action status: every trap's record and condition.",
      "parameters": {"action": "record|deploy|trigger|reset|stow|status", "trap": "str?", "spec": "object?", "location": "str?", "by": "str?",
-                    "target": "str?", "operator": "str?", "advantage": "int?"}},
+                    "target": "str?", "operator": "str?", "advantage": "int?", "target_number": "int? (the target's Evade outside combat)"}},
     {"name": "save_game",
      "description": "The player asked to save: creates a named manual save point when this turn commits (restore it from Saves & Settings).",
      "parameters": {"label": "str"}},
@@ -317,7 +317,8 @@ class ToolRunner:
                 out = traps.deploy(self.conn, self.roller, self.cid, self.turn_id, str(a["trap"]), str(a.get("location") or ""), a.get("by"))
             elif act == "trigger":
                 out = traps.trigger(self.conn, self.roller, self.cid, self.turn_id, str(a["trap"]), str(a.get("target") or ""),
-                                    a.get("operator"), int(a.get("advantage") or 0))
+                                    a.get("operator"), int(a.get("advantage") or 0),
+                                    int(a["target_number"]) if a.get("target_number") is not None else None)
             elif act == "reset":
                 out = traps.reset(self.conn, self.roller, self.cid, self.turn_id, str(a["trap"]), a.get("by"))
             else:

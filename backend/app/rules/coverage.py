@@ -142,8 +142,8 @@ MATRIX: dict[str, dict] = {
     "13.7": R("partial", "trap tool: a full record (components, ammunition, deploy cost, trigger, area, Check, damage, effects, reset, bulk) "
               "is required before deployment and locked while deployed; deploy/trigger/reset/stow spend Actions in combat or time, and "
               "ammunition per trigger", ("test_traps_need_a_record_lock_while_deployed_and_spend_real_costs",),
-              gap="trap condition is not written back to the ledger yet, and the party's existing traps have no records until the owner "
-                  "rules them", priority="P2"),
+              gap="trap records and condition are not written back to the ledger yet (the party's nine traps have approved records in "
+                  "the console, correction #13)", priority="P2"),
     "14.1": R("reference", "there is no XP pool by design"),
     "14.2": R("partial", "level op records source (quest, boss, grind, crawler kill)", ("test_level_award_banks_stat_points_and_resets_grind_progress",),
               gap="award sizes (Quest >= 1; Boss tiers 1-6) are not checked", priority="P2"),

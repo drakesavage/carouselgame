@@ -134,7 +134,8 @@ def deploy(conn, roller, cid, turn_id, trap: str, location: str, by: str | None 
     return {"summary": "; ".join(lines + [f"{it['name']} armed at {location} (trigger: {spec.trigger}; area: {spec.area})"]), "lines": lines}
 
 
-def trigger(conn, roller, cid, turn_id, trap: str, target: str, operator: str | None = None, advantage: int = 0) -> dict:
+def trigger(conn, roller, cid, turn_id, trap: str, target: str, operator: str | None = None, advantage: int = 0,
+            target_number: int | None = None) -> dict:
     from .combat import Combat, _find, _state, active_encounter
     it = _trap(conn, cid, trap)
     spec, props = _spec(it)
@@ -162,9 +163,9 @@ def trigger(conn, roller, cid, turn_id, trap: str, target: str, operator: str | 
             if mod is None:
                 raise ChangeError(f"{op['name']} has no recorded {stat} modifier")
             bonus, who = int(rank) + int(mod), op["name"]
-        target_no = mob["evade"] if mob else c.dc
+        target_no = mob["evade"] if mob else (target_number if target_number is not None else c.dc)
         if target_no is None:
-            raise ChangeError("outside combat, an attack trap needs the target number (the record's dc)")
+            raise ChangeError("outside combat, give target_number: the target's Evade (a Mob's default is 10 + DEX Mod + Floor)")
         d20 = "2d20kh1" if advantage > 0 else "1d20"
         r = roller.roll(f"{d20}+{bonus}", target=target_no, reason=f"{it['name']} triggers on {target}")
         nat = next(d.value for d in r.dice if d.kept)
