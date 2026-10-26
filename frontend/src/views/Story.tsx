@@ -31,7 +31,9 @@ const COMBAT_QUICK = [
   { icon: BookOpen, label: "Rules question", text: "Rules question (no in-world action): " },
 ];
 
-type Pending = { key: string; text: string; turnId?: number; status: "sending" | "processing" | "failed"; progress?: TurnStatus["progress"]; error?: string };
+type Pending = { key: string; text: string; turnId?: number; status: "sending" | "processing" | "failed"; progress?: TurnStatus["progress"]; error?: string; unreachable?: boolean };
+// the request never reached the game: a proxy with nothing behind it (502/503/504) or no network at all
+const unreachable = (e: unknown) => (e instanceof ApiError && [502, 503, 504].includes(e.status)) || e instanceof TypeError;
 
 const PAGE = 80;  // the server's default page of messages
 
@@ -147,7 +149,7 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
       else if (t.status === "failed") setPending({ key, text, turnId: t.turn_id, status: "failed", error: t.error ?? "failed" });
       else { setDraft(""); setPending({ key, text, turnId: t.turn_id, status: "processing", progress: t.progress }); }
     } catch (e) {
-      setPending({ key, text, status: "failed", error: e instanceof ApiError ? e.message : String(e) });
+      setPending({ key, text, status: "failed", error: e instanceof ApiError ? e.message : String(e), unreachable: unreachable(e) });
     }
   };
 
@@ -177,9 +179,12 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
                 {pending.text && <PlayerLine pc={pc} text={pending.text} />}
                 {pending.status === "failed" ? (
                   <div className="error-box">
-                    <div className="row"><AlertTriangle size={16} color="var(--red)" /><b>The GM couldn't finish that turn.</b></div>
+                    <div className="row"><AlertTriangle size={16} color="var(--red)" />
+                      <b>{pending.unreachable ? "The game server didn't answer." : "The GM couldn't finish that turn."}</b></div>
                     <div className="mono" style={{ margin: "6px 0 10px", whiteSpace: "pre-wrap", fontSize: 12 }}>{pending.error}</div>
-                    <div className="sub" style={{ marginBottom: 8 }}>Nothing was applied to the game state. Dice already rolled stay in the audit log.</div>
+                    <div className="sub" style={{ marginBottom: 8 }}>{pending.unreachable
+                      ? "Your turn never reached the game, so nothing happened. Check that the server is running on the game PC (start.cmd), then Retry."
+                      : "Nothing was applied to the game state. Dice already rolled stay in the audit log."}</div>
                     <div className="row">
                       {pending.text && <button className="btn" onClick={() => send(pending.text, pending.key)}><RotateCcw size={14} /> Retry</button>}
                       <button className="btn ghost" onClick={() => { setDraft(pending.text); setPending(null); textarea.current?.focus(); }}>Edit &amp; resend</button>
