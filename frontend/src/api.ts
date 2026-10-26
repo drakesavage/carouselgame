@@ -21,6 +21,18 @@ export type Person = CharacterCard & {
 };
 export type Skill = { id: number; kind: string; name: string; rank: number | null; mana_cost: number | null; passive: number; marked: number; description?: string | null; properties: Record<string, unknown> };
 export type Item = { id: number; owner_character_id: number | null; owner_name?: string | null; name: string; quantity: number | null; equipped: number; deployed?: number; slot?: string | null; rarity?: string | null; description?: string | null; properties: Record<string, unknown> };
+/** Inventory view of an item (memory/inventory.py): category, honest quantity, invention stage. */
+export type InvItem = Item & { category: string; quantity_state: "exact" | "unknown"; quantity_note: string | null; status: string | null;
+  invention: boolean; stage: Stage | null; storage: string | null; attached_to: string | null };
+export type Stage = "planned" | "designed" | "in_progress" | "finished" | "installed";
+export type Inventory = {
+  shared: InvItem[]; by_character: InvItem[];
+  gold: { amount: number | null; item_id: number | null; committed: number; history: { id: number; summary: string; delta: number | null; game_time_minutes: number | null }[] };
+  reservations: { quest_id: number; item: string; payment: string | null; paid_gold: number | null; held_by: string | null; claim: string | null; owned: boolean; note: string | null }[];
+  projects: { quest_id: number; title: string; stage: Stage; status_text: string | null; build_time: string | null; difficulty: number | null; lead: string | null;
+    assistant: string | null; linked_items: { id: number; name: string; owner: string | null }[]; materials: { material: string; need: number; have: number | null; enough: boolean }[] }[];
+  materials: { id: number; name: string; quantity: number | null; owner: string | null }[];
+};
 export type CharacterSheet = CharacterCard & {
   bio?: string | null; sheet: Record<string, unknown>; skills: Skill[]; items: Item[];
   achievements: { title: string; description?: string; game_time_minutes?: number }[];
@@ -120,7 +132,7 @@ export const api = {
   dossier: (id: number, cid: number) => req<Record<string, unknown>>(`api/campaigns/${id}/characters/${cid}/dossier`),
   explainAbilities: (id: number) => req<{ state: string; progress?: string; error?: string }>(`api/campaigns/${id}/abilities/explain`, { method: "POST" }),
   explainStatus: (id: number) => req<{ state: string; progress?: string; error?: string }>(`api/campaigns/${id}/abilities/explain`),
-  inventory: (id: number) => req<{ shared: Item[]; by_character: Item[] }>(`api/campaigns/${id}/inventory`),
+  inventory: (id: number) => req<Inventory>(`api/campaigns/${id}/inventory`),
   quests: (id: number) => req<Quest[]>(`api/campaigns/${id}/quests`),
   npcs: (id: number) => req<Person[]>(`api/campaigns/${id}/npcs`),
   timeline: (id: number) => req<EventRow[]>(`api/campaigns/${id}/timeline`),

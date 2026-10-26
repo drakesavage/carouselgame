@@ -121,12 +121,9 @@ def character_sheet(conn: sqlite3.Connection, cid: int, char_id: int) -> dict | 
 
 
 def inventory(conn: sqlite3.Connection, cid: int) -> dict:
-    items = rows(conn, """SELECT i.id, i.owner_character_id, c.name AS owner_name, i.name, i.quantity, i.equipped, i.deployed, i.slot,
-                                 i.rarity, i.description, i.properties_json
-                          FROM items i LEFT JOIN characters c ON c.id = i.owner_character_id
-                          WHERE i.campaign_id = ? ORDER BY i.owner_character_id IS NOT NULL, c.name, i.equipped DESC, i.name""", (cid,))
-    return {"shared": [i for i in items if i["owner_character_id"] is None],
-            "by_character": [i for i in items if i["owner_character_id"] is not None]}
+    """Items with category, honest quantity and stage, plus Gold, reservations, projects and materials (memory/inventory.py)."""
+    from .inventory import build
+    return build(conn, cid)
 
 
 def quests(conn: sqlite3.Connection, cid: int) -> list[dict]:

@@ -8,8 +8,8 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 | M1 Canonical-state reconciliation | P0 | Exit gate met | M0 | (pending) | 166 backend; consistency 21/21 | HUD roster + objectives | 7 uncounted-gear items stay open for owner counts; 44 house rules move to M2/M7 |
 | M2 Mechanics reliability & GM gates | P0 | Done | M1 | 4933fed | 187 backend; playtest 2 gate met; isolation probe PASS | n/a | P2 gaps in docs/RULES_COVERAGE.md |
 | M3 Main story HUD | P1 | Done | M2 | 82fc1b7 | 187 backend; typecheck/build | live campaign at 1440/1100/375 px; 100-message disposable transcript; owner accepted the gate for this pass | journal "now" chip lacks the immediate flag; phone height gap |
-| M4 Characters, party, people | P1 | Built, owner review | M3 | (pending) | 188 backend (people payload + GM-leak test); typecheck/build | live People, Characters, Driscoll dossier at 1440 and 768 px | no console interactions recorded yet, so "last interaction" is mostly empty; truncated promise title (M6) |
-| M5 Inventory, crafting, economy | P1 | Backlog | M3 | | | | |
+| M4 Characters, party, people | P1 | Done | M3 | d8ebe50 (+ f6b7198 ability explanations) | 188 backend (people payload + GM-leak test); typecheck/build | live People, Characters, Driscoll dossier at 1440 and 768 px | no console interactions recorded yet, so "last interaction" is mostly empty; truncated promise title (M6) |
+| M5 Inventory, crafting, economy | P1 | Done | M4 | (this commit) | 195 backend (counts/stages/materials, reserved-gear guard, uncounted ruling); typecheck/build | live inventory grid, list, filters, expanded items at 1440 px | inventory stays read-only (changes go through GM ops); categories are name-based; correction #14 (no uncounted items remain) not yet written back to the ledger |
 | M6 Quests, memory, timeline | P1 | Backlog | M3 | | | | |
 | M7 Rules center | P1 | Backlog | M2 | | | | |
 | M8 World visuals | P2 | Backlog | M3–M6 verified | | | | |

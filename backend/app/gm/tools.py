@@ -37,7 +37,8 @@ TOOL_SPECS: list[dict] = [
                     "name, slug, numeric id or 'player'; items by name or item_id. character null/'shared' = shared stash. "
                     "Use skill/level/ai_favor for training and awards, group/move_group/move_character for party splits (never teleport "
                     "people: only move who actually goes), scene to keep the current scene current, remember for NPC memories and private "
-                    "beats, quest kind commitment/reservation for promises and held items (a reservation is never an owned item), "
+                    "beats, quest kind commitment/reservation for promises and held items (a reservation is never an owned item: when it is "
+                    "claimed, complete the reservation quest earlier in the same batch, then add_item), "
                     "use_ability for limited uses, rest in saferooms (a rest advances the clock itself: never also advance_time for it), advance_time mending for calm hours. Scene fields, quest details, groups "
                     "and remember(visibility player) are SHOWN TO THE PLAYER: put hidden material only in gm_note or remember(visibility gm). Ops:\n" + ops_reference(),
      "parameters": {"changes": "[change objects]"}},

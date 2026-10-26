@@ -413,10 +413,16 @@ class Builder:
         want, new = self._group_items("owner_character_id IS NULL", (), all_entries)
         for k in ("items", "deployed_assets"):
             self._sync_list(f, k, sections[k], want, "Shared stash", "")
-        for e in sections["unquantified_items"]:
-            q = want.get(e.get("id"))
-            if q is not None:
-                self.warnings.append(f"Shared '{e.get('name')}' now has a count ({q}) in the console; unquantified_items entries have no quantity field, so update it manually.")
+        # an unquantified entry that now has a count (a ruling or a set_quantity) moves to the counted items list
+        counted = [e for e in sections["unquantified_items"] if want.get(e.get("id")) is not None]
+        for e in counted:
+            desc = one(self.conn, "SELECT description FROM items WHERE campaign_id = ? AND owner_character_id IS NULL AND lower(name) = lower(?)",
+                       (self.cid, e.get("name", "")))
+            entry = {**{k: v for k, v in e.items() if k != "note"}, "quantity": want[e["id"]], "note": (desc or {}).get("description") or e.get("note")}
+            self.append(f, ["items"], entry, f"{e.get('name')} now counted: {want[e['id']]}", "Shared stash")
+        if counted:
+            keep = [e for e in sections["unquantified_items"] if e not in counted]
+            self.set(f, ["unquantified_items"], keep, f"{len(counted)} item(s) leave the unquantified list", "Shared stash")
         taken = {e.get("id") for e in all_entries}
         for n in new.values():
             if n["quantity"] == 0:

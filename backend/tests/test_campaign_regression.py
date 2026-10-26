@@ -144,6 +144,59 @@ def test_npc_relationship_evolves_without_losing_personality(conn, denton):
     assert "kite reel" in build_context(conn, denton, "I ask Margit about the siphon cables")["text"]
 
 
+def test_inventory_is_honest_about_counts_stages_reservations_and_materials(client, conn, denton):
+    inv = client.get(f"/api/campaigns/{denton}/inventory").json()
+    items = inv["shared"] + inv["by_character"]
+    assert all(i["category"] and i["quantity_state"] in ("exact", "unknown") for i in items)
+    # unknown stays unknown: no count is filled in for display
+    unknown = [i for i in items if i["quantity_state"] == "unknown"]
+    assert unknown and all(i["quantity"] is None for i in unknown)
+    drum = next(i for i in items if i["name"].startswith("Murder Drum Stake Battery"))
+    assert drum["invention"] and drum["stage"] == "finished" and drum["category"] == "trap"
+    # a designed invention is a project, never an item: the Siphon shows its stage and what it still needs
+    siphon = next(p for p in inv["projects"] if "Siphon" in p["title"])
+    assert siphon["stage"] == "designed" and not any("Pass-Pulse" in i["name"] for i in items)
+    junk = next(m for m in siphon["materials"] if "Junk" in m["material"])
+    assert junk["need"] == 8 and junk["have"] >= 8 and junk["enough"]
+    assert any(i["name"] == "Gold Siphon Assembly" for i in siphon["linked_items"])
+    assert inv["gold"]["amount"] == next(i["quantity"] for i in items if i["name"] == "Gold" and i["owner_character_id"] is None)
+
+
+def test_uncounted_items_ruling_counts_everything_and_writes_back(conn, denton, tmp_path):
+    from app import reconcile
+    from app.ledger import sync
+    root = Path(one(conn, "SELECT source_path FROM import_reports WHERE campaign_id = ?", (denton,))["source_path"])
+    names = [n for _, n, _, _, _, _ in reconcile.UNCOUNTED]
+    assert all(one(conn, "SELECT quantity FROM items WHERE campaign_id = ? AND name = ?", (denton, n))["quantity"] is None for n in names)
+    reconcile.uncounted_correction(conn, denton, root, "owner (proxy-GM delegation)")
+    left = {r["name"]: r["quantity"] for r in rows(conn, "SELECT name, quantity FROM items WHERE campaign_id = ? AND name IN (%s)" % ",".join("?" * len(names)), (denton, *names))}
+    assert left == {"Recovered Electrical Cabling": 1, "Better-quality liquor": 4, "Basic carried gear": 1,
+                    "Converted Needle-Spears usable as Javelins": 3, "Personal Maintenance Tools": 1}  # Driscoll's kit is gone
+    assert "partial coil" in one(conn, "SELECT description FROM items WHERE campaign_id = ? AND name = 'Recovered Electrical Cabling'", (denton,))["description"]
+    with pytest.raises(ValueError, match="re-review"):  # decided against unknown counts only
+        reconcile.uncounted_correction(conn, denton, root, "owner")
+    pv = sync.preview(conn, denton, fetch=False)
+    summaries = [c["summary"] for c in pv["changes"]]
+    assert "Recovered Electrical Cabling now counted: 1" in summaries and "2 item(s) leave the unquantified list" in summaries
+    assert not any("unquantified_items entries have no quantity" in w for w in pv["warnings"])
+
+
+def test_reserved_gear_cannot_be_handed_over_until_the_reservation_is_resolved(client, conn, denton):
+    do(conn, denton, {"op": "quest", "title": "Reserved: Brass Lantern", "kind": "reservation",
+                      "details": {"payment": "paid", "paid_gold": 5, "held_by": "Gilded Feathers", "owned": False}})
+    inv = client.get(f"/api/campaigns/{denton}/inventory").json()
+    r = next(x for x in inv["reservations"] if x["item"] == "Brass Lantern")
+    assert r["paid_gold"] == 5 and not r["owned"] and inv["gold"]["committed"] >= 5
+    with pytest.raises(ChangeError, match="reserved and not yet claimed"):
+        do(conn, denton, {"op": "add_item", "character": "Scout", "name": "Brass Lantern", "quantity": 1})
+    assert not one(conn, "SELECT 1 AS x FROM items WHERE campaign_id = ? AND name = 'Brass Lantern'", (denton,))
+    # resolving the reservation first in the same batch makes the hand-over valid
+    do(conn, denton, {"op": "quest", "title": "Reserved: Brass Lantern", "status": "completed"},
+       {"op": "add_item", "character": "Scout", "name": "Brass Lantern", "quantity": 1})
+    assert one(conn, "SELECT quantity FROM items WHERE campaign_id = ? AND name = 'Brass Lantern'", (denton,))["quantity"] == 1
+    assert not any(x["item"] == "Brass Lantern" for x in client.get(f"/api/campaigns/{denton}/inventory").json()["reservations"])
+
+
 def test_people_show_life_state_whereabouts_promises_and_last_interaction_without_gm_material(client, conn, denton):
     scout = one(conn, "SELECT id FROM characters WHERE campaign_id = ? AND slug = 'scout'", (denton,))["id"]
     do(conn, denton, {"op": "remember", "subject": "margit", "content": "Margit sketched the siphon's cable run on a napkin for Cliff.", "importance": 1},

@@ -47,7 +47,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
 def apply_correction(conn: sqlite3.Connection, cid: int, *, subject: str, decision: str, evidence: list[dict], ops: list[dict],
                      decided_by: str, ledger_edits: list[dict] | None = None, sheet_edits: list[dict] | None = None,
                      resolves: list[str] | None = None, position_edits: list[dict] | None = None,
-                     rulings: list[dict] | None = None, trap_records: list[dict] | None = None) -> dict:
+                     rulings: list[dict] | None = None, trap_records: list[dict] | None = None,
+                     item_edits: list[dict] | None = None) -> dict:
     if not evidence:
         raise ValueError("a correction needs evidence")
     if not decided_by.strip():
@@ -58,6 +59,7 @@ def apply_correction(conn: sqlite3.Connection, cid: int, *, subject: str, decisi
         results = [apply_change(conn, cid, None, op) for op in ops]  # validated; any failure rolls everything back
         results += [_sheet_edit(conn, cid, e) for e in sheet_edits or []]
         results += [_position_edit(conn, cid, e) for e in position_edits or []]
+        results += [_item_edit(conn, cid, e) for e in item_edits or []]
         if trap_records:  # trap records (CORE 13.7), validated by the trap tool's own model
             from .rules import traps
             results += [traps.record(conn, cid, t["trap"], t["spec"]) for t in trap_records]
@@ -90,6 +92,22 @@ def _sheet_edit(conn: sqlite3.Connection, cid: int, e: dict) -> dict:
     node[e["path"][-1]] = e["value"]
     conn.execute("UPDATE characters SET sheet_json = ? WHERE id = ?", (json.dumps(sheet, ensure_ascii=False), c["id"]))
     return {"summary": f"{c['name']}: sheet {'.'.join(e['path'])} corrected", "before": before, "after": e["value"]}
+
+
+def _item_edit(conn: sqlite3.Connection, cid: int, e: dict) -> dict:
+    """An item's description and properties (a None property is removed); no engine op rewrites an item's record text."""
+    it = one(conn, "SELECT id, name, description, properties_json FROM items WHERE campaign_id = ? AND id = ?", (cid, e["item_id"]))
+    if not it:
+        raise ValueError(f"no item #{e['item_id']}")
+    props = dict(it["properties"] or {})
+    for k, v in (e.get("properties") or {}).items():
+        if v is None:
+            props.pop(k, None)
+        else:
+            props[k] = v
+    desc = e.get("description", it["description"])
+    conn.execute("UPDATE items SET description = ?, properties_json = ? WHERE id = ?", (desc, json.dumps(props, ensure_ascii=False), it["id"]))
+    return {"summary": f"{it['name']}: record updated", "before": it["description"], "after": desc}
 
 
 def _position_edit(conn: sqlite3.Connection, cid: int, e: dict) -> dict:
@@ -613,3 +631,63 @@ def trap_records_correction(conn: sqlite3.Connection, cid: int, decided_by: str)
     ]
     return apply_correction(conn, cid, subject="Trap records", decision="The party's traps get the approved records (CORE 13.7): deployable, locked while deployed.",
                             evidence=evidence, ops=[], decided_by=decided_by, trap_records=TRAP_RECORDS)
+
+
+UNCOUNTED_RULING = ("Proxy-GM rulings (owner delegated 2026-10-26) for the six items held at an unknown count: Recovered Electrical "
+                    "Cabling 1 partial coil; Better-quality liquor 4 bottles; Cliff's Basic carried gear 1 everyday kit; Eli's Converted "
+                    "Needle-Spears 3; Nate's Personal Maintenance Tools 1 kit; Mad Driscoll's trapsmith kit lost with him in the Floor 1 collapse.")
+UNCOUNTED = [  # (owner, item name, count or None = lost, reason, new description or None, properties to set)
+    ("shared", "Recovered Electrical Cabling", 1,
+     "half the industrial reel was recovered, then the Skyhook and both Kill-Lane Wings attempts used the cable they required: one partial coil remains",
+     "One partial coil of recovered industrial electrical cabling (proxy-GM ruling 2026-10-26): enough for one more modest rigging or "
+     "trap build. Using it in a build consumes the coil.", {"note": None, "quantity_status": "ruled: 1 partial coil"}),
+    ("shared", "Better-quality liquor", 4, "a modest stash supplemented from cleared nests: 4 bottles",
+     "Four bottles of better-quality liquor (proxy-GM ruling 2026-10-26), the existing stock plus what the cleared nests yielded.",
+     {"note": None, "quantity_status": "ruled: 4 bottles"}),
+    ("Cliff Atkinson", "Basic carried gear", 1, "a single everyday kit, not a countable stock",
+     "Cliff's everyday carried basics (pack, water, small tools and sundries) treated as one bundle (proxy-GM ruling 2026-10-26). "
+     "Nothing specific is drawn from it without a ruling.", {"quantity_status": "ruled: one bundle"}),
+    ("Eli Ramirez", "Converted Needle-Spears usable as Javelins", 3, "the only established figure: three encounter throws were recovered",
+     None, {"quantity_status": "ruled: 3 (the three recovered encounter throws)"}),
+    ("Nate Holloway", "Personal Maintenance Tools", 1, "his own personal tool kit",
+     None, {"quantity_status": "ruled: one personal kit"}),
+    ("Mad Driscoll", "Trapsmith tools and components", None, "Driscoll died in the Floor 1 collapse; the kit he carried was lost with him",
+     None, {}),
+]
+
+
+def uncounted_correction(conn: sqlite3.Connection, cid: int, ledger_root, decided_by: str) -> dict:
+    """Owner delegation 2026-10-26 ("resolve any item held at an unknown count; I trust you as proxy GM")."""
+    ops, edits, item_edits = [], [], []
+    for owner, name, count, why, desc, props in UNCOUNTED:
+        sql = "SELECT i.id, i.quantity FROM items i LEFT JOIN characters c ON c.id = i.owner_character_id WHERE i.campaign_id = ? AND i.name = ? AND "
+        it = one(conn, sql + ("i.owner_character_id IS NULL" if owner == "shared" else "c.name = ?"), (cid, name) if owner == "shared" else (cid, name, owner))
+        if not it or it["quantity"] is not None:
+            raise ValueError(f"{owner}'s {name} is {it and it['quantity']!r}, not the unknown count this ruling was decided against; re-review")
+        ops.append({"op": "set_quantity", "item_id": it["id"], "name": name, "character": owner, "quantity": count or 1, "reason": f"Proxy-GM ruling: {why}"})
+        if count is None:
+            ops.append({"op": "remove_item", "item_id": it["id"], "name": name, "character": owner, "quantity": 1, "cause": why})
+        elif desc or props:
+            item_edits.append({"item_id": it["id"], **({"description": desc} if desc else {}), "properties": props})
+    for file, iid, value in (("state/characters/eli-ramirez.yaml", "converted-needle-spears", {"quantity": 3, "quantity_status": "ruled: 3 (the three recovered encounter throws), proxy GM 2026-10-26"}),
+                             ("state/characters/nate-holloway.yaml", "personal-maintenance-tools", {"quantity": 1, "quantity_status": "ruled: one personal kit, proxy GM 2026-10-26"}),
+                             ("state/characters/mad-driscoll.yaml", "trapsmith-tools", {"quantity": 0, "quantity_status": "lost with Driscoll in the Floor 1 collapse (proxy GM 2026-10-26)"})):
+        sheet = _ledger_yaml(ledger_root, file)
+        carried = (sheet.get("equipment") or {}).get("carried") or []
+        if any(isinstance(e, dict) and e.get("id") == iid for e in carried):
+            for k, v in value.items():
+                edits.append({"file": file, "path": ["equipment", "carried", {"id": iid}, k], "value": v})
+    evidence = [
+        {"source": "state/shared_inventory.yaml unquantified_items and notes",
+         "says": "Cabling: half the reel recovered; some consumed by the Skyhook, the failed Wings prototype and the completed Wings; residual unquantified. "
+                 "Liquor: 'existing stock was supplemented from cleared nests; source gives no numeric amount.'"},
+        {"source": "state/characters/eli-ramirez.yaml equipment.carried", "says": "Converted needle-spears: 'unknown-total; three encounter throws were recovered'."},
+        {"source": "state/characters/mad-driscoll.yaml", "says": "Deceased in the Floor 1 collapse; carried 'Trapsmith tools and components', unquantified."},
+        {"source": "state/characters/nate-holloway.yaml, cliff.yaml", "says": "Nate's personal maintenance tools (his property); Cliff's 'Basic carried gear' (a placeholder line)."},
+        {"source": "story history (threads 4, 5)", "says": "No counts for any of these."},
+        {"source": "owner, 2026-10-26", "says": "'Any item that's being held out by an unknown count, go ahead and resolve. I trust you to make decisions as a proxy GM.'"},
+    ]
+    return apply_correction(conn, cid, subject="Uncounted items", decision=UNCOUNTED_RULING, evidence=evidence, ops=ops,
+                            decided_by=decided_by, ledger_edits=edits, item_edits=item_edits,
+                            rulings=[{"topic": "Counts for previously uncounted items", "ruling": UNCOUNTED_RULING, "label": "CAMPAIGN",
+                                      "sources": ["owner delegation 2026-10-26"]}])

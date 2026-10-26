@@ -192,6 +192,8 @@ def test_real_ledger_round_trip_passes_its_own_validator(conn, real_repo):
         apply_change(conn, cid, t, {"op": "hp", "character": "cliff", "delta": -9})
         apply_change(conn, cid, t, {"op": "remove_item", "character": "shared", "name": "Healing Potion"})
         apply_change(conn, cid, t, {"op": "advance_time", "minutes": 60, "reason": "Gilded Feathers shopping"})
+        # Scout claims the reserved stabber: the reservation is resolved before the item exists (pending gear is nobody's)
+        apply_change(conn, cid, t, {"op": "quest", "title": "Reserved: Personal Stabber", "status": "completed", "progress": "Claimed by Scout."})
         apply_change(conn, cid, t, {"op": "add_item", "character": "scout", "name": "Personal Stabber", "rarity": "Bronze"})
         perform_check(conn, conn, roller, cid, t, CheckRequest(character="cliff", skill="Negotiation", stat="cha", dc=16, reason="haggle"))
         apply_change(conn, cid, t, {"op": "clock", "key": "advancement_cycles", "delta": 1, "reason": "Bought the stabber → Scout armed"})

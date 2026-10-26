@@ -277,7 +277,17 @@ def _apply_mana(ctx: Ctx, op: ManaChange) -> dict:
     return _resource(ctx, op, "mana", "mana")
 
 
+def _unreserved(ctx: Ctx, name: str) -> None:
+    """Pending gear is nobody's yet: a reserved, unclaimed item can't be added or equipped until the reservation is resolved."""
+    from ..memory.inventory import pending_reservation
+    q = pending_reservation(ctx.conn, ctx.campaign_id, name)
+    if q:
+        raise ChangeError(f"{name} is reserved and not yet claimed ({q['title']}); resolve that reservation first in this batch "
+                          f"(quest op on that title with status completed, or details owned: true) before handing the item over")
+
+
 def _apply_add_item(ctx: Ctx, op: AddItem) -> dict:
+    _unreserved(ctx, op.name)
     owner = resolve_character(ctx.conn, ctx.campaign_id, op.character, allow_shared=True)
     owner_id = owner["id"] if owner else None
     existing = _find_item(ctx.conn, ctx.campaign_id, owner_id, op.name)
