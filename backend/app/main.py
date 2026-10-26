@@ -318,10 +318,39 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     @app.get("/api/campaigns/{cid}/characters/{char_id}/dossier")
     def character_dossier(cid: int, char_id: int, c=Depends(db)):
         from .memory.dossier import build as build_dossier
+        from .memory.abilities import attach
         d = build_dossier(c, cid, char_id)
         if not d:
             raise HTTPException(404, "character not found")
-        return d
+        return attach(c, cid, d)
+
+    explaining: dict[int, dict] = {}
+
+    @app.post("/api/campaigns/{cid}/abilities/explain")
+    def explain_abilities(cid: int):
+        """Write explanations for dossier abilities that have none (template, rulebook, record or homebrew; Codex in the background)."""
+        if explaining.get(cid, {}).get("state") == "running":
+            return explaining[cid]
+        explaining[cid] = {"state": "running", "started_at": now_iso(), "progress": ""}
+
+        def work():
+            from .memory.abilities import explain_missing
+            conn = state.conn()
+            try:
+                counts = explain_missing(conn, cid, settings, log=lambda m: explaining[cid].update(progress=m))
+                explaining[cid] = {"state": "done", "finished_at": now_iso(), "counts": counts}
+            except Exception as exc:  # surfaced in the dossier
+                traceback.print_exc()
+                explaining[cid] = {"state": "failed", "error": str(exc)[:300]}
+            finally:
+                conn.close()
+
+        threading.Thread(target=work, daemon=True, name=f"abilities-{cid}").start()
+        return explaining[cid]
+
+    @app.get("/api/campaigns/{cid}/abilities/explain")
+    def explain_status(cid: int):
+        return explaining.get(cid, {"state": "idle"})
 
     @app.put("/api/campaigns/{cid}/characters/{char_id}/portrait-crop")
     def portrait_crop(cid: int, char_id: int, body: CropIn, c=Depends(db), _=Depends(write_lock)):

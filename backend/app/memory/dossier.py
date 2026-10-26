@@ -55,6 +55,11 @@ def _mentions(text: str, name: str) -> bool:
     return any(len(n) > 2 and re.search(rf"\b{re.escape(n)}\b", text, re.I) for n in names)
 
 
+def _norm(name: str) -> str:
+    """'Clear Lane', 'clear_lane' and 'Clear-Lane!' are the same ability."""
+    return re.sub(r"[^a-z0-9]+", " ", str(name).lower().replace("’", "'").replace("'", "")).strip()
+
+
 def _flat(v: Any) -> str:
     if isinstance(v, dict):
         return " ".join(f"{k} {_flat(x)}" for k, x in v.items())
@@ -159,10 +164,15 @@ def build(conn: sqlite3.Connection, cid: int, char_id: int) -> dict | None:
     for k, v in (klass or {}).items():
         if k not in ("name", "types", "benefits", "detriments", "custom_build_points", "source") and isinstance(v, str):
             highlights.append({"title": k.replace("_", " ").title(), "detail": v, "source": "class feature"})
+    # the ledger's own definitions of custom class features ("class_features": {"clear_lane": "Reduced penalties when..."})
+    features = {_norm(k): str(v) for k, v in ((klass or {}).get("class_features") or {}).items() if isinstance(v, str)} \
+        if isinstance((klass or {}).get("class_features"), dict) else {}
     for b in _list((klass or {}).get("benefits")):
         text = b.get("benefit") if isinstance(b, dict) else str(b)
         if text and not re.match(r"^[+-]\d+\s+\w+$", text.strip()) and not any(h["title"].lower() == text.lower() for h in highlights):
-            highlights.append({"title": text, "detail": None, "source": "class benefit"})
+            highlights.append({"title": text, "detail": features.pop(_norm(text), None), "source": "class benefit"})
+    for k, v in features.items():  # defined features with no matching benefit line
+        highlights.append({"title": k.title(), "detail": v, "source": "class feature"})
     for s in ranked:
         if s["specialty"]:
             highlights.append({"title": s["specialty"], "detail": f"{s['name']} specialty (Rank {s['rank']})", "source": "skill specialty"})
@@ -171,7 +181,8 @@ def build(conn: sqlite3.Connection, cid: int, char_id: int) -> dict | None:
     build_info = {"class_name": c.get("class_name") or (klass or {}).get("name"), "class_types": _list((klass or {}).get("types")),
                   "class_benefits": [b.get("benefit") if isinstance(b, dict) else str(b) for b in _list((klass or {}).get("benefits"))],
                   "class_detriments": [d.get("detriment") if isinstance(d, dict) else str(d) for d in _list((klass or {}).get("detriments"))],
-                  "race": (race or {}).get("name") or c.get("race"), "race_benefits": [str(b) for b in _list((race or {}).get("benefits"))],
+                  "race": (race or {}).get("name") or c.get("race"),
+                  "race_benefits": [str(b.get("benefit")) if isinstance(b, dict) else str(b) for b in _list((race or {}).get("benefits"))],
                   "role": narrative.get("current_role") or c.get("bio"), "tactics": [str(t) for t in _list(narrative.get("tactical_tendencies"))],
                   "highlights": highlights}
 

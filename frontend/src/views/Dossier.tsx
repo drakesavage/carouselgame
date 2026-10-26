@@ -15,10 +15,13 @@ import "../dossier.css";
 type Attr = { key: string; abbr: string; name: string; value: number | null; modifier: number | null; unenhanced: number | null; standout: boolean };
 type Skill = { id: number; name: string; rank: number | null; kind: string; category: string; stat: string | null; learned: boolean; gear_granted: boolean;
   passive: boolean; marked: boolean; mana_cost: number | null; description: string | null; specialty: string | null; perk: string | null; upgrades: string[];
-  source: string | null; condition: string | null; provenance: string | null; details: Record<string, unknown>; attack: Record<string, any> | null; signature: boolean };
+  source: string | null; condition: string | null; provenance: string | null; details: Record<string, unknown>; attack: Record<string, any> | null; signature: boolean;
+  explain?: Explain; upgrade_explain?: Explain[] };
 type Item = { id: number; name: string; quantity: number | null; equipped: boolean; deployed: boolean; rarity: string | null; description: string | null;
   slot: string; effects: string[]; notes: string[]; status: string | null; provenance: string | null; special: boolean; properties: Record<string, unknown>; shared?: boolean };
-type Effect = { type: string; name: string; detail: string | null; polarity?: string };
+/** What an ability does (memory/abilities.py): from the rulebook, the campaign record, a build template, or a labelled homebrew reading. */
+type Explain = { summary: string; explanation: string; basis: "rulebook" | "record" | "homebrew" | "template"; citation: string | null } | null;
+type Effect = { type: string; name: string; detail: string | null; polarity?: string; explain?: Explain };
 type HistoryEntry = { kind: string; text: string; when: number | null; source: string; at?: string };
 type Dossier = {
   id: number; slug: string; name: string; kind: string; is_player: boolean; crawler_number: string | null; level: number | null; race: string | null;
@@ -30,10 +33,10 @@ type Dossier = {
     statuses: { id: number; name: string; polarity: string | null; description: string | null }[]; ai_favor: number | null; attacks: Record<string, any>[];
     level_progress: { current?: number; target?: number; toward_level?: number; note?: string } | null; unallocated_stat_points: unknown };
   build: { class_name: string | null; class_types: string[]; class_benefits: string[]; class_detriments: string[]; race: string | null; race_benefits: string[];
-    role: string | null; tactics: string[]; highlights: { title: string; detail: string | null; source: string }[] };
+    role: string | null; tactics: string[]; highlights: { title: string; detail: string | null; source: string; explain?: Explain }[] };
   skills: Skill[]; signature_skill_ids: number[]; category_labels: Record<string, string>; effects: Effect[];
   equipment: { equipped: Item[]; carried: Item[]; linked_shared: Item[]; commitments: Record<string, any>[]; slot_labels: Record<string, string> };
-  story: Record<string, any>; history: HistoryEntry[]; hotlist: unknown[];
+  story: Record<string, any>; history: HistoryEntry[]; hotlist: unknown[]; explanations_missing?: number;
 };
 
 const TABS = [
@@ -92,7 +95,7 @@ export function CharacterDossierDialog({ cid, charId, onClose, onChanged }: { ci
                 ))}
               </nav>
               <div className="dossier-body" role="tabpanel" ref={body}>
-                {tab === "overview" && <Overview d={d} openSkill={openSkill} openTab={setTab} />}
+                {tab === "overview" && <Overview d={d} cid={cid} openSkill={openSkill} openTab={setTab} reload={load} />}
                 {tab === "skills" && <SkillsTab d={d} focus={focusSkill} />}
                 {tab === "equipment" && <EquipmentTab d={d} />}
                 {tab === "story" && <StoryTab d={d} />}
@@ -180,12 +183,13 @@ function StatusChip({ s }: { s: { name: string; polarity: string | null; descrip
 }
 
 // ------------------------------------------------------------------ overview
-function Overview({ d, openSkill, openTab }: { d: Dossier; openSkill: (id: number) => void; openTab: (t: TabId) => void }) {
+function Overview({ d, cid, openSkill, openTab, reload }: { d: Dossier; cid: number; openSkill: (id: number) => void; openTab: (t: TabId) => void; reload: () => void }) {
   const sig = d.signature_skill_ids.map((id) => d.skills.find((s) => s.id === id)!).filter(Boolean);
   const b = d.build;
   return (
     <div className="ov-grid">
       <div className="ov-col">
+      {!!d.explanations_missing && <ExplainMissing cid={cid} count={d.explanations_missing} reload={reload} />}
       <section className="dpanel ov-attrs">
         <h3>Core attributes</h3>
         {d.attributes.length === 0 ? <Empty>Stats not established in the record.</Empty> : (
@@ -214,12 +218,7 @@ function Overview({ d, openSkill, openTab }: { d: Dossier; openSkill: (id: numbe
           </div>
         )}
         {b.highlights.length === 0 ? <Empty>No class features or specialties recorded.</Empty> : (
-          <div className="highlights">{b.highlights.map((h, i) => (
-            <div key={i} className={`highlight src-${h.source.replace(/\s/g, "-")}`}>
-              <Sparkles size={14} />
-              <div><div className="hl-title">{h.title}</div>{h.detail && <div className="hl-detail">{h.detail}</div>}<div className="hl-src">{h.source}</div></div>
-            </div>))}
-          </div>
+          <div className="highlights">{b.highlights.map((h, i) => <Highlight key={i} h={h} />)}</div>
         )}
         {b.tactics.length > 0 && <div className="build-tactics"><Swords size={13} /> {b.tactics.join(" ")}</div>}
       </section>
@@ -289,7 +288,7 @@ function CombatReadiness({ d }: { d: Dossier }) {
 
 function SkillMini({ s, labels, onOpen }: { s: Skill; labels: Record<string, string>; onOpen: () => void }) {
   return (
-    <button className={`skill-mini cat-${s.category}`} onClick={onOpen} title="Open in Skills">
+    <button className={`skill-mini cat-${s.category}`} onClick={onOpen} title={s.explain ? `${s.explain.summary} (open in Skills)` : "Open in Skills"}>
       <div className="sm-rank">{s.rank ?? "?"}</div>
       <div className="sm-body">
         <div className="sm-name">{s.name}{s.marked && <span className="marked-dot" title="Marked for advancement" />}</div>
@@ -311,13 +310,7 @@ function EffectsList({ effects }: { effects: Effect[] }) {
         <button className={`chip ${filter == null ? "cyan" : ""}`} onClick={() => setFilter(null)}>All {effects.length}</button>
         {types.map((t) => <button key={t} className={`chip ${filter === t ? "cyan" : ""}`} onClick={() => setFilter(filter === t ? null : t)}>{EFFECT_META[t]?.label ?? humanize(t)}</button>)}
       </div>
-      <ul className="effects">{shown.map((e, i) => (
-        <li key={i} className={`effect tone-${EFFECT_META[e.type]?.tone ?? "steel"}`}>
-          <span className="effect-type">{EFFECT_META[e.type]?.label ?? humanize(e.type)}</span>
-          <span className="effect-name">{e.name}</span>
-          {e.detail && <span className="effect-detail">{e.detail}</span>}
-        </li>))}
-      </ul>
+      <ul className="effects">{shown.map((e, i) => <EffectRow key={i} e={e} />)}</ul>
     </>
   );
 }
@@ -395,26 +388,106 @@ function SkillCard({ s, open, onToggle, labels }: { s: Skill; open: boolean; onT
             {s.marked && <span className="tag marked" title="Marked for an advancement check">marked</span>}
             {s.upgrades.length > 0 && <span className="tag upgrade">upgrade</span>}
           </div>
-          {(s.specialty || s.perk || s.upgrades[0] || s.description) && (
-            <div className="sc-summary">{s.specialty && <>Specialty: <b>{s.specialty}</b>. </>}{s.perk && <>Perk: <b>{s.perk}</b>. </>}{!s.specialty && !s.perk && (s.upgrades[0] ?? s.description)}</div>
+          {(s.explain || s.specialty || s.perk || s.upgrades[0] || s.description) && (
+            <div className="sc-summary">{s.explain ? s.explain.summary : <>{s.specialty && <>Specialty: <b>{s.specialty}</b>. </>}{s.perk && <>Perk: <b>{s.perk}</b>. </>}{!s.specialty && !s.perk && (s.upgrades[0] ?? s.description)}</>}</div>
           )}
         </div>
         {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
       </button>
       {open && (
         <div className="sc-details">
+          {s.explain && <WhatItDoes x={s.explain} />}
           {s.description && <p>{s.description}</p>}
           {s.specialty && <p><b>Specialty:</b> {s.specialty}</p>}
           {s.perk && <p><b>Perk:</b> {s.perk}</p>}
-          {s.upgrades.map((u, i) => <p key={i}><b>Rank upgrade:</b> {u}</p>)}
+          {s.upgrades.map((u, i) => <p key={i}><b>Rank upgrade:</b> {u}{s.upgrade_explain?.[i] && s.upgrade_explain[i]!.explanation !== u ? <span className="sub"> {s.upgrade_explain[i]!.explanation}</span> : null}</p>)}
           {s.source && <p><b>Granted by:</b> {s.source}</p>}
           {s.condition && <p><b>Condition:</b> {s.condition}</p>}
           {s.attack && <p><b>Attack:</b> {s.attack.name} {s.attack.attack_bonus != null ? signed(s.attack.attack_bonus) : ""} · {s.attack.damage ?? ""}{s.attack.range ? ` · ${s.attack.range}` : ""}{s.attack.reach ? ` · reach ${s.attack.reach}` : ""}</p>}
           {extra.length > 0 && <Tree value={Object.fromEntries(extra)} />}
           {s.provenance && <p className="sub"><b>Provenance:</b> {s.provenance}</p>}
-          {!s.description && !s.specialty && !s.perk && !s.upgrades.length && !s.source && !s.attack && !extra.length && !s.provenance && <p className="sub">No further details are recorded for this skill. The rulebooks (Rules view) have its general rules.</p>}
+          {!s.explain && !s.description && !s.specialty && !s.perk && !s.upgrades.length && !s.source && !s.attack && !extra.length && !s.provenance && <p className="sub">No explanation has been written for this skill yet.</p>}
         </div>
       )}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ ability explanations
+const BASIS: Record<string, { label: string; tone: string; hint: string }> = {
+  rulebook: { label: "Rulebook", tone: "green", hint: "Paraphrased from the rulebook entry cited." },
+  record: { label: "Campaign record", tone: "cyan", hint: "As the campaign ledger defines it." },
+  template: { label: "Build bonus", tone: "", hint: "A plain bonus from the class or race build." },
+  homebrew: { label: "Homebrew reading", tone: "amber", hint: "Nothing in the rulebooks or the record defines this; written to fill the gap. Tell the GM if it plays differently." },
+};
+
+function WhatItDoes({ x }: { x: NonNullable<Explain> }) {
+  const b = BASIS[x.basis] ?? BASIS.homebrew;
+  return (
+    <div className={`what-it-does basis-${x.basis}`}>
+      <p>{x.explanation}</p>
+      <div className="wid-source"><Chip tone={b.tone} title={b.hint}>{b.label}</Chip>{x.citation && x.basis !== "template" && <span className="sub">{x.citation}</span>}</div>
+    </div>
+  );
+}
+
+/** A class feature, benefit, specialty or perk: its one-line summary, and what it does on demand. */
+function Highlight({ h }: { h: Dossier["build"]["highlights"][number] }) {
+  const [open, setOpen] = useState(false);
+  const x = h.explain;
+  return (
+    <div className={`highlight src-${h.source.replace(/\s/g, "-")} ${open ? "open" : ""}`}>
+      <button className="hl-head" onClick={() => setOpen((o) => !o)} aria-expanded={open} disabled={!x && !h.detail}>
+        <Sparkles size={14} />
+        <div className="hl-text">
+          <div className="hl-title">{h.title}</div>
+          {(x?.summary || h.detail) && !open && <div className="hl-detail">{x?.summary ?? h.detail}</div>}
+          <div className="hl-src">{h.source}</div>
+        </div>
+        {(x || h.detail) && (open ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}
+      </button>
+      {open && (
+        <div className="hl-body">
+          {h.detail && x?.basis !== "record" && h.detail !== x?.explanation && <p className="hl-record">{h.detail}</p>}
+          {x ? <WhatItDoes x={x} /> : <p className="sub">No explanation written yet.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EffectRow({ e }: { e: Effect }) {
+  const [open, setOpen] = useState(false);
+  const x = e.explain;
+  return (
+    <li className={`effect tone-${EFFECT_META[e.type]?.tone ?? "steel"} ${open ? "open" : ""}`}>
+      <button className="effect-head" onClick={() => setOpen((o) => !o)} aria-expanded={open} disabled={!x}>
+        <span className="effect-type">{EFFECT_META[e.type]?.label ?? humanize(e.type)}</span>
+        <span className="effect-name">{e.name}</span>
+        <span className="effect-detail">{x && !open ? x.summary : open && x?.basis === "record" ? null : e.detail}</span>
+      </button>
+      {open && x && <WhatItDoes x={x} />}
+    </li>
+  );
+}
+
+function ExplainMissing({ cid, count, reload }: { cid: number; count: number; reload: () => void }) {
+  const [st, setSt] = useState<{ state: string; progress?: string; error?: string } | null>(null);
+  useEffect(() => {
+    if (st?.state !== "running") return;
+    const t = setInterval(async () => {
+      const s = await api.explainStatus(cid);
+      setSt(s);
+      if (s.state === "done") reload();
+    }, 3000);
+    return () => clearInterval(t);
+  }, [st?.state, cid]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="explain-missing">
+      <BookOpen size={14} />
+      <span className="grow">{st?.state === "running" ? `Writing explanations… ${st.progress ?? ""}` : st?.state === "failed" ? `Couldn't write explanations: ${st.error}`
+        : `${count} abilit${count === 1 ? "y has" : "ies have"} no explanation yet.`}</span>
+      {st?.state !== "running" && <button className="btn small" onClick={async () => setSt(await api.explainAbilities(cid))}>Explain them</button>}
     </div>
   );
 }

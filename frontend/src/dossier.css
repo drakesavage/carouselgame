@@ -252,3 +252,32 @@
   .attack-line { grid-template-columns: 14px 1fr 40px; }
   .attack-line > :nth-child(4), .attack-line > :nth-child(5) { grid-column: 2 / -1; }
 }
+
+/* dossier: abilities drop down to what they do */
+.highlight { display: block; padding: 0; }
+.highlight .hl-head { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; width: 100%; padding: 8px 10px; background: none; border: 0;
+  color: inherit; font: inherit; text-align: left; cursor: pointer; align-items: start; }
+.highlight .hl-head:disabled { cursor: default; }
+.highlight .hl-head > svg:first-child { color: var(--gold); margin-top: 2px; }
+.highlight.src-skill-specialty .hl-head > svg:first-child, .highlight.src-skill-perk .hl-head > svg:first-child { color: var(--cyan); }
+.highlight .hl-head > svg:last-child { color: var(--muted); margin-top: 3px; }
+.highlight .hl-head:not(:disabled):hover .hl-title { color: var(--cyan); }
+.highlight .hl-head:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; border-radius: 6px; }
+.highlight.open { border-color: var(--line-2); }
+.hl-body { padding: 0 12px 10px 36px; display: grid; gap: 6px; }
+.hl-record { margin: 0; font-size: 12.5px; color: var(--text-2); font-style: italic; }
+.what-it-does { display: grid; gap: 6px; padding: 8px 10px; border-radius: 5px; background: rgba(62, 240, 200, 0.04); border-left: 2px solid var(--cyan-dim); }
+.what-it-does.basis-homebrew { background: rgba(255, 181, 71, 0.05); border-left-color: var(--amber); }
+.what-it-does.basis-rulebook { border-left-color: var(--hp); }
+.what-it-does p { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--text); }
+.wid-source { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 11.5px; }
+.effect { display: block; padding: 0; }
+.effect .effect-head { display: grid; grid-template-columns: 104px minmax(120px, 0.8fr) 1.4fr; gap: 10px; align-items: baseline; width: 100%; padding: 6px 8px;
+  background: none; border: 0; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.effect .effect-head:disabled { cursor: default; }
+.effect .effect-head:not(:disabled):hover .effect-name { color: var(--cyan); }
+.effect.open .what-it-does { margin: 0 8px 8px; }
+.explain-missing { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 6px; border: 1px dashed var(--line-2); font-size: 12.5px; color: var(--text-2); }
+.explain-missing .grow { flex: 1; }
+.skill-card .what-it-does { margin-bottom: 4px; }
+@media (max-width: 760px) { .effect .effect-head { grid-template-columns: 1fr; gap: 2px; } }

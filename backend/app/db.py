@@ -300,6 +300,19 @@ CREATE TABLE IF NOT EXISTS corrections (    -- owner-approved corrections of can
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_art_subject ON art_jobs(campaign_id, kind, subject_id);
+CREATE TABLE IF NOT EXISTS ability_explanations (  -- what a skill/spell/ability does, for the dossier (derived; not campaign canon)
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  key TEXT NOT NULL,                      -- kind:normalized name (see memory/abilities.py)
+  name TEXT NOT NULL,
+  summary TEXT NOT NULL,                  -- one line
+  explanation TEXT NOT NULL,              -- what it actually does, in plain words
+  basis TEXT NOT NULL,                    -- rulebook | record | homebrew | template
+  citation TEXT,                          -- rulebook page, or the ledger record it came from
+  model TEXT,                             -- who wrote it: codex / template
+  created_at TEXT NOT NULL,
+  UNIQUE (campaign_id, key)
+);
 CREATE TABLE IF NOT EXISTS art_subjects (   -- the player's appearance notes per subject (art only; not campaign canon)
   campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
   kind TEXT NOT NULL,
