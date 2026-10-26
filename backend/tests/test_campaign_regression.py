@@ -207,6 +207,31 @@ def test_story_threads_are_findable_scoped_and_in_gm_context(client, conn, dento
         assert private not in body and "GMONLY-M6-BEAT-9911" not in body and "find-my-family-promise" not in body, url
 
 
+def test_known_world_map_shows_only_recorded_places_and_paints_only_known_ones(client, conn, denton):
+    from app import reconcile
+    reconcile.floor_3_places_correction(conn, denton, "owner (proxy-GM delegation)")
+    w = client.get(f"/api/campaigns/{denton}/places").json()
+    n = w["nodes"]
+    assert n["heavensworth"]["parent"] == "over city" and "molting pigeon" in n["heavensworth"]["children"]
+    assert n["molting pigeon"]["saferoom"] and n["fallen watch"]["visited"] is False
+    assert any(g["label"] == "Saferoom" for g in n["molting pigeon"]["groups"])
+    assert sum(1 for x in n.values() if x["current"]) == 1
+    assert not any("deathstroke" in k for k in n)  # a place only the rulebook mentions is not on the party's map
+    # a real move becomes a travelled route
+    do(conn, denton, {"op": "move_group", "key": "training-market", "destination": "The Molting Pigeon, Heavensworth, Over City", "reason": "walk back"})
+    routes = client.get(f"/api/campaigns/{denton}/places").json()["routes"]
+    assert any({r["a"], r["b"]} == {"Gilded Feathers", "The Molting Pigeon"} for r in routes)
+    # pictures only of known places; a place's picture is keyed by the place, so every scene there reuses it
+    ok = client.get(f"/api/campaigns/{denton}/art/preview", params={"kind": "location", "subject_name": "Fallen Watch"})
+    assert ok.status_code == 200 and "Fallen Watch" in ok.json()["prompt"] and "Heavensworth" in ok.json()["prompt"]
+    assert client.get(f"/api/campaigns/{denton}/art/preview", params={"kind": "location", "subject_name": "Deathstroke Hall"}).status_code == 422
+    from app.art.service import _named_key
+    assert _named_key("location", "The Molting Pigeon") == "molting pigeon"
+    with pytest.raises(ValueError, match="already recorded"):
+        reconcile.apply_correction(conn, denton, subject="dup", decision="dup", evidence=[{"source": "t", "says": "t"}], ops=[], decided_by="t",
+                                   places=[reconcile.FLOOR_3_PLACES[0]])
+
+
 def test_reserved_gear_cannot_be_handed_over_until_the_reservation_is_resolved(client, conn, denton):
     do(conn, denton, {"op": "quest", "title": "Reserved: Brass Lantern", "kind": "reservation",
                       "details": {"payment": "paid", "paid_gold": 5, "held_by": "Gilded Feathers", "owned": False}})

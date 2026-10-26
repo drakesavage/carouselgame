@@ -24,22 +24,25 @@ from ..config import Settings
 from ..db import connect, now_iso, one, rows, transaction
 from .comfy import ComfyClient, ComfyError, default_root, sdxl_txt2img
 
-KINDS = ("character", "item", "mob", "scene")
-SIZES = {"character": (832, 1216), "mob": (896, 1152), "item": (1024, 1024), "scene": (1344, 768)}
+KINDS = ("character", "item", "mob", "scene", "location")
+NAMED = ("mob", "location")  # kinds keyed by name rather than a record id
+SIZES = {"character": (832, 1216), "mob": (896, 1152), "item": (1024, 1024), "scene": (1344, 768), "location": (1344, 768)}
 STYLE = ("(gritty painted fantasy illustration:1.3), (oil painting:1.2), painterly, tabletop RPG sourcebook art, visible brushstrokes, "
          "dramatic chiaroscuro lighting, grimy dungeon atmosphere, darkly humorous, highly detailed")
 KIND_STYLE = {
     "character": "waist-up character portrait, facing the viewer, detailed expressive face, plain dark background",
     "mob": "monster illustration, full body, menacing pose, dungeon background",
-    "item": "single isolated object, centered, alone on a bare worn dark wooden surface, simple uncluttered background, nothing else in "
-            "the frame, no people",
+    "item": "the whole object in full view with empty space around it, single isolated object, centered, alone on a bare worn dark "
+            "wooden surface, simple uncluttered background, nothing else in the frame, no people",
     "scene": "environment illustration, wide establishing shot, no people, no characters",
+    "location": "environment illustration of a place, wide establishing shot, no people, no characters",
 }
 NEGATIVE = ("(photo, photograph, photorealistic:1.3), realistic skin texture, studio portrait, 3d render, anime, manga, cartoon, chibi, blurry, lowres, jpeg artifacts, watermark, "
             "(text, letters, words, writing:1.2), name tag, signature, logo, frame, border, extra limbs, extra fingers, deformed hands, disfigured face, cropped head, "
             "nsfw, nude")
-KIND_NEGATIVE = {"scene": "people, person, man, woman, figures, crowd, portrait",
-                 "item": "people, person, hands, face, (clutter, multiple objects, still life:1.2), candles, bottles, coins, books, scattered props"}
+KIND_NEGATIVE = {"scene": "people, person, man, woman, figures, crowd, portrait", "location": "people, person, man, woman, figures, crowd, portrait",
+                 "item": "people, person, hands, face, (clutter, multiple objects, still life:1.2), candles, bottles, coins, books, scattered props, "
+                         "(close-up, cropped, extreme close-up, texture, pattern, wallpaper:1.2)"}
 FIRE_WORDS = re.compile(r"\b(flames?|flaming|burning|ablaze|on fire|lit|smok\w*|embers?|sparks?)\b", re.I)
 MAX_PROMPT = 1700  # SDXL reads long prompts in 77-token chunks; the style tail must survive
 
@@ -183,16 +186,88 @@ def appearance(conn: sqlite3.Connection, cid: int, kind: str, key: str) -> str:
     return _clean(r["appearance"]) if r else ""
 
 
+GENERIC_AVOID = {"weapon", "vehicle", "car", "device", "machine", "object", "tool", "item", "kit", "container", "canister", "pouch",
+                 "bag", "box", "trap", "equipment", "gear", "building", "place", "structure"}
+
+
+def _misleads(words: str | None, name: str) -> bool:
+    """True when the drafter named at least one word that is really in the name and isn't literal."""
+    named = {w.lower() for w in re.findall(r"[A-Za-z]+", name)}
+    return any(w.lower() in named for w in re.findall(r"[A-Za-z]+", words or ""))
+
+
+def clean_avoid(avoid_text: str, look: str) -> str:
+    """Drop don't-draw terms that the look itself needs ('dart' for a dart, 'pickup truck' for the pickup) and generic
+    category words: in a negative prompt they would erase the very thing being painted."""
+    words = {re.sub(r"(es|s)$", "", w) for w in re.findall(r"[a-z]+", look.lower())}
+    keep = []
+    for term in (t.strip() for t in (avoid_text or "").split(",")):
+        tw = [re.sub(r"(es|s)$", "", w) for w in re.findall(r"[a-z]+", term.lower()) if len(w) > 2]
+        if not tw or term.lower() in GENERIC_AVOID or any(w in words for w in tw):
+            continue
+        keep.append(term)
+    return ", ".join(dict.fromkeys(keep))
+
+
+def _draft(settings: Settings, system: str, record: str, schema: dict, label: str) -> str:
+    """The look drafter: Codex (better judgment on literal wording; the user's ChatGPT plan, no API billing), else Gemini
+    Flash Lite. Returns the raw JSON text."""
+    from ..gm.providers import AGENTS_NOTICE, CodexCliProvider, GeminiProvider, ProviderError
+    try:
+        raw, _ = CodexCliProvider(settings, effort="low")._run(record, schema, label, system + "\nReply only with the JSON object.\n\n" + AGENTS_NOTICE)
+        return raw
+    except ProviderError:
+        from ..gm.router import GeminiQuota
+        model = "gemini-3.5-flash-lite"
+        if not settings.gemini_api_key() or GeminiQuota(settings).remaining(model) < 1:
+            raise ValueError("Codex is unavailable and there is no Gemini Flash Lite quota left today") from None
+        raw, _ = GeminiProvider(settings, model=model, effort="low")._generate(system, record, schema, label)
+        return raw
+
+
+def features(conn: sqlite3.Connection, cid: int, kind: str, key: str) -> str:
+    r = one(conn, "SELECT features FROM art_subjects WHERE campaign_id = ? AND kind = ? AND subject_key = ?", (cid, kind, key.lower()))
+    return (r or {}).get("features") or ""
+
+
+def set_features(conn: sqlite3.Connection, cid: int, kind: str, key: str, text: str) -> None:
+    conn.execute("""INSERT INTO art_subjects (campaign_id, kind, subject_key, appearance, features, updated_at) VALUES (?,?,?,?,?,?)
+                    ON CONFLICT(campaign_id, kind, subject_key) DO UPDATE SET features = excluded.features, updated_at = excluded.updated_at""",
+                 (cid, kind, key.lower(), "", _clean(text)[:300], now_iso()))
+
+
+def _with_features(look: str, feats: str) -> str:
+    """SDXL weighs early words most and drops details: the must-show features go first, weighted up, then the full look."""
+    parts = [f.strip().strip("()") for f in (feats or "").split(",") if f.strip()][:4]
+    if not look:
+        return ""
+    return ", ".join([f"({p}:1.25)" for p in parts] + [look]) if parts else look
+
+
+def avoid(conn: sqlite3.Connection, cid: int, kind: str, key: str) -> str:
+    r = one(conn, "SELECT avoid FROM art_subjects WHERE campaign_id = ? AND kind = ? AND subject_key = ?", (cid, kind, key.lower()))
+    return (r or {}).get("avoid") or ""
+
+
+def set_avoid(conn: sqlite3.Connection, cid: int, kind: str, key: str, text: str) -> None:
+    conn.execute("""INSERT INTO art_subjects (campaign_id, kind, subject_key, appearance, avoid, updated_at) VALUES (?,?,?,?,?,?)
+                    ON CONFLICT(campaign_id, kind, subject_key) DO UPDATE SET avoid = excluded.avoid, updated_at = excluded.updated_at""",
+                 (cid, kind, key.lower(), "", _clean(text)[:300], now_iso()))
+
+
 def set_appearance(conn: sqlite3.Connection, cid: int, kind: str, key: str, text: str) -> None:
     conn.execute("""INSERT INTO art_subjects (campaign_id, kind, subject_key, appearance, updated_at) VALUES (?,?,?,?,?)
                     ON CONFLICT(campaign_id, kind, subject_key) DO UPDATE SET appearance = excluded.appearance, updated_at = excluded.updated_at""",
                  (cid, kind, key.lower(), text.strip()[:600], now_iso()))
 
 
-def subject_negative(conn: sqlite3.Connection, cid: int, kind: str, subject_id: int | None) -> str:
+def subject_negative(conn: sqlite3.Connection, cid: int, kind: str, subject_id: int | None, subject_name: str | None = None) -> str:
+    if kind == "location" and subject_name:
+        return avoid(conn, cid, "location", _named_key("location", subject_name))
     if kind == "item" and subject_id:
         # only the look counts: names like "Heavy Fire Blanket" are what made SDXL set it alight
-        return "" if FIRE_WORDS.search(appearance(conn, cid, "item", str(subject_id))) else "fire, flames, burning, smoke"
+        fire = "" if FIRE_WORDS.search(appearance(conn, cid, "item", str(subject_id))) else "fire, flames, burning, smoke"
+        return ", ".join(x for x in (fire, avoid(conn, cid, "item", str(subject_id))) if x)
     if kind != "character" or not subject_id:
         return ""
     c = one(conn, "SELECT * FROM characters WHERE campaign_id = ? AND id = ?", (cid, subject_id))
@@ -219,7 +294,9 @@ def subject_text(conn: sqlite3.Connection, cid: int, kind: str, subject_id: int 
             raise ValueError("unknown item")
         # Name and look only: notes, effects and status lines are inventory bookkeeping (counts, provenance, rules) that
         # an image model draws literally or not at all. Looks come from the Appearance notes (draft_item_looks).
-        return i["name"], "; ".join(b for b in (i["name"], appearance(conn, cid, "item", str(i["id"]))) if b)
+        # The look alone, without the name: an image model draws names literally ("Porcupine Pod" painted a porcupine,
+        # "Accordion Barricade" an accordion). The name is used only while no look has been written.
+        return i["name"], _with_features(appearance(conn, cid, "item", str(i["id"])), features(conn, cid, "item", str(i["id"]))) or i["name"]
     if kind == "scene":
         s = one(conn, "SELECT * FROM scenes WHERE campaign_id = ? AND id = ?", (cid, subject_id)) if subject_id else \
             one(conn, "SELECT * FROM scenes WHERE campaign_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1", (cid,))
@@ -236,6 +313,22 @@ def subject_text(conn: sqlite3.Connection, cid: int, kind: str, subject_id: int 
         if not name:
             raise ValueError("a mob needs a name")
         return name, "; ".join(x for x in (name, appearance(conn, cid, "mob", name)) if x)
+    if kind == "location":
+        # only a place on the party's map: a picture never depicts a discovery the party hasn't made (memory/places.py)
+        from ..memory.places import chain, key, known_world
+        world = known_world(conn, cid)
+        k = key((chain(subject_name) or [subject_name or ""])[-1])
+        node = world["nodes"].get(k)
+        if not node:
+            raise ValueError(f"{subject_name!r} isn't a place the party knows")
+        where, n = [], node
+        while n["parent"]:
+            n = world["nodes"][n["parent"]]
+            where.append(n["name"])
+        # the look (drafted from the place's player-known record, art only); its record text names people and plans, which
+        # a painter would draw, so without a look the prompt is just the place and its district
+        look = _with_features(appearance(conn, cid, "location", k), features(conn, cid, "location", k))
+        return node["name"], look or (node["name"] + (f", in {', '.join(where)}" if where else ""))
     raise ValueError(f"kind must be one of {', '.join(KINDS)}")
 
 
@@ -265,8 +358,46 @@ or something they built from it, and some items are System-made or enchanted. Fo
 (under 40 words) saying what it physically looks like: shape, material, colours, size, condition, and container for a bundle or
 cache. Real-world objects look like their real-world counterparts (a fire blanket is a folded grey fibreglass sheet in a red
 pouch with pull tabs). Use any condition the record gives (scorched, repaired, makeshift). Do not invent glows, magical effects,
-text, labels or logos unless the record says so. No numbers of uses, rules, owners, backstory or people. Return every item id
-you were given."""
+text, labels or logos unless the record says so. No numbers of uses, rules, owners, backstory or people.
+Begin with the kind of object in everyday words, its overall silhouette, its size next to a person and how it stands or lies
+("a waist-high freestanding folding barrier, standing open in a zigzag, seen from a three-quarter angle"); a painter given
+only surface words ("slats", "panel", "wall", "folded flat") paints a flat texture that fills the frame, so describe the whole
+object's outline.
+Write it for a painter who never sees the item's name and takes every word literally. Use plain physical words only: no
+metaphors, nicknames or comparisons, and never a word that names an animal, a musical instrument, a person or another object
+unless the thing literally is one. A "Porcupine Pod" trap is "a squat dented steel canister on a round spring base, its lid
+studded with short sharp steel spikes, one thin dart tip showing in a hole on top", not "quills"; an "Accordion Barricade" is "a
+tall folding wall of riveted steel slats in a zigzag lattice, chipped yellow and black hazard paint", not "concertina". Use the
+record's construction (trap components, attachments, materials) to say what it is made of.
+Also give "features": two to four short comma-separated phrases naming what makes it recognisable and must be visible (for
+the Porcupine Pod: "dozens of short sharp steel spikes sticking out of the lid, squat steel canister on a coil spring"; for
+the Accordion Barricade: "freestanding zigzag folding steel barrier, yellow and black hazard stripes"). The first feature is
+the object's overall shape. Plain words, no commas inside a phrase.
+Also give "misleading": the words of the item's NAME that are not literally what it is ("Porcupine" in Porcupine Pod,
+"Accordion" in Accordion Barricade, "Crawler" in Crawler Biscuit, "Murder" in Murder Drum), or empty when every word is
+literal ("Plastic alligator dashboard bobblehead" really is a plastic alligator; a "golden-retriever ornament" really is a
+dog figurine; "Recovered Shotgun Shell Cache" really is shotgun shells).
+Then "avoid": only what those misleading words could make a painter draw instead, and empty when "misleading" is empty (for the Porcupine Pod:
+"porcupine, hedgehog, animal, fur, quills"; for the Accordion Barricade: "accordion, musical instrument, piano keys,
+bellows"). Never list the item itself, what it really is, or any word your look uses (a dart's avoid list never says "dart";
+a pickup truck's never says "truck" or "vehicle"), and never anything that resembles a feature it must show: a negative
+prompt suppresses look-alikes too, so a spiked pod's list leaves out "quills" and "spines" (they would erase its spikes). Leave it empty when the name already says plainly what it is. If a
+"current_look" is given, keep what it gets right and rewrite misleading, figurative or vague wording (like "quills" or
+"concertina"); don't add glows or magic the record doesn't give. Return every item id you were given."""
+
+PLACE_LOOK_SYSTEM = """You write short visual descriptions for location illustrations (wide establishing shots, no people) in a
+Dungeon Crawler Carl tabletop campaign. The Third Floor is the Over City: a sprawling, decaying fantasy city built by the
+System, full of mismatched districts, markets, guildhalls, inns and ruins, under a strange sky. For each place, write two or
+three plain sentences (under 60 words) of what the painter should see: architecture, materials, scale, street or room layout,
+light, weather and mood. Use only what the record says plus ordinary details that fit it (a saferoom is an inn or shelter
+with a warm, protected look; a market district has stalls, awnings and signage without readable text). For a place the party
+has only seen from outside ("visited": false), describe its exterior as seen from a distance. Never include people, crowds,
+named characters, monsters or plans; no text or logos. Write for a painter who takes every word literally: no metaphors.
+Also give "features": two to four short comma-separated phrases a painter must show (for a saferoom inn: "warm hearth
+fire, heavy barred door").
+Also give "avoid": a short comma list of things the NAME could make a painter wrongly draw instead ("The Molting Pigeon":
+"pigeon, bird, feathers"; "Fallen Watch": "wristwatch, clock"), or empty; never a word your look uses. Return every place
+key you were given."""
 
 
 def _item_record(i: dict) -> dict:
@@ -277,10 +408,53 @@ def _item_record(i: dict) -> dict:
     return json.loads(text) if len(text) <= 900 else {"id": i["id"], "name": i["name"], "summary": text[:900]}
 
 
+def draft_place_looks(conn: sqlite3.Connection, settings: Settings, cid: int, keys: list[str] | None = None, overwrite: bool = False) -> dict:
+    """A look and an avoid list for each place on the party's map, from its player-known record (art only, not canon)."""
+    from ..gm.providers import GeminiProvider, ProviderError
+    from ..gm.router import GeminiQuota
+    from ..memory.places import known_world
+    world = known_world(conn, cid)
+    todo = [n for k, n in world["nodes"].items() if (not keys or k in keys) and (overwrite or not appearance(conn, cid, "location", k))]
+    if not todo:
+        return {"drafted": [], "skipped": 0, "remaining": 0}
+    def where(n):
+        out, p = [], n["parent"]
+        while p:
+            out.append(world["nodes"][p]["name"])
+            p = world["nodes"][p]["parent"]
+        return ", ".join(out)
+    facts = rows(conn, "SELECT fact FROM lore_facts WHERE campaign_id = ? AND visibility = 'player'", (cid,))
+    record = json.dumps([{"key": n["key"], "name": n["name"], "in": where(n), "visited": n["visited"], "saferoom": n["saferoom"],
+                          "record": _clean(n["description"]),
+                          "lore": [f["fact"][:300] for f in facts if n["name"].lower() in f["fact"].lower()][:3],
+                          "current_look": appearance(conn, cid, "location", n["key"]) or None} for n in todo], ensure_ascii=False)
+    schema = {"type": "object", "additionalProperties": False, "required": ["places"], "properties": {"places": {"type": "array", "items": {
+        "type": "object", "additionalProperties": False, "required": ["key", "look", "features", "avoid"],
+        "properties": {"key": {"type": "string"}, "look": {"type": "string"}, "features": {"type": "string"}, "avoid": {"type": "string"}}}}}}
+    try:
+        raw = _draft(settings, PLACE_LOOK_SYSTEM, record, schema, "place-looks")
+    except ProviderError as exc:
+        raise ValueError(str(exc)) from None
+    names = {n["key"]: n["name"] for n in todo}
+    drafted, skipped = [], 0
+    for d in json.loads(raw).get("places") or []:
+        look = _clean(d.get("look"))[:700]
+        if d.get("key") not in names or not look or leaks_secret(conn, cid, look):
+            skipped += 1
+            continue
+        av = clean_avoid(d.get("avoid") or "", look)
+        set_appearance(conn, cid, "location", d["key"], look)
+        set_avoid(conn, cid, "location", d["key"], av)
+        set_features(conn, cid, "location", d["key"], d.get("features") or "")
+        drafted.append({"key": d["key"], "name": names[d["key"]], "appearance": look, "features": d.get("features") or "", "avoid": av})
+    return {"drafted": drafted, "skipped": skipped, "remaining": len(todo) - len(drafted) - skipped}
+
+
 def draft_item_looks(conn: sqlite3.Connection, settings: Settings, cid: int, item_ids: list[int] | None = None,
                      overwrite: bool = False, batch: int = 20) -> dict:
-    """Ask Gemini Flash Lite for a physical look per item, saved as the item's Appearance notes (art only, not canon; the
-    owner reviews and edits them). Existing notes are kept unless overwrite. Batches keep the quota use to a few calls."""
+    """Ask Gemini Flash Lite for a physical look and an avoid list per item, saved as the item's Appearance notes (art only,
+    not canon; the owner reviews and edits them). Existing notes are kept unless overwrite, which revises them (the current
+    look is sent along, so what it gets right is kept). Batches keep the quota use to a few calls."""
     from ..gm.providers import GeminiProvider, ProviderError
     from ..gm.router import GeminiQuota
     from ..importer.visual_reference import bible_guide
@@ -293,19 +467,17 @@ def draft_item_looks(conn: sqlite3.Connection, settings: Settings, cid: int, ite
     if not items:
         return {"drafted": [], "skipped": 0, "remaining": 0}
     chunks = [items[k:k + batch] for k in range(0, len(items), batch)]
-    model = "gemini-3.5-flash-lite"
-    if not settings.gemini_api_key() or GeminiQuota(settings).remaining(model) < len(chunks):
-        raise ValueError(f"Needs {len(chunks)} Gemini Flash Lite request(s); no key or not enough quota left today")
     canon = bible_guide(conn, cid).get("shared_hardware")
     system = ITEM_LOOK_SYSTEM + (f"\nEstablished look of a shared item: {json.dumps(canon, ensure_ascii=False)}" if canon else "")
     schema = {"type": "object", "additionalProperties": False, "required": ["items"], "properties": {"items": {"type": "array", "items": {
-        "type": "object", "additionalProperties": False, "required": ["id", "look"],
-        "properties": {"id": {"type": "integer"}, "look": {"type": "string"}}}}}}
+        "type": "object", "additionalProperties": False, "required": ["id", "look", "features", "misleading", "avoid"],
+        "properties": {"id": {"type": "integer"}, "look": {"type": "string"}, "features": {"type": "string"}, "misleading": {"type": "string"},
+                       "avoid": {"type": "string"}}}}}}
     drafted, skipped = [], 0
     for chunk in chunks:
-        record = json.dumps([_item_record(i) for i in chunk], ensure_ascii=False)
+        record = json.dumps([{**_item_record(i), "current_look": appearance(conn, cid, "item", str(i["id"])) or None} for i in chunk], ensure_ascii=False)
         try:
-            raw, _ = GeminiProvider(settings, model=model, effort="low")._generate(system, record, schema, "item-looks")
+            raw = _draft(settings, system, record, schema, "item-looks")
         except ProviderError as exc:
             if drafted:
                 break  # keep what was drafted; report the rest as remaining
@@ -316,8 +488,12 @@ def draft_item_looks(conn: sqlite3.Connection, settings: Settings, cid: int, ite
             if d.get("id") not in names or not look or leaks_secret(conn, cid, look):
                 skipped += 1
                 continue
+            # a don't-draw list only where the name misleads: for a literal name it can only suppress the thing itself
+            av = clean_avoid(d.get("avoid") or "", look) if _misleads(d.get("misleading"), names[d["id"]]) else ""
             set_appearance(conn, cid, "item", str(d["id"]), look)
-            drafted.append({"id": d["id"], "name": names[d["id"]], "appearance": look})
+            set_avoid(conn, cid, "item", str(d["id"]), av)
+            set_features(conn, cid, "item", str(d["id"]), d.get("features") or "")
+            drafted.append({"id": d["id"], "name": names[d["id"]], "appearance": look, "features": d.get("features") or "", "avoid": av})
     return {"drafted": drafted, "skipped": skipped, "remaining": len(items) - len(drafted) - skipped}
 
 
@@ -327,9 +503,12 @@ def appearances(conn: sqlite3.Connection, cid: int, kind: str) -> dict[str, str]
 
 
 def build_prompt(kind: str, description: str, extra: str | None = None, style: str | None = None) -> str:
-    """Subject first (SDXL weights the start of a prompt most), then the GM's or player's extra words, then style."""
+    """Subject first (SDXL weights the start of a prompt most), then the GM's or player's extra words, then style. A short
+    medium anchor leads, so a long description (weighted features, a full look) can't push the painting style out of the
+    first 77-token chunk and leave a photograph."""
     body = "; ".join(x for x in (description, _clean(extra)) if x)
-    return f"{body}, {style or KIND_STYLE[kind]}, {STYLE}"[:MAX_PROMPT]
+    anchor = "(oil painting:1.2) of " if kind in ("item", "location") else ""  # portraits keep their tuned subject-first start
+    return f"{anchor}{body}, {style or KIND_STYLE[kind]}, {STYLE}"[:MAX_PROMPT]
 
 
 def _shingles(text: str, n: int = 6) -> set[str]:
@@ -425,7 +604,7 @@ def create_job(conn: sqlite3.Connection, settings: Settings, cid: int, kind: str
         final = (prompt or "").strip()[:MAX_PROMPT] or build_prompt(kind, desc, extra, style)
     jid = conn.execute("""INSERT INTO art_jobs (campaign_id, kind, subject_id, subject_name, prompt, negative, width, height, seed, status,
                           source, reason, note, turn_id, checkpoint, created_at, engine) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                       (cid, kind, subject_id, name, final, ", ".join(x for x in (NEGATIVE, KIND_NEGATIVE.get(kind), subject_negative(conn, cid, kind, subject_id)) if x), w, h, random.randint(1, 2**31 - 1), status, source, reason, note,
+                       (cid, kind, subject_id, name, final, ", ".join(x for x in (NEGATIVE, KIND_NEGATIVE.get(kind), subject_negative(conn, cid, kind, subject_id, name)) if x), w, h, random.randint(1, 2**31 - 1), status, source, reason, note,
                         turn_id, checkpoint_name(settings) if eng == "comfy" else "codex image tool", now_iso(), eng)).lastrowid
     return job_view(one(conn, "SELECT * FROM art_jobs WHERE id = ?", (jid,)))
 
@@ -442,7 +621,7 @@ def current_art(conn: sqlite3.Connection, cid: int) -> dict:
     out: dict[str, dict] = {k: {} for k in KINDS}
     for j in rows(conn, "SELECT kind, subject_id, subject_name, file FROM art_jobs WHERE campaign_id = ? AND is_current = 1 AND status = 'done'", (cid,)):
         url = f"media/art/{cid}/{j['file']}"
-        key = j["subject_name"].lower() if j["kind"] == "mob" else str(j["subject_id"])
+        key = _named_key(j["kind"], j["subject_name"]) if j["kind"] in NAMED else str(j["subject_id"])
         out[j["kind"]][key] = url
     return out
 
@@ -453,9 +632,9 @@ def make_current(conn: sqlite3.Connection, settings: Settings, job_id: int) -> d
     j = one(conn, "SELECT * FROM art_jobs WHERE id = ?", (job_id,))
     if not j or j["status"] != "done":
         raise ValueError("only a finished picture can be used")
-    same = "subject_name = ? COLLATE NOCASE" if j["kind"] == "mob" else "subject_id = ?"
+    same = "subject_name = ? COLLATE NOCASE" if j["kind"] in NAMED else "subject_id = ?"
     conn.execute(f"UPDATE art_jobs SET is_current = 0 WHERE campaign_id = ? AND kind = ? AND {same}",
-                 (j["campaign_id"], j["kind"], j["subject_name"] if j["kind"] == "mob" else j["subject_id"]))
+                 (j["campaign_id"], j["kind"], j["subject_name"] if j["kind"] in NAMED else j["subject_id"]))
     conn.execute("UPDATE art_jobs SET is_current = 1 WHERE id = ?", (job_id,))
     if j["kind"] == "character" and j["subject_id"]:
         settings.portraits_dir.mkdir(parents=True, exist_ok=True)
@@ -463,6 +642,14 @@ def make_current(conn: sqlite3.Connection, settings: Settings, job_id: int) -> d
         shutil.copyfile(art_dir(settings, j["campaign_id"]) / j["file"], settings.portraits_dir / name)
         conn.execute("UPDATE characters SET portrait_path = ?, portrait_crop_json = NULL WHERE id = ?", (name, j["subject_id"]))
     return job_view(one(conn, "SELECT * FROM art_jobs WHERE id = ?", (job_id,)))
+
+
+def _named_key(kind: str, name: str) -> str:
+    """A Mob by its lower-case name; a place by its map key ('the molting pigeon' -> 'molting pigeon')."""
+    if kind == "location":
+        from ..memory.places import key
+        return key(name)
+    return name.lower()
 
 
 def art_dir(settings: Settings, cid: int) -> Path:

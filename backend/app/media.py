@@ -51,7 +51,7 @@ def thumbnail(src: Path, w: int, cache_dir: Path) -> tuple[Path, str]:
         return out, mt
 
 
-def warm(folders: list[Path], cache_dir: Path, widths: tuple[int, ...] = (64, 128)) -> int:
+def warm(folders: list[Path], cache_dir: Path, widths: tuple[int, ...] = (64, 128, 256)) -> int:
     """Make the small sizes the roster, inventory and story ask for first, so a first visit isn't waiting on them.
     Already-cached ones are skipped; failures are ignored (that picture is then made on demand)."""
     made = 0

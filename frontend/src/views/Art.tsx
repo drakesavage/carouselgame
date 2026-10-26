@@ -2,9 +2,9 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Check, Crop, ImagePlus, Loader2, Paintbrush, RefreshCw, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ArtJob, ArtKind } from "../api";
-import { Chip, Panel, Portrait, PortraitCrop, sized } from "../ui";
+import { Chip, Panel, placeKey, Portrait, PortraitCrop, sized } from "../ui";
 
-const KIND_LABEL: Record<ArtKind, string> = { character: "portrait", item: "item", mob: "Mob", scene: "scene" };
+const KIND_LABEL: Record<ArtKind, string> = { character: "portrait", item: "item", mob: "Mob", scene: "scene", location: "place" };
 
 /** Small "Paint" button that opens the art dialog for one subject. */
 export function ArtButton({ cid, kind, subjectId, subjectName, label, onChanged, small = true }:
@@ -32,11 +32,15 @@ function useJobs(cid: number, params: { kind?: ArtKind; subject_id?: number | nu
 
 function ArtDialog({ cid, kind, subjectId, subjectName, onClose }:
   { cid: number; kind: ArtKind; subjectId?: number | null; subjectName: string; onClose: () => void }) {
-  const params = kind === "mob" ? { kind, subject_name: subjectName } : { kind, subject_id: subjectId ?? undefined };
+  const params = kind === "mob" || kind === "location" ? { kind, subject_name: subjectName } : { kind, subject_id: subjectId ?? undefined };
   const { jobs, load, busy } = useJobs(cid, params);
   const [prompt, setPrompt] = useState("");
   const [look, setLook] = useState("");
   const [savedLook, setSavedLook] = useState("");
+  const [avoid, setAvoid] = useState("");
+  const [savedAvoid, setSavedAvoid] = useState("");
+  const [feats, setFeats] = useState("");
+  const [savedFeats, setSavedFeats] = useState("");
   const [open, setOpen] = useState<string[]>([]);
   const [drafting, setDrafting] = useState(false);
   const [engine, setEngine] = useState<string>(kind === "character" ? "codex" : "comfy");
@@ -46,7 +50,7 @@ function ArtDialog({ cid, kind, subjectId, subjectName, onClose }:
   const [err, setErr] = useState<string | null>(null);
   const [status, setStatus] = useState<Record<string, any> | null>(null);
   useEffect(() => {
-    api.artPreview(cid, kind, subjectId, subjectName, engine).then((p) => { setPrompt(p.prompt); if (p.engine) setEngine(p.engine); setLook(p.appearance ?? ""); setSavedLook(p.appearance ?? ""); setOpen(p.unestablished ?? []); })
+    api.artPreview(cid, kind, subjectId, subjectName, engine).then((p) => { setPrompt(p.prompt); if (p.engine) setEngine(p.engine); setLook(p.appearance ?? ""); setSavedLook(p.appearance ?? ""); setAvoid(p.avoid ?? ""); setSavedAvoid(p.avoid ?? ""); setFeats(p.features ?? ""); setSavedFeats(p.features ?? ""); setOpen(p.unestablished ?? []); })
       .catch((e) => setErr(String(e)));
     api.artStatus().then(setStatus).catch(() => {});
   }, [cid, kind, subjectId, subjectName]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -57,10 +61,10 @@ function ArtDialog({ cid, kind, subjectId, subjectName, onClose }:
   const done = jobs.filter((j) => j.status === "done");
   const current = done.find((j) => j.is_current) ?? done[0];
   const saveLook = async () => {
-    if (look === savedLook) return;
+    if (look === savedLook && avoid === savedAvoid && feats === savedFeats) return;
     try {
-      await api.artAppearance(cid, { kind, subject_id: subjectId ?? undefined, subject_name: subjectName, appearance: look });
-      setSavedLook(look);
+      await api.artAppearance(cid, { kind, subject_id: subjectId ?? undefined, subject_name: subjectName, appearance: look, avoid, features: feats });
+      setSavedLook(look); setSavedAvoid(avoid); setSavedFeats(feats);
       setPrompt((await api.artPreview(cid, kind, subjectId, subjectName, engine)).prompt);
     } catch (e) { setErr(String(e)); }
   };
@@ -118,17 +122,29 @@ function ArtDialog({ cid, kind, subjectId, subjectName, onClose }:
                 <div className="h2" style={{ marginTop: 10 }}>Appearance</div>
                 <textarea className="input" rows={3} value={look} onChange={(e) => setLook(e.target.value)} onBlur={saveLook}
                   placeholder={kind === "character" ? "e.g. woman in her forties, short grey-streaked hair, broad shoulders, tired eyes" : "what it looks like"} />
-                {(kind === "character" || kind === "item") && subjectId != null && (
+                {(kind === "item" || kind === "location") && (
+                  <>
+                    <div className="sub" style={{ marginTop: 6 }}>Must show (weighted up; the first is the overall shape)</div>
+                    <input className="input" value={feats} onChange={(e) => setFeats(e.target.value)} onBlur={saveLook} placeholder="e.g. dozens of short steel spikes on the lid, squat canister on a coil spring" />
+                    <div className="sub" style={{ marginTop: 6 }}>Don't draw (from the name: an image model paints names literally)</div>
+                    <input className="input" value={avoid} onChange={(e) => setAvoid(e.target.value)} onBlur={saveLook} placeholder="e.g. porcupine, hedgehog, animal" />
+                  </>
+                )}
+                {((kind === "character" || kind === "item") && subjectId != null || kind === "location") && (
                   <button className="btn small ghost" style={{ justifySelf: "start", marginTop: 4 }} disabled={drafting} onClick={async () => {
                     setDrafting(true); setErr(null);
                     try {
-                      if (kind === "character") setLook((await api.artDraftAppearance(cid, subjectId)).appearance);
+                      if (kind === "character") setLook((await api.artDraftAppearance(cid, subjectId!)).appearance);
+                      else if (kind === "location") {
+                        const d = (await api.artDraftPlaceLooks(cid, { keys: [placeKey(subjectName)], overwrite: true })).drafted[0];
+                        if (d) { setLook(d.appearance); setSavedLook(d.appearance); setAvoid(d.avoid); setSavedAvoid(d.avoid); setFeats(d.features ?? ""); setSavedFeats(d.features ?? ""); setPrompt((await api.artPreview(cid, kind, subjectId, subjectName, engine)).prompt); }
+                      }
                       else {  // items: the draft is saved like the batch on the Inventory page, so refresh the prompt too
-                        const d = (await api.artDraftItemLooks(cid, { item_ids: [subjectId], overwrite: true })).drafted[0];
-                        if (d) { setLook(d.appearance); setSavedLook(d.appearance); setPrompt((await api.artPreview(cid, kind, subjectId, subjectName, engine)).prompt); }
+                        const d = (await api.artDraftItemLooks(cid, { item_ids: [subjectId!], overwrite: true })).drafted[0];
+                        if (d) { setLook(d.appearance); setSavedLook(d.appearance); setAvoid(d.avoid ?? ""); setSavedAvoid(d.avoid ?? ""); setFeats(d.features ?? ""); setSavedFeats(d.features ?? ""); setPrompt((await api.artPreview(cid, kind, subjectId, subjectName, engine)).prompt); }
                       }
                     } catch (e) { setErr(String(e)); } finally { setDrafting(false); }
-                  }}>{drafting ? <Loader2 size={11} className="spin" /> : <Sparkles size={11} />} Draft with Gemini</button>)}
+                  }}>{drafting ? <Loader2 size={11} className="spin" /> : <Sparkles size={11} />} Draft look</button>)}
                 <div className="sub">{open.length ? <>The ledger leaves these open: {open.join(", ").toLowerCase()}. </> : null}
                   Saved for every future picture of {subjectName}, so they stay consistent. Art only; not campaign canon.</div>
               <div className="h2" style={{ marginTop: 10 }}>Prompt</div>

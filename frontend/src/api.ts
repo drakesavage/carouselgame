@@ -58,7 +58,7 @@ export type Campaign = {
   recent_events: { id: number; type: string; summary: string; game_time_minutes: number | null }[];
   art?: ArtMap;
 };
-export type ArtKind = "character" | "item" | "mob" | "scene";
+export type ArtKind = "character" | "item" | "mob" | "scene" | "location";
 /** Current picture URL per subject: ids as keys, except mobs (lower-case name). */
 export type ArtMap = Record<ArtKind, Record<string, string>>;
 export type ArtJob = { id: number; campaign_id: number; kind: ArtKind; subject_id: number | null; subject_name: string; prompt: string;
@@ -99,6 +99,11 @@ export type RuleSuggestion = { kind: "entry" | "house_rule"; label: string; ref?
 export type RuleBrowse = { books?: { id: number; title: string; entry_count: number; chapters: number }[];
   book?: { id: number; title: string; page_offset: number } | null; chapters?: { title: string; page: number; sections: { title: string; page: number }[] }[];
   entries?: { name: string; page: number; chapter: string | null }[] };
+/** The places the party knows (memory/places.py): a nested tree from recorded locations, no invented geography. */
+export type Place = { key: string; name: string; parent: string | null; children: string[]; visited: boolean; saferoom: boolean; current: boolean;
+  floor: number | null; description: string | null; groups: { key: string; label: string; members: number }[]; sources: string[] };
+export type KnownWorld = { floor: number | null; roots: string[]; nodes: Record<string, Place>; routes: { a: string; b: string; times: number; last: number | null }[];
+  unplaced_groups: { key: string; label: string }[] };
 export type Manifest = { locations: Record<string, string>; characters: Record<string, string> };
 export type DiagnosticsRow = { turn_id: number; status: string; input: string; created_at: string; rounds: number; flags: number; input_tokens: number };
 export type TurnStatus = { turn_id: number; status: "processing" | "completed" | "failed"; replayed: boolean; error: string | null;
@@ -161,6 +166,7 @@ export const api = {
   quests: (id: number) => req<Quest[]>(`api/campaigns/${id}/quests`),
   npcs: (id: number) => req<Person[]>(`api/campaigns/${id}/npcs`),
   timeline: (id: number) => req<EventRow[]>(`api/campaigns/${id}/timeline`),
+  places: (id: number) => req<KnownWorld>(`api/campaigns/${id}/places`),
   journal: (id: number) => req<{ kinds: { id: string; label: string }[]; quests: JournalQuest[] }>(`api/campaigns/${id}/journal`),
   loreNotebook: (id: number) => req<LoreFact[]>(`api/campaigns/${id}/lore-notebook`),
   chronology: (id: number) => req<Chronology>(`api/campaigns/${id}/chronology`),
@@ -211,7 +217,7 @@ export const api = {
     req<{ appearance: string }>(`api/campaigns/${cid}/art/draft-appearance`, { method: "POST", body: JSON.stringify({ kind: "character", subject_id: subjectId }) }),
   consistency: (cid: number) => req<{ ok: boolean; failed: number; checks: { check: string; ok: boolean; values: Record<string, unknown>; note?: string }[] }>(`api/campaigns/${cid}/consistency`),
   artDraftItemLooks: (cid: number, body: { item_ids?: number[]; overwrite?: boolean } = {}) =>
-    post<{ drafted: { id: number; name: string; appearance: string }[]; skipped: number; remaining: number }>(`api/campaigns/${cid}/art/draft-item-looks`, body),
+    post<{ drafted: { id: number; name: string; appearance: string; avoid?: string; features?: string }[]; skipped: number; remaining: number }>(`api/campaigns/${cid}/art/draft-item-looks`, body),
   artAppearances: (cid: number, kind: ArtKind) => req<Record<string, string>>(`api/campaigns/${cid}/art/appearances?kind=${kind}`),
   artList: (cid: number, p: { kind?: ArtKind; subject_id?: number | null; subject_name?: string }) => {
     const q = new URLSearchParams(Object.entries(p).filter(([, v]) => v != null && v !== "").map(([k, v]) => [k, String(v)]));
@@ -219,10 +225,12 @@ export const api = {
   },
   artPreview: (cid: number, kind: ArtKind, subjectId?: number | null, subjectName?: string, engine?: string) => {
     const q = new URLSearchParams({ kind, ...(subjectId != null ? { subject_id: String(subjectId) } : {}), ...(subjectName ? { subject_name: subjectName } : {}), ...(engine ? { engine } : {}) });
-    return req<{ subject_name: string; prompt: string; engine: string; negative: string; size: [number, number]; appearance: string; unestablished: string[] }>(`api/campaigns/${cid}/art/preview?${q}`);
+    return req<{ subject_name: string; prompt: string; engine: string; negative: string; size: [number, number]; appearance: string; avoid?: string; features?: string; unestablished: string[] }>(`api/campaigns/${cid}/art/preview?${q}`);
   },
-  artAppearance: (cid: number, body: { kind: ArtKind; subject_id?: number | null; subject_name?: string; appearance: string }) =>
+  artAppearance: (cid: number, body: { kind: ArtKind; subject_id?: number | null; subject_name?: string; appearance: string; avoid?: string; features?: string }) =>
     req<{ ok: boolean }>(`api/campaigns/${cid}/art/appearance`, { method: "PUT", body: JSON.stringify(body) }),
+  artDraftPlaceLooks: (cid: number, body: { keys?: string[]; overwrite?: boolean } = {}) =>
+    post<{ drafted: { key: string; name: string; appearance: string; avoid: string; features?: string }[]; skipped: number; remaining: number }>(`api/campaigns/${cid}/art/draft-place-looks`, body),
   artRefs: (cid: number, charId: number) => req<{ name: string; url: string }[]>(`api/campaigns/${cid}/characters/${charId}/art-refs`),
   artRefUpload: (cid: number, charId: number, file: File) => {
     const fd = new FormData(); fd.append("file", file);

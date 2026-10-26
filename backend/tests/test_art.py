@@ -261,8 +261,9 @@ def test_item_looks_are_drafted_in_batches_and_replace_bookkeeping_in_prompts(co
     def fake_generate(self, system, prompt, schema, label):
         items = _json.loads(prompt)
         calls.append(len(items))
-        return _json.dumps({"items": [{"id": i["id"], "look": f"a plain {i['name'].lower()}"} for i in items]}), {}
+        return _json.dumps({"items": [{"id": i["id"], "look": f"a plain {i['name'].lower()}", "avoid": ""} for i in items]}), {}
     monkeypatch.setattr(providers.GeminiProvider, "_generate", fake_generate)
+    monkeypatch.setattr(providers.CodexCliProvider, "_run", lambda *a, **k: (_ for _ in ()).throw(providers.ProviderError("codex off in tests")))
     monkeypatch.setattr(type(settings), "gemini_api_key", lambda self: "test-key")
     monkeypatch.setattr(router.GeminiQuota, "remaining", lambda self, model: 50)
     with transaction(conn):
@@ -272,10 +273,73 @@ def test_item_looks_are_drafted_in_batches_and_replace_bookkeeping_in_prompts(co
     out = art.draft_item_looks(conn, settings, demo_id, batch=3)
     assert len(out["drafted"]) == n and calls and max(calls) <= 3 and len(calls) == -(-n // 3)
     name, desc = art.subject_text(conn, demo_id, "item", iid, None)
-    assert desc == "Heavy Fire Blanket; a plain heavy fire blanket" and ".yaml" not in desc
+    assert desc == "a plain heavy fire blanket" and ".yaml" not in desc  # the look alone: names are drawn literally
     assert "fire, flames" in art.subject_negative(conn, demo_id, "item", iid)
     again = art.draft_item_looks(conn, settings, demo_id)  # existing looks are kept
     assert again["drafted"] == [] and len(calls) == -(-n // 3)
+
+
+def test_misleading_names_stay_out_of_the_picture(conn, settings, demo_id, monkeypatch):
+    """'Porcupine Pod' painted a porcupine and 'Accordion Barricade' an accordion: the prompt is the look alone, and the
+    drafter's don't-draw list goes into the negative prompt. Revising sends the current look along."""
+    import json as _json
+    from app.gm import providers, router
+    seen = []
+
+    def fake_generate(self, system, prompt, schema, label):
+        items = _json.loads(prompt)
+        seen.extend(items)
+        return _json.dumps({"items": [{"id": i["id"], "look": "a squat dented steel canister studded with short steel spikes",
+                                       "features": "short steel spikes on the lid, coil spring base", "misleading": "Porcupine",
+                                       "avoid": "porcupine, hedgehog, animal, fur"} for i in items]}), {}
+    monkeypatch.setattr(providers.GeminiProvider, "_generate", fake_generate)
+    monkeypatch.setattr(providers.CodexCliProvider, "_run", lambda *a, **k: (_ for _ in ()).throw(providers.ProviderError("codex off in tests")))
+    monkeypatch.setattr(type(settings), "gemini_api_key", lambda self: "test-key")
+    monkeypatch.setattr(router.GeminiQuota, "remaining", lambda self, model: 50)
+    with transaction(conn):
+        iid = conn.execute("INSERT INTO items (campaign_id, name, quantity, properties_json) VALUES (?,?,?,?)",
+                           (demo_id, "Porcupine Pod", 1, '{"trap": {"components": "spring pod with one paralytic dart"}}')).lastrowid
+    art.set_appearance(conn, demo_id, "item", str(iid), "A cylindrical pod covered in quills.")
+    art.draft_item_looks(conn, settings, demo_id, [iid], overwrite=True)
+    sent = next(i for i in seen if i["id"] == iid)
+    assert sent["current_look"] == "A cylindrical pod covered in quills." and "spring pod" in _json.dumps(sent)
+    name, desc = art.subject_text(conn, demo_id, "item", iid, None)
+    assert name == "Porcupine Pod" and "Porcupine" not in desc and "spikes" in desc
+    assert desc.startswith("(short steel spikes on the lid:1.25), (coil spring base:1.25), a squat dented")  # must-show features first, weighted
+    neg = art.subject_negative(conn, demo_id, "item", iid)
+    assert "porcupine, hedgehog" in neg and "fire, flames" in neg
+    job = art.create_job(conn, settings, demo_id, "item", subject_id=iid, status="suggested")
+    assert "Porcupine" not in job["prompt"] and "porcupine" in one(conn, "SELECT negative FROM art_jobs WHERE id = ?", (job["id"],))["negative"]
+
+
+def test_places_get_drafted_looks_without_people(conn, settings, demo_id, monkeypatch):
+    import json as _json
+    from app.gm import providers, router
+    with transaction(conn):
+        conn.execute("INSERT INTO locations (campaign_id, floor, name, description, visited) VALUES (?,?,?,?,?)",
+                     (demo_id, 3, "The Molting Pigeon, Heavensworth, Over City", "Saferoom; Jonai and Margit are stationed there.", 1))
+        conn.execute("INSERT INTO locations (campaign_id, floor, name, description, visited) VALUES (?,?,?,?,?)",
+                     (demo_id, 3, "Fallen Watch, Heavensworth, Over City", "The old prison, under reconnaissance.", 0))
+    sent = {}
+
+    def fake_generate(self, system, prompt, schema, label):
+        places = _json.loads(prompt)
+        sent.update({p["key"]: p for p in places})
+        return _json.dumps({"places": [{"key": p["key"], "look": f"a weathered stone building with {len(p['key'])} shuttered windows",
+                                        "avoid": "pigeon, bird" if "pigeon" in p["key"] else ""} for p in places]}), {}
+    monkeypatch.setattr(providers.GeminiProvider, "_generate", fake_generate)
+    monkeypatch.setattr(providers.CodexCliProvider, "_run", lambda *a, **k: (_ for _ in ()).throw(providers.ProviderError("codex off in tests")))
+    monkeypatch.setattr(type(settings), "gemini_api_key", lambda self: "test-key")
+    monkeypatch.setattr(router.GeminiQuota, "remaining", lambda self, model: 50)
+    # before a look: the place and its district only, never its record text (which names people)
+    assert art.subject_text(conn, demo_id, "location", None, "The Molting Pigeon")[1] == "The Molting Pigeon, in Heavensworth, Over City"
+    out = art.draft_place_looks(conn, settings, demo_id)
+    assert {"molting pigeon", "fallen watch", "heavensworth", "over city"} <= {d["key"] for d in out["drafted"]}
+    assert sent["fallen watch"]["visited"] is False and sent["molting pigeon"]["visited"] is True
+    assert "Jonai" not in _json.dumps(sent["molting pigeon"]["current_look"] or "")
+    assert art.subject_text(conn, demo_id, "location", None, "The Molting Pigeon")[1] == "a weathered stone building with 14 shuttered windows"
+    assert "pigeon, bird" in art.subject_negative(conn, demo_id, "location", None, "The Molting Pigeon")
+    assert art.draft_place_looks(conn, settings, demo_id)["drafted"] == []  # existing looks are kept
 
 
 def test_draft_item_looks_endpoint_takes_a_json_body(client, demo_id, monkeypatch):
@@ -284,3 +348,23 @@ def test_draft_item_looks_endpoint_takes_a_json_body(client, demo_id, monkeypatc
                         {"drafted": [], "skipped": 0, "remaining": 0})
     r = client.post(f"/api/campaigns/{demo_id}/art/draft-item-looks", json={"item_ids": [3], "overwrite": True})
     assert r.status_code == 200 and seen == {"ids": [3], "overwrite": True}
+
+
+def test_dont_draw_lists_never_erase_the_thing_itself():
+    look = "A slender metal dart with a yellow tail fin, in a white compact pickup truck bed"
+    assert art.clean_avoid("dart, porcupine, pickup truck, vehicle, weapon, hedgehog, Darts", look) == "porcupine, hedgehog"
+    assert art.clean_avoid("", look) == ""
+
+
+def test_literal_names_get_no_dont_draw_list(conn, settings, demo_id, monkeypatch):
+    """'Plastic alligator dashboard bobblehead' is an alligator: a don't-draw list could only erase it."""
+    import json as _json
+    from app.gm import providers
+    monkeypatch.setattr(providers.CodexCliProvider, "_run", lambda self, record, schema, label, dev: (_json.dumps({"items": [
+        {"id": i["id"], "look": "a green plastic toy on a spring", "features": "", "misleading": "",
+         "avoid": "reptile, animal"} for i in _json.loads(record)]}), {}))
+    with transaction(conn):
+        iid = conn.execute("INSERT INTO items (campaign_id, name, quantity) VALUES (?,?,?)", (demo_id, "Plastic alligator dashboard bobblehead", 1)).lastrowid
+    art.draft_item_looks(conn, settings, demo_id, [iid], overwrite=True)
+    assert art.avoid(conn, demo_id, "item", str(iid)) == ""
+    assert art._misleads("Porcupine", "Porcupine Pod") and not art._misleads("Hedgehog", "Porcupine Pod") and not art._misleads("", "Arrow")

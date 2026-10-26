@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowDown, BookOpen, ChevronRight, Cog, Dices, Eye, Foot
 import { api, ApiError, Campaign, CharacterCard, Message, newKey, RollCard, TurnStatus } from "../api";
 import { Chip, Empty, Markdown, Portrait } from "../ui";
 import { RulePageDialog } from "./Reference";
+import { play } from "../prefs";
 import { CampaignSidebar, CombatPanel, Decision, DiscoveryCards, IMPORTANT_CARDS, portraitSrc, RosterPanel, SceneBanner, splitDecision, StoryText, useManifest } from "./Hud";
 
 const QUIPS = [
@@ -129,6 +130,7 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
     setPending(null);
     onState();
     const gm = [...fresh].reverse().find((m) => m.role === "gm" && m.turn_id === t.turn_id);
+    if (gm?.meta.rolls?.length) play("dice");
     const big = (gm?.meta.cards ?? []).filter((c) => IMPORTANT_CARDS.has(c.type))
       .map((c) => ({ text: c.summary, style: /down|death|collapse/.test(c.type) ? "warning" : "achievement" }));
     if (t.result?.notices?.length || big.length) onNotices([...(t.result?.notices ?? []), ...big]);

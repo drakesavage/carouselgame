@@ -31,7 +31,7 @@ from .gm.providers import make_provider, prune_jobs, secure_dir
 from .importer.ledger import import_ledger, refresh_mechanical_status, report_markdown
 from .ledger import sync as ledger_sync
 from .ledger.sync import LedgerError
-from .memory import journal, snapshots, views
+from .memory import journal, places, snapshots, views
 from .reference import rulecenter
 from .reference import rulebooks
 from .seed.demo import seed_demo
@@ -73,6 +73,13 @@ class AppearanceIn(BaseModel):
     subject_id: int | None = None
     subject_name: str | None = None
     appearance: str = Field(default="", max_length=600)
+    avoid: str | None = Field(default=None, max_length=300)  # what the painter must not draw (None = leave as is)
+    features: str | None = Field(default=None, max_length=300)  # what must be visible, weighted up in the prompt (None = leave as is)
+
+
+class PlaceLooksIn(BaseModel):
+    keys: list[str] | None = None
+    overwrite: bool = False
 
 
 class ItemLooksIn(BaseModel):
@@ -489,6 +496,15 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         except ValueError as exc:
             raise HTTPException(409, str(exc))
 
+    @app.post("/api/campaigns/{cid}/art/draft-place-looks")
+    def art_draft_place_looks(cid: int, body: PlaceLooksIn, c=Depends(db)):
+        """Gemini drafts a look (and a don't-draw list) for each known place; saved as Appearance notes (art only) for review."""
+        campaign_or_404(c, cid)
+        try:
+            return art.draft_place_looks(c, settings, cid, body.keys, body.overwrite)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+
     @app.get("/api/campaigns/{cid}/art/appearances")
     def art_appearances(cid: int, kind: str, c=Depends(db)):
         campaign_or_404(c, cid)
@@ -517,7 +533,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
             name, desc = art.subject_text(c, cid, kind, subject_id, subject_name)
         except ValueError as exc:
             raise HTTPException(422, str(exc))
-        key = (subject_name or name).lower() if kind == "mob" else str(subject_id or "")
+        key = art._named_key(kind, subject_name or name) if kind in art.NAMED else str(subject_id or "")
         unestablished = []
         if kind == "character":
             ch = one(c, "SELECT * FROM characters WHERE campaign_id = ? AND (id = ? OR lower(name) = lower(?))", (cid, subject_id or -1, subject_name or ""))
@@ -526,17 +542,23 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         eng = art.engine_for(settings, kind, engine)
         prompt = art.codex_prompt(c, settings, cid, int(key)) if eng == "codex" else art.build_prompt(kind, desc, style=style)
         return {"subject_name": name, "prompt": prompt, "engine": eng, "negative": art.NEGATIVE, "size": size,
-                "appearance": art.appearance(c, cid, kind, key) if key else "", "unestablished": unestablished}
+                "appearance": art.appearance(c, cid, kind, key) if key else "", "avoid": art.avoid(c, cid, kind, key) if key else "",
+                "features": art.features(c, cid, kind, key) if key else "",
+                "unestablished": unestablished}
 
     @app.put("/api/campaigns/{cid}/art/appearance")
     def art_set_appearance(cid: int, body: AppearanceIn, c=Depends(db)):
         campaign_or_404(c, cid)
         if body.kind not in art.KINDS:
             raise HTTPException(422, "unknown kind")
-        key = (body.subject_name or "").lower() if body.kind == "mob" else str(body.subject_id or "")
+        key = art._named_key(body.kind, body.subject_name or "") if body.kind in art.NAMED else str(body.subject_id or "")
         if not key:
-            raise HTTPException(422, "subject_id (or subject_name for a Mob) is required")
+            raise HTTPException(422, "subject_id (or subject_name for a Mob or a place) is required")
         art.set_appearance(c, cid, body.kind, key, body.appearance)
+        if body.avoid is not None:
+            art.set_avoid(c, cid, body.kind, key, body.avoid)
+        if body.features is not None:
+            art.set_features(c, cid, body.kind, key, body.features)
         return {"ok": True}
 
     @app.post("/api/campaigns/{cid}/art")
@@ -635,7 +657,8 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
 
     for route, fn in {"inventory": views.inventory, "quests": views.quests, "npcs": views.npcs, "timeline": views.timeline,
                       "rolls": views.player_rolls, "house-rules": views.house_rules, "rulings": rulecenter.rulings, "lore": views.lore,
-                      "journal": journal.journal, "lore-notebook": journal.lore_notebook, "chronology": journal.chronology}.items():
+                      "journal": journal.journal, "lore-notebook": journal.lore_notebook, "chronology": journal.chronology,
+                      "places": places.known_world}.items():
         def make(fn=fn):
             def handler(cid: int, c=Depends(db)):
                 campaign_or_404(c, cid)

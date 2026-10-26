@@ -531,6 +531,9 @@ COLUMN_MIGRATIONS = [
     ("art_jobs", "engine", "TEXT NOT NULL DEFAULT 'comfy'"),
     ("characters", "portrait_crop_json", "TEXT"),
     ("corrections", "resolves_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ("locations", "visited", "INTEGER NOT NULL DEFAULT 1"),
+    ("art_subjects", "avoid", "TEXT NOT NULL DEFAULT ''"),
+    ("art_subjects", "features", "TEXT NOT NULL DEFAULT ''"),  # 2-4 distinctive features an image must show, weighted in the prompt  # what an image model must not draw from the name ("porcupine" for a trap)  # 0 = known (seen, reported) but not entered (memory/places.py)
     ("rulings", "review", "TEXT"),          # NULL pending | approved | rejected (reference/rulecenter.py: only precedents reach later turns)
     ("rulings", "review_note", "TEXT"),
     ("rulings", "reviewed_at", "TEXT"),

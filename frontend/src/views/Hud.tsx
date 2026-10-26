@@ -6,7 +6,7 @@ import {
   MapPin, Skull, Sparkles, Sun, Swords, TrendingUp, Trophy, Wrench, Zap,
 } from "lucide-react";
 import { Campaign, CharacterCard, Encounter, fmtMinutes, Group, Manifest, Quest } from "../api";
-import { Bar, Chip, humanize, Panel, Portrait, sized } from "../ui";
+import { Bar, Chip, humanize, Panel, placeKey, Portrait, sized } from "../ui";
 import { ArtButton, ArtQueue } from "./Art";
 
 // ------------------------------------------------------------------ local artwork
@@ -17,6 +17,16 @@ function locationArt(m: Manifest, ...names: (string | null | undefined)[]): stri
   const hay = names.filter(Boolean).join(" ").toLowerCase();
   const key = Object.keys(m.locations).sort((a, b) => b.length - a.length).find((k) => hay.includes(k.toLowerCase()));
   return key ? `media/assets/${encodeURIComponent(m.locations[key])}` : null;
+}
+
+/** Location art for a location string, most specific place first ("Gilded Feathers, Heavensworth" -> Gilded Feathers, then Heavensworth). */
+export function locationArtFor(campaign: Campaign, location?: string | null): string | null {
+  const art = campaign.art?.location ?? {};
+  for (const part of (location ?? "").split(/,|—| - /).map((p) => p.trim()).filter(Boolean)) {
+    const hit = art[placeKey(part)];
+    if (hit) return hit;
+  }
+  return null;
 }
 
 /** Uploaded portrait first, then manifest art (data/assets), else the generated placeholder. */
@@ -81,7 +91,9 @@ export function SceneBanner({ campaign, onArt, openCharacter }: { campaign: Camp
   const m = useManifest();
   const [open, setOpen] = useState(false);
   const s = campaign.scene;
-  const art = (s && campaign.art?.scene[String(s.id)]) || locationArt(m, s?.location, s?.title, campaign.current_location);
+  // this scene's own picture, else the place's (reused for every scene there), else local assets, else a generated skyline
+  const art = (s && campaign.art?.scene[String(s.id)]) || locationArtFor(campaign, s?.location ?? campaign.current_location)
+    || locationArt(m, s?.location, s?.title, campaign.current_location);
   const here = pcGroup(campaign);
   const others = (here?.members ?? []).filter((c) => c.id !== campaign.active_character_id);
   const safe = campaign.safe_room && sameplace(s?.location, campaign.current_location);

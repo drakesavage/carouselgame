@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { DeviceSettings } from "./DeviceSettings";
 import * as Dialog from "@radix-ui/react-dialog";
 import { AlertTriangle, Bot, Copy, Database, Download, Eye, EyeOff, History, KeyRound, Save, Smartphone } from "lucide-react";
 import { api, Prefs, SavePoint } from "../api";
@@ -49,6 +50,7 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
       <div className="h1">Saves &amp; settings</div>
       {msg && <div className="card" style={{ margin: "10px 0", borderColor: "var(--cyan-dim)" }}>{msg}</div>}
       <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", marginTop: 12 }}>
+        <DeviceSettings />
         <Panel title={<><Save size={13} /> Save points</>}>
           <div className="row"><input className="input" placeholder="Label (optional)" value={label} onChange={(e) => setLabel(e.target.value)} /><button className="btn primary" onClick={save}>Save</button></div>
           <div className="sub" style={{ margin: "8px 0" }}>Every completed turn autosaves (last 25 kept). Restoring hides later transcript/events but keeps them in the audit log.</div>

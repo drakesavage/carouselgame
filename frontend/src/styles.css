@@ -331,7 +331,7 @@ mark { background: rgba(255, 181, 71, 0.25); color: var(--text); border-radius: 
   .sheet-head { grid-template-columns: 84px 1fr; }
   .statgrid { grid-template-columns: repeat(3, 1fr); }
 }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) *, :root:not([data-motion="full"]) *::before, :root:not([data-motion="full"]) *::after { animation: none !important; transition: none !important; } }
 .sheet-head > button { align-self: start; }
 
 /* ledger review */

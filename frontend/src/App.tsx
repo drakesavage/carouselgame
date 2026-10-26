@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Backpack, BookOpen, Clock3, FileText, Flag, GitCommitHorizontal, MessageSquareText, Search, Settings2, UserRound, Users } from "lucide-react";
+import { Backpack, BookOpen, Clock3, FileText, Flag, GitCommitHorizontal, Map as MapIcon, MessageSquareText, Search, Settings2, UserRound, Users } from "lucide-react";
 import { api, Campaign, CampaignListItem, fmtMinutes, Manifest } from "./api";
 import { ManifestContext } from "./views/Hud";
 import { Chip } from "./ui";
@@ -8,6 +8,9 @@ import { CharacterSheetDialog } from "./views/Sheet";
 import { CharactersView } from "./views/Journals";
 import { ChronicleView, QuestsView } from "./views/Journal";
 import { SearchDialog } from "./views/Search";
+import { WorldView } from "./views/World";
+import { Announcement, AnnouncementStage } from "./views/Announce";
+import { applyMotion, getPrefs, play } from "./prefs";
 import { InventoryView } from "./views/Inventory";
 import { PeopleView } from "./views/People";
 import { RecordsView, RulesView } from "./views/Reference";
@@ -21,6 +24,7 @@ const TABS = [
   { id: "quests", label: "Quests", icon: Flag },
   { id: "people", label: "People", icon: Users },
   { id: "timeline", label: "Chronicle", icon: Clock3 },
+  { id: "world", label: "World", icon: MapIcon },
   { id: "rules", label: "Rules", icon: BookOpen },
   { id: "records", label: "Records", icon: FileText },
   { id: "ledger", label: "Ledger", icon: GitCommitHorizontal },
@@ -39,6 +43,8 @@ export default function App() {
   const [sheet, setSheet] = useState<number | null>(null);
   const [focusQuest, setFocusQuest] = useState<number | null>(null);
   const [searching, setSearching] = useState(false);
+  const [announcing, setAnnouncing] = useState<Announcement[]>([]);
+  useEffect(() => applyMotion(), []);
   useEffect(() => { // Ctrl+K anywhere, or "/" when not typing, opens search
     const onKey = (e: KeyboardEvent) => {
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement)?.tagName ?? "") || (e.target as HTMLElement)?.isContentEditable;
@@ -77,11 +83,23 @@ export default function App() {
     setCampaigns(await api.campaigns());
   };
   const pushNotices = (n: { text: string; style: string }[]) => {
+    // device preference: theatrical announcements for the big moments, toasts for the rest; or toasts only; or none
+    const mode = getPrefs().announcements;
+    if (mode === "off") return;
+    const big = mode === "theatrical" ? n.filter((x) => x.style === "achievement" || x.style === "warning") : [];
+    if (big.length) setAnnouncing((q) => [...q, ...big.map((x, i) => ({ ...x, id: Date.now() + 100 + i }))]);
+    n = n.filter((x) => !big.includes(x));
+    if (n.length) play("notice");
     const add = n.map((x, i) => ({ ...x, id: Date.now() + i }));
     setToasts((t) => [...t, ...add].slice(-4));
     add.forEach((t) => setTimeout(() => setToasts((all) => all.filter((x) => x.id !== t.id)), 9000));
   };
   const openQuest = (id?: number) => { setFocusQuest(id ?? null); setTab("quests"); };
+  useEffect(() => { // any component can announce: window.dispatchEvent(new CustomEvent("crawler:announce", { detail: { text, style } }))
+    const on = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.text) pushNotices([{ text: String(d.text), style: String(d.style ?? "notice") }]); };
+    window.addEventListener("crawler:announce", on);
+    return () => window.removeEventListener("crawler:announce", on);
+  });
   const dismiss = (id: number) => {
     setToasts((all) => all.filter((x) => x.id !== id));
   };
@@ -132,6 +150,7 @@ export default function App() {
             {tab === "people" && <PeopleView cid={cid} version={version} openCharacter={setSheet} openQuest={openQuest}
               pcAssignment={campaign.roster.find((c) => c.id === campaign.active_character_id)?.assignment} />}
             {tab === "timeline" && <ChronicleView cid={cid} version={version} openCharacter={setSheet} />}
+            {tab === "world" && <WorldView cid={cid} campaign={campaign} version={version} onChanged={refresh} openCharacter={setSheet} />}
             {tab === "rules" && <RulesView cid={cid} />}
             {tab === "records" && <RecordsView cid={cid} />}
             {tab === "ledger" && <LedgerView cid={cid} version={version} onChanged={refresh} />}
@@ -147,6 +166,7 @@ export default function App() {
         }} />
       )}
       {cid != null && <CharacterSheetDialog cid={cid} charId={sheet} onClose={() => setSheet(null)} onChanged={refresh} />}
+      <AnnouncementStage queue={announcing} onDone={(id) => setAnnouncing((q) => q.filter((a) => a.id !== id))} />
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => <div key={t.id} className="toast" onClick={() => dismiss(t.id)} title="Click to dismiss"><SystemNotice text={t.text} style={t.style} /></div>)}
       </div>

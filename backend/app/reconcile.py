@@ -48,7 +48,8 @@ def apply_correction(conn: sqlite3.Connection, cid: int, *, subject: str, decisi
                      decided_by: str, ledger_edits: list[dict] | None = None, sheet_edits: list[dict] | None = None,
                      resolves: list[str] | None = None, position_edits: list[dict] | None = None,
                      rulings: list[dict] | None = None, trap_records: list[dict] | None = None,
-                     item_edits: list[dict] | None = None, lore: list[tuple[str, str, str]] | None = None) -> dict:
+                     item_edits: list[dict] | None = None, lore: list[tuple[str, str, str]] | None = None,
+                     places: list[dict] | None = None) -> dict:
     if not evidence:
         raise ValueError("a correction needs evidence")
     if not decided_by.strip():
@@ -60,6 +61,12 @@ def apply_correction(conn: sqlite3.Connection, cid: int, *, subject: str, decisi
         results += [_sheet_edit(conn, cid, e) for e in sheet_edits or []]
         results += [_position_edit(conn, cid, e) for e in position_edits or []]
         results += [_item_edit(conn, cid, e) for e in item_edits or []]
+        for pl in places or []:  # a place the party knows (memory/places.py): name is its own nesting, most specific first
+            if one(conn, "SELECT id FROM locations WHERE campaign_id = ? AND lower(name) = lower(?)", (cid, pl["name"])):
+                raise ValueError(f"place {pl['name']!r} is already recorded; re-review")
+            conn.execute("INSERT INTO locations (campaign_id, floor, name, description, discovered, visibility, visited) VALUES (?,?,?,?,1,'player',?)",
+                         (cid, pl["floor"], pl["name"], pl["description"], int(pl["visited"])))
+            results.append({"summary": f"Place recorded: {pl['name']} ({'visited' if pl['visited'] else 'known, not entered'})"})
         if lore:  # player-known facts (subject, fact, source); duplicates are skipped
             from .memory.journal import add_player_known
             results.append({"summary": f"{add_player_known(conn, cid, lore)} player-known facts added"})
@@ -737,3 +744,34 @@ def story_known_correction(conn: sqlite3.Connection, cid: int, ledger_root, deci
     return apply_correction(conn, cid, subject="Player-known story records", evidence=evidence, ops=ops, decided_by=decided_by, lore=facts,
                             decision=f"Imported {len(facts)} player-known statements (companion sheets' known lists, completed events, known "
                                      "intelligence) and recorded Marcus's family-search promise and Margit's no-fee build help as commitments.")
+
+
+FLOOR_3_PLACES = [
+    {"name": "The Molting Pigeon, Heavensworth, Over City", "floor": 3, "visited": True,
+     "description": "The party's genuine System-protected saferoom in Heavensworth; Jonai, Xaggra and Margit are stationed there."},
+    {"name": "Heavensworth, Over City", "floor": 3, "visited": True,
+     "description": "The Over City district where the party is based: Gilded Feathers, The Molting Pigeon and the old Fallen Watch prison."},
+    {"name": "Secondhand Saviors, Gilded Feathers, Heavensworth, Over City", "floor": 3, "visited": True,
+     "description": "A Gilded Feathers shop; it holds the prepaid Personal Stabber until Scout claims it in person."},
+    {"name": "Fallen Watch, Heavensworth, Over City", "floor": 3, "visited": False,
+     "description": "The old prison: conspicuously open gates and a strong Brain Boiler presence. Under reconnaissance, not entered; a credible "
+                    "high-risk objective, not a confirmed stairwell."},
+]
+
+
+def floor_3_places_correction(conn: sqlite3.Connection, cid: int, decided_by: str) -> dict:
+    """M8 (owner delegation 2026-10-26): record the Floor 3 places the party knows, so the map shows them; only player-known ones."""
+    evidence = [
+        {"source": "state/campaign.yaml world_state_notes (lore)", "says": "The Molting Pigeon is the party's genuine System-protected saferoom in "
+                 "Heavensworth; Heavensworth's Gilded Feathers district is mapped; the old Fallen Watch prison is a credible high-risk objective, "
+                 "not a confirmed stairwell; Brain Boiler presence."},
+        {"source": "quests (journal)", "says": "Reserved: Personal Stabber, held by Secondhand Saviors; Complete final reconnaissance of the Fallen "
+                 "Watch prison without committing to the fight."},
+        {"source": "party groups", "says": "Saferoom group at The Molting Pigeon, Heavensworth, Over City; Prison Recon assigned to Fallen Watch."},
+        {"source": "owner, 2026-10-26", "says": "'I trust you to make decisions as a proxy GM.' Fallen Watch is recorded as known, not entered."},
+    ]
+    have = {r["name"].lower() for r in rows(conn, "SELECT name FROM locations WHERE campaign_id = ?", (cid,))}
+    todo = [p for p in FLOOR_3_PLACES if p["name"].lower() not in have]
+    return apply_correction(conn, cid, subject="Floor 3 places", evidence=evidence, ops=[], decided_by=decided_by, places=todo,
+                            decision="Recorded the Floor 3 places the party knows for the map: The Molting Pigeon (saferoom), Heavensworth, "
+                                     "Secondhand Saviors, and Fallen Watch as known but not entered.")

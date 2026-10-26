@@ -28,6 +28,11 @@ function hash(s: string) {
   return h >>> 0;
 }
 
+/** The map key of a place name, matching memory/places.py ('The Molting Pigeon' -> 'molting pigeon'). */
+export function placeKey(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9 ]+/g, "").replace(/^the\s+/, "").trim();
+}
+
 /** A local picture at the width it is shown (CSS pixels): the server sends a cached, scaled-down copy (app/media.py). */
 export function sized(url: string | null | undefined, cssWidth: number): string | null {
   if (!url) return null;

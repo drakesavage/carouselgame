@@ -69,7 +69,8 @@ TOOL_SPECS: list[dict] = [
     {"name": "suggest_image",
      "description": "Suggest a picture for the player to approve (rendered locally by ComfyUI; nothing renders without their click). "
                     "Use sparingly, at most one per turn, when the party first meets a notable character or Mob, gets a notable "
-                    "item, or enters a striking new place. kind: character | mob | item | scene (scene = the current scene). "
+                    "item, or enters a striking new place. kind: character | mob | item | scene (scene = the current scene) | "
+                    "location (a place on the party's map, by name; reused for every scene there). "
                     "description: what it LOOKS like, only what the party has seen; never GM-only material. Skip it if the "
                     "subject already has a picture.",
      "parameters": {"kind": "str", "subject": "str (name; ignored for scene)", "description": "str (visual only, <= 60 words)", "reason": "str?"}},
@@ -572,12 +573,12 @@ class ToolRunner:
             if not sc:
                 raise ValueError("no active scene; start one with apply_changes op scene first")
             sid, name = sc["id"], None
-        elif kind == "mob":
+        elif kind in ("mob", "location"):
             sid, name = None, subject
         else:
-            raise ValueError("kind must be character, mob, item or scene")
+            raise ValueError("kind must be character, mob, item, scene or location")
         if one(self.conn, f"""SELECT id FROM art_jobs WHERE campaign_id = ? AND kind = ? AND status IN ('suggested','queued','running','done')
-                               AND {'lower(subject_name) = lower(?)' if kind == 'mob' else 'subject_id = ?'}""", (self.cid, kind, name if kind == "mob" else sid)):
+                               AND {'lower(subject_name) = lower(?)' if kind in ('mob', 'location') else 'subject_id = ?'}""", (self.cid, kind, name if kind in ("mob", "location") else sid)):
             return {"skipped": "that subject already has a picture or a pending suggestion"}
         job = create_job(self.conn, self.settings or Settings(), self.cid, kind, subject_id=sid, subject_name=name or subject,
                          extra=str(a.get("description") or "")[:500], source="gm", status="suggested", reason=a.get("reason"), turn_id=self.turn_id)
