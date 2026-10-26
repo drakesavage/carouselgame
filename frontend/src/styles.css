@@ -354,3 +354,17 @@ mark { background: rgba(255, 181, 71, 0.25); color: var(--text); border-radius: 
 .pips { display: inline-flex; gap: 3px; }
 .pips i { width: 9px; height: 9px; border-radius: 2px; background: #1a232c; border: 1px solid var(--line-2); }
 .pips i.on { background: var(--cyan); box-shadow: 0 0 6px rgba(62, 240, 200, 0.5); border-color: transparent; }
+
+/* campaign manager (views/Campaigns.tsx) */
+.camp-list { display: grid; gap: 8px; }
+.camp-row { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-2); }
+.camp-row.current { border-color: var(--cyan-dim); }
+.camp-name { font-weight: 600; font-size: 15px; }
+.camp-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.btn.danger-text { color: var(--red); }
+.camp-form { display: grid; gap: 10px; }
+.camp-form label { display: grid; gap: 4px; }
+.camp-form-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 520px) { .camp-row { flex-direction: column; } .camp-actions { justify-content: flex-start; } .camp-form-pair { grid-template-columns: 1fr; } }
+.settings-grid > * { min-width: 0; }
+.settings-grid .mono { overflow-wrap: anywhere; }

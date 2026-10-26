@@ -537,6 +537,7 @@ COLUMN_MIGRATIONS = [
     ("rulings", "review", "TEXT"),          # NULL pending | approved | rejected (reference/rulecenter.py: only precedents reach later turns)
     ("rulings", "review_note", "TEXT"),
     ("rulings", "reviewed_at", "TEXT"),
+    ("campaigns", "archived", "INTEGER NOT NULL DEFAULT 0"),  # 1 = hidden from the campaign picker (campaigns.py)
     ("campaigns", "objective_quests_json", "TEXT NOT NULL DEFAULT '[]'"),  # ordered quest ids that make up the immediate objective  # {cx, cy, k, ar}: square crop of the portrait image (null = default)  # comfy | codex (art/codex_image.py)  # staged tool calls and roll records while a turn is in flight
 ]
 
@@ -549,6 +550,23 @@ def init_db(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
     conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
     conn.execute("UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(SCHEMA_VERSION),))
+
+
+def next_campaign_id(conn: sqlite3.Connection) -> int:
+    """Claim a campaign id that was never used before, even by a deleted campaign (campaigns.py): links, saved views and
+    art folders named after an old id must not point at a new campaign. Call inside the transaction that inserts it."""
+    used = conn.execute("SELECT value FROM meta WHERE key = 'last_campaign_id'").fetchone()
+    top = conn.execute("SELECT COALESCE(MAX(id), 0) FROM campaigns").fetchone()[0]
+    cid = max(int(used[0]) if used else 0, top) + 1
+    conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_campaign_id', ?)", (str(cid),))
+    return cid
+
+
+def remember_campaign_id(conn: sqlite3.Connection, cid: int) -> None:
+    """Before deleting campaign cid, record it as used so next_campaign_id never hands it out again."""
+    used = conn.execute("SELECT value FROM meta WHERE key = 'last_campaign_id'").fetchone()
+    if not used or int(used[0]) < cid:
+        conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_campaign_id', ?)", (str(cid),))
 
 
 @contextmanager

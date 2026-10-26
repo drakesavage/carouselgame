@@ -56,7 +56,7 @@ def character_card(conn: sqlite3.Connection, c: dict) -> dict:
 
 # ------------------------------------------------------------------ player
 def list_campaigns(conn: sqlite3.Connection) -> list[dict]:
-    return rows(conn, "SELECT id, name, is_demo, data_source, current_floor, current_location, updated_at FROM campaigns ORDER BY id")
+    return rows(conn, "SELECT id, name, is_demo, data_source, current_floor, current_location, archived, updated_at FROM campaigns ORDER BY id")
 
 
 def campaign_summary(conn: sqlite3.Connection, cid: int) -> dict | None:

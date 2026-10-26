@@ -244,6 +244,10 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
         present += [c["id"] for c in chars if c.get("assignment") == gkey and c["id"] not in present]
     if not groups and not scene:  # no organization recorded: treat the in-party roster as together
         present += [c["id"] for c in chars if c["in_party"] and c["id"] not in present]
+    here = (camp["current_location"] or "").strip().lower()
+    if here and not pc_group:  # an NPC recorded at the PC's location (op npc) is in the room even if no scene lists them
+        present += [c["id"] for c in chars if not c["in_party"] and (c.get("location") or "").strip().lower() == here
+                    and c["status"] not in ("deceased", "dead") and c["id"] not in present]
     named = [i for i in _named(chars, focus_text) if i != (pc or {}).get("id")]
     po = []
     for g in groups:

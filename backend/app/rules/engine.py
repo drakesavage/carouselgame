@@ -10,6 +10,7 @@ in CHANGE_OPS. Combat, crafting and leveling rules should land here as further o
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from typing import Any, Callable, Literal
 
@@ -167,6 +168,35 @@ class AllocateStats(BaseModel):
     stat: Literal["strength", "intelligence", "constitution", "dexterity", "charisma"]
     points: int = Field(ge=1, le=60)
     new_modifier: int | None = Field(default=None, ge=-10, le=30)  # from the rulebook's table; never guessed
+
+
+class NpcUpsert(BaseModel):
+    """Record a named person the party has met (or update what the party knows of them), so they appear on People."""
+    op: Literal["npc"]
+    name: str = Field(min_length=1, max_length=80)
+    role: str | None = Field(default=None, max_length=120)          # what they are to the party, e.g. "Game Guide"
+    category: Literal["allied_npcs", "neutral_npcs", "hostile_npcs", "contacts", "dungeon_staff"] | None = None
+    race: str | None = Field(default=None, max_length=60)
+    description: str | None = Field(default=None, max_length=600)   # appearance and manner as the party saw them
+    location: str | None = Field(default=None, max_length=160)
+    personality: str | None = Field(default=None, max_length=300)
+    voice: str | None = Field(default=None, max_length=200)
+    known_motivation: str | None = Field(default=None, max_length=300)
+    attitude: int | None = Field(default=None, ge=-3, le=3)        # only when first recorded; later shifts use npc_attitude
+
+
+class InitializeSheet(BaseModel):
+    """Character creation: a crawler's starting stats, Health Bar and Mana, once, before any are recorded."""
+    op: Literal["initialize_sheet"]
+    character: str
+    stats: dict[Literal["strength", "intelligence", "constitution", "dexterity", "charisma"], int]
+    modifiers: dict[Literal["strength", "intelligence", "constitution", "dexterity", "charisma"], int]  # from the rulebook table
+    health_slots: int = Field(ge=1, le=50)
+    health_per_slot: int = Field(ge=1, le=50)
+    mana_max: int = Field(ge=0, le=500)
+    level: int = Field(default=1, ge=1, le=60)
+    race: str | None = Field(default=None, max_length=60)
+    source: str = Field(min_length=3, max_length=200)                # book and page, or the rolls this came from
 
 
 class SetQuantity(BaseModel):
@@ -583,6 +613,67 @@ def _apply_allocate_stats(ctx: Ctx, op: AllocateStats) -> dict:
     return {"summary": summary}
 
 
+def _apply_npc(ctx: Ctx, op: NpcUpsert) -> dict:
+    name = op.name.strip()
+    c = one(ctx.conn, "SELECT * FROM characters WHERE campaign_id = ? AND lower(name) = lower(?)", (ctx.campaign_id, name))
+    camp = one(ctx.conn, "SELECT active_character_id FROM campaigns WHERE id = ?", (ctx.campaign_id,))
+    if c and c["id"] == camp["active_character_id"]:
+        raise ChangeError("the player character is not an NPC")
+    if c is None:
+        base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "npc"
+        slug, n = base, 2
+        while one(ctx.conn, "SELECT id FROM characters WHERE campaign_id = ? AND slug = ?", (ctx.campaign_id, slug)):
+            slug, n = f"{base}-{n}", n + 1
+        sheet = {"narrative": {"current_role": op.role}} if op.role else {}
+        cid = ctx.conn.execute(
+            """INSERT INTO characters (campaign_id, slug, name, kind, roster_category, race, species, status, location, in_party, bio, sheet_json, provenance)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (ctx.campaign_id, slug, name, "npc", op.category or "neutral_npcs", op.race, op.race, "active", op.location, 0,
+             op.description, json.dumps(sheet), f"turn {ctx.turn_id}")).lastrowid
+        ctx.conn.execute("INSERT INTO npc_profiles (character_id, personality, voice, known_motivation, attitude, last_seen) VALUES (?,?,?,?,?,?)",
+                         (cid, op.personality, op.voice, op.known_motivation, op.attitude, op.location))
+        summary = f"Met {name}" + (f", {op.role}" if op.role else "") + (f" ({op.location})" if op.location else "")
+        ctx.event("npc_met", summary, {"character_id": cid, "role": op.role})
+        return {"summary": summary, "character_id": cid}
+    sets = {k: v for k, v in {"roster_category": op.category, "race": op.race, "location": op.location, "bio": op.description}.items() if v is not None}
+    if op.role:
+        sheet = c.get("sheet") or {}
+        sheet.setdefault("narrative", {})["current_role"] = op.role
+        sets["sheet_json"] = json.dumps(sheet)
+    if sets:
+        ctx.conn.execute(f"UPDATE characters SET {', '.join(f'{k} = ?' for k in sets)} WHERE id = ?", (*sets.values(), c["id"]))
+    prof = {k: v for k, v in {"personality": op.personality, "voice": op.voice, "known_motivation": op.known_motivation,
+                              "last_seen": op.location}.items() if v is not None}
+    if not one(ctx.conn, "SELECT character_id FROM npc_profiles WHERE character_id = ?", (c["id"],)):
+        ctx.conn.execute("INSERT INTO npc_profiles (character_id, attitude) VALUES (?, ?)", (c["id"], op.attitude))
+    if prof:
+        ctx.conn.execute(f"UPDATE npc_profiles SET {', '.join(f'{k} = ?' for k in prof)} WHERE character_id = ?", (*prof.values(), c["id"]))
+    summary = f"Updated what the party knows of {c['name']}"
+    ctx.event("npc_updated", summary, {"character_id": c["id"], "fields": sorted([*sets, *prof])})
+    return {"summary": summary, "character_id": c["id"]}
+
+
+def _apply_initialize_sheet(ctx: Ctx, op: InitializeSheet) -> dict:
+    c = resolve_character(ctx.conn, ctx.campaign_id, op.character)
+    have = (c.get("stats") or {}).get("stats") or {}
+    if have or c["hp_max"] is not None:
+        raise ChangeError(f"{c['name']} already has recorded stats or Health; later changes go through allocate_stats, hp and mana")
+    keys = {"strength", "intelligence", "constitution", "dexterity", "charisma"}
+    if set(op.stats) != keys or set(op.modifiers) != keys:
+        raise ChangeError("stats and modifiers must each give all five stats")
+    hp = op.health_slots * op.health_per_slot
+    derived = c.get("derived") or {}
+    derived.update({"health_bar": {"slots": op.health_slots, "health_per_slot": op.health_per_slot}, "unallocated_stat_points": 0})
+    st = {"stats": dict(op.stats), "modifiers": dict(op.modifiers), "unenhanced": dict(op.stats)}
+    ctx.conn.execute("""UPDATE characters SET stats_json = ?, derived_json = ?, hp_current = ?, hp_max = ?, mana_current = ?, mana_max = ?,
+                        level = COALESCE(level, ?), race = COALESCE(?, race), species = COALESCE(?, species) WHERE id = ?""",
+                     (json.dumps(st), json.dumps(derived), hp, hp, op.mana_max, op.mana_max, op.level, op.race, op.race, c["id"]))
+    line = ", ".join(f"{k[:3].upper()} {op.stats[k]} ({op.modifiers[k]:+d})" for k in ("strength", "intelligence", "constitution", "dexterity", "charisma"))
+    summary = f"{c['name']}'s sheet is set: {line}; Health {hp} ({op.health_slots}×{op.health_per_slot}); Mana {op.mana_max} — {op.source}"
+    ctx.event("sheet_initialized", summary, {"character_id": c["id"], **op.model_dump(exclude={"op", "character"})})
+    return {"summary": summary}
+
+
 def _apply_set_quantity(ctx: Ctx, op: SetQuantity) -> dict:
     owner = resolve_character(ctx.conn, ctx.campaign_id, op.character, allow_shared=True)
     item = _item_by_id(ctx, op.item_id, owner) if op.item_id else _find_item(ctx.conn, ctx.campaign_id, owner["id"] if owner else None, op.name)
@@ -643,6 +734,8 @@ CHANGE_OPS: dict[str, tuple[type[BaseModel], Callable[[Ctx, Any], dict]]] = {
     # "encounter" (narrative-only) is superseded by rules/combat.py and the combat_* GM tools
     "set_quantity": (SetQuantity, _apply_set_quantity),
     "allocate_stats": (AllocateStats, _apply_allocate_stats),
+    "initialize_sheet": (InitializeSheet, _apply_initialize_sheet),
+    "npc": (NpcUpsert, _apply_npc),
     "clock": (ClockChange, _apply_clock),
 }
 

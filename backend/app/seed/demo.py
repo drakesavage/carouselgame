@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from ..db import now_iso, transaction
+from ..db import next_campaign_id, now_iso, transaction
 from ..memory.snapshots import create_save_point
 
 DEMO_NAME = "DEMO — Fictional Sample Crawl"
@@ -17,12 +17,13 @@ def seed_demo(conn: sqlite3.Connection) -> int:
         return existing["id"]
     t = now_iso()
     with transaction(conn):
-        cid = conn.execute(
-            """INSERT INTO campaigns (name, is_demo, data_source, current_floor, current_location, safe_room, game_time_minutes,
+        cid = next_campaign_id(conn)
+        conn.execute(
+            """INSERT INTO campaigns (id, name, is_demo, data_source, current_floor, current_location, safe_room, game_time_minutes,
                                       floor_deadline_minutes, active_objective, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (DEMO_NAME, 1, "demo", 3, "Laundromat of Infinite Socks (demo)", 1, 600, 600 + 8 * 1800,
-             "Demo objective: find the stairwell before the sponsor loses interest.", t, t)).lastrowid
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (cid, DEMO_NAME, 1, "demo", 3, "Laundromat of Infinite Socks (demo)", 1, 600, 600 + 8 * 1800,
+             "Demo objective: find the stairwell before the sponsor loses interest.", t, t))
 
         def char(slug, name, kind, cat, race, cls, level, hp, mana, mods, order, bio, in_party=1):
             stats = {k: 10 + 2 * v for k, v in mods.items()}

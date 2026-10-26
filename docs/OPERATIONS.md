@@ -44,6 +44,18 @@ To switch the live game to the restored copy:
 
 Alternatively, point the server at the restored folder without renaming anything: set `CRAWLER_DATA_DIR` in `.env`.
 
+## Managing campaigns
+
+Saves & Settings → Campaigns (or "Manage campaigns…" in the header picker): start a new campaign, open, rename, archive
+(hidden from the picker, nothing removed) and delete. A new campaign has one crawler and an opening save point; stats,
+skills and gear start empty for character creation in play.
+
+Delete works only on the game PC, needs the exact name typed, and is refused while a turn is running. It first makes a
+database backup named `before-delete-<name>` and moves the campaign's art (`data/art/c<id>`) and portraits into that
+backup folder. To get a deleted campaign back, restore that backup into a new folder as above and copy
+`art/c<id>` and `portraits/` back into the restored `data`. Campaign ids are never reused, and the Git ledger is never
+touched by a delete.
+
 ## Rolling back code
 
 Each milestone is one commit on `main` in dccweb. To return to the previous version:

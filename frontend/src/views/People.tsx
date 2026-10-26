@@ -14,7 +14,7 @@ export function LifeChip({ life }: { life?: Life | null }) {
 
 const FILTERS = [
   { id: "all", label: "Everyone" },
-  { id: "here", label: "With Cliff" },
+  { id: "here", label: "With you" },
   { id: "away", label: "Offscreen" },
   { id: "contact", label: "Contacts" },
   { id: "gone", label: "Fallen & missing" },
@@ -27,8 +27,8 @@ const firstSentence = (s?: string | null) => (s ? (s.match(/^.*?[.!?](\s|$)/)?.[
  * People as the party knows them: who they are to the party, where they are, what was promised, and the last thing seen
  * of them. Compact cards that expand; the server sends only player-visible records.
  */
-export function PeopleView({ cid, version, pcAssignment, openCharacter, openQuest }: {
-  cid: number; version: number; pcAssignment?: string | null; openCharacter: (id: number) => void; openQuest: (id?: number) => void;
+export function PeopleView({ cid, version, pcAssignment, pcName, openCharacter, openQuest }: {
+  cid: number; version: number; pcAssignment?: string | null; pcName?: string; openCharacter: (id: number) => void; openQuest: (id?: number) => void;
 }) {
   const [data, setData] = useState<Person[] | null>(null);
   const [q, setQ] = useState("");
@@ -64,14 +64,14 @@ export function PeopleView({ cid, version, pcAssignment, openCharacter, openQues
       {sections.filter(([, list]) => list.length).map(([title, list]) => (
         <section key={title}>
           <div className="h2">{title} <span className="muted">{list.length}</span></div>
-          <div className="people-grid">{list.map((p) => <PersonCard key={p.id} p={p} here={!!pcAssignment && p.assignment === pcAssignment} openCharacter={openCharacter} openQuest={openQuest} />)}</div>
+          <div className="people-grid">{list.map((p) => <PersonCard key={p.id} p={p} here={!!pcAssignment && p.assignment === pcAssignment} pcName={pcName?.split(" ")[0]} openCharacter={openCharacter} openQuest={openQuest} />)}</div>
         </section>
       ))}
     </div>
   );
 }
 
-function PersonCard({ p, here, openCharacter, openQuest }: { p: Person; here: boolean; openCharacter: (id: number) => void; openQuest: (id?: number) => void }) {
+function PersonCard({ p, here, pcName, openCharacter, openQuest }: { p: Person; here: boolean; pcName?: string; openCharacter: (id: number) => void; openQuest: (id?: number) => void }) {
   const m = useManifest();
   const [open, setOpen] = useState(false);
   const [label, tone] = role(p);
@@ -86,7 +86,7 @@ function PersonCard({ p, here, openCharacter, openQuest }: { p: Person; here: bo
           <div className="chips">
             <LifeChip life={p.life} />
             {p.allegiance && <Chip>{p.allegiance}</Chip>}
-            {here && !gone && <Chip tone="cyan">with Cliff</Chip>}
+            {here && !gone && <Chip tone="cyan">with {pcName ?? "you"}</Chip>}
           </div>
           {!gone && (
             <div className="person-where"><MapPin size={11} aria-hidden />

@@ -68,7 +68,8 @@ export type ArtJob = { id: number; campaign_id: number; kind: ArtKind; subject_i
 export type Combatant = { id: string; name: string; side: "party" | "foe"; defeated?: boolean; hb_percent?: number; actions_left?: number;
   evading?: boolean; hp_current?: number | null; hp_max?: number | null; dead?: boolean; dying?: string | null };
 export type Encounter = { id: number; name: string; round: number; phase?: string; summary?: string | null; combatants: Combatant[] };
-export type CampaignListItem = { id: number; name: string; is_demo: number; data_source: string; current_floor: number | null; current_location: string | null };
+export type CampaignListItem = { id: number; name: string; is_demo: number; data_source: string; current_floor: number | null; current_location: string | null; archived: number };
+export type ManagedCampaign = CampaignListItem & { created_at: string; updated_at: string; turns: number; last_played: string | null; characters: number; crawler: string | null };
 export type RollCard = { roll_id: number; expression: string; dice: { sides: number; value: number; kept: boolean }[]; total: number; target: number | null;
   outcome: string | null; degree: string | null; reason: string | null; detail: Record<string, any> };
 export type Message = { id: number; turn_id: number | null; role: "player" | "gm" | "system"; content: string; created_at: string;
@@ -156,6 +157,11 @@ const post = <T,>(path: string, body?: unknown) => req<T>(path, { method: "POST"
 export const api = {
   health: () => req<{ provider: string; codex_cli: string | null; rulebook_index: boolean }>("api/health"),
   campaigns: () => req<CampaignListItem[]>("api/campaigns"),
+  manageCampaigns: () => req<ManagedCampaign[]>("api/campaigns-manage"),
+  createCampaign: (body: { name: string; crawler: string; race: string | null; class_name: string | null; floor: number; location: string | null; floor_hours: number | null; premise: string | null }) =>
+    post<{ campaign_id: number }>("api/campaigns", body),
+  editCampaign: (id: number, body: { name?: string; archived?: boolean }) => req<{ ok: boolean }>(`api/campaigns/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteCampaign: (id: number, confirmName: string) => post<{ deleted: string; backup: string; pictures_moved: number }>(`api/campaigns/${id}/delete`, { confirm_name: confirmName }),
   campaign: (id: number) => req<Campaign>(`api/campaigns/${id}`),
   characters: (id: number) => req<CharacterCard[]>(`api/campaigns/${id}/characters`),
   character: (id: number, cid: number) => req<CharacterSheet>(`api/campaigns/${id}/characters/${cid}`),

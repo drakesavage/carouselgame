@@ -65,7 +65,7 @@ def render_steps(steps: list[dict]) -> str:
         if kind == "context":
             out.append("## CURRENT CAMPAIGN CONTEXT (authoritative state from the database)\n" + s["text"])
         elif kind == "player":
-            out.append("## PLAYER INPUT (Cliff's player, this turn)\n" + s["text"])
+            out.append("## PLAYER INPUT (the player character's player, this turn)\n" + s["text"])
         elif kind == "gm_request":
             calls = "\n".join(f"- {c['name']}({json.dumps(c['arguments'], ensure_ascii=False)})" for c in s["tool_calls"])
             out.append("## YOUR PREVIOUS TOOL REQUESTS THIS TURN\n" + calls + (f"\n(draft narration you wrote: {s['draft']})" if s.get("draft") else ""))

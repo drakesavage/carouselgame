@@ -77,10 +77,11 @@ export default function App() {
   useEffect(() => { setCampaign(null); refresh().catch((e) => setError(String(e))); }, [refresh]);
   useEffect(() => { const iv = setInterval(() => api.health().then((h) => setProvider(h.provider)).catch(() => {}), 15000); return () => clearInterval(iv); }, []);
 
-  const chooseCampaign = async (id: number) => {
-    setCid(id);
-    api.saveSettings({ active_campaign_id: id }).catch(() => {});
+  const chooseCampaign = async (id: number | null) => {  // null: the open campaign was deleted and none is left
+    if (id == null) { setCid(null); setCampaign(null); setCampaigns(await api.campaigns()); return; }
+    if (id !== cid) { setCid(id); api.saveSettings({ active_campaign_id: id }).catch(() => {}); }
     setCampaigns(await api.campaigns());
+    if (id === cid) refresh().catch(() => {});
   };
   const pushNotices = (n: { text: string; style: string }[]) => {
     // device preference: theatrical announcements for the big moments, toasts for the rest; or toasts only; or none
@@ -131,8 +132,12 @@ export default function App() {
           )}
           <Chip tone={provider === "codex" ? "cyan" : "amber"} title="Runtime GM provider (change in Saves & Settings)">GM: {provider || "…"}</Chip>
           {campaigns && campaigns.length > 0 && (
-            <select className="select" value={cid ?? ""} onChange={(e) => chooseCampaign(Number(e.target.value))} aria-label="Campaign">
-              {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            <select className="select" value={cid ?? ""} aria-label="Campaign" onChange={(e) => {
+              if (e.target.value === "manage") { setTab("settings"); setTimeout(() => document.getElementById("campaigns")?.scrollIntoView({ block: "start" }), 50); return; }
+              chooseCampaign(Number(e.target.value));
+            }}>
+              {campaigns.filter((c) => !c.archived || c.id === cid).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <option value="manage">Manage campaigns…</option>
             </select>
           )}
         </div>
@@ -148,7 +153,8 @@ export default function App() {
             {tab === "inventory" && <InventoryView cid={cid} version={version} openQuest={openQuest} />}
             {tab === "quests" && <QuestsView cid={cid} version={version} focus={focusQuest} openCharacter={setSheet} />}
             {tab === "people" && <PeopleView cid={cid} version={version} openCharacter={setSheet} openQuest={openQuest}
-              pcAssignment={campaign.roster.find((c) => c.id === campaign.active_character_id)?.assignment} />}
+              pcAssignment={campaign.roster.find((c) => c.id === campaign.active_character_id)?.assignment}
+              pcName={campaign.roster.find((c) => c.id === campaign.active_character_id)?.name} />}
             {tab === "timeline" && <ChronicleView cid={cid} version={version} openCharacter={setSheet} />}
             {tab === "world" && <WorldView cid={cid} campaign={campaign} version={version} onChanged={refresh} openCharacter={setSheet} />}
             {tab === "rules" && <RulesView cid={cid} />}

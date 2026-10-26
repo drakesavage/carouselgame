@@ -35,6 +35,7 @@ from .memory import journal, places, snapshots, views
 from .reference import rulecenter
 from .reference import rulebooks
 from .seed.demo import seed_demo
+from . import campaigns as campaign_admin
 
 DEFAULT_LEDGER = ROOT_DIR / "campaign_sources" / "dccrepository"
 FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
@@ -122,6 +123,26 @@ class SaveIn(BaseModel):
 
 class IndexIn(BaseModel):
     directory: str | None = None
+
+
+class CampaignIn(BaseModel):
+    name: str = Field(max_length=80)
+    crawler: str = Field(max_length=60)
+    race: str | None = Field(default=None, max_length=60)
+    class_name: str | None = Field(default=None, max_length=60)
+    floor: int = Field(default=1, ge=1, le=18)
+    location: str | None = Field(default=None, max_length=120)
+    floor_hours: int | None = Field(default=None, ge=1, le=2000)
+    premise: str | None = Field(default=None, max_length=2000)
+
+
+class CampaignEditIn(BaseModel):
+    name: str | None = Field(default=None, max_length=80)
+    archived: bool | None = None
+
+
+class CampaignDeleteIn(BaseModel):
+    confirm_name: str
 
 
 class ImportIn(BaseModel):
@@ -337,6 +358,45 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     @app.post("/api/campaigns/demo")
     def make_demo(c=Depends(db), _=Depends(write_lock)):
         return {"campaign_id": seed_demo(c)}
+
+    @app.get("/api/campaigns-manage")
+    def campaigns_manage(c=Depends(db)):
+        return campaign_admin.summary(c)
+
+    @app.post("/api/campaigns")
+    def campaign_create(body: CampaignIn, c=Depends(db), _=Depends(write_lock)):
+        try:
+            return {"campaign_id": campaign_admin.create(c, **body.model_dump())}
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+
+    @app.patch("/api/campaigns/{cid}")
+    def campaign_edit(cid: int, body: CampaignEditIn, c=Depends(db), _=Depends(write_lock)):
+        campaign_or_404(c, cid)
+        try:
+            if body.name is not None:
+                campaign_admin.rename(c, cid, body.name)
+            if body.archived is not None:
+                campaign_admin.set_archived(c, cid, body.archived)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        return {"ok": True}
+
+    @app.post("/api/campaigns/{cid}/delete")
+    def campaign_delete(cid: int, body: CampaignDeleteIn, c=Depends(db), _=Depends(write_lock), __=Depends(local_only)):
+        try:
+            out = campaign_admin.delete(c, settings, cid, body.confirm_name)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc))
+        p = state.prefs()
+        if p.get("active_campaign_id") == cid:
+            p["active_campaign_id"] = None
+            state.save_prefs(p)
+        return out
 
     @app.get("/api/campaigns/{cid}/characters/{char_id}/dossier")
     def character_dossier(cid: int, char_id: int, c=Depends(db)):

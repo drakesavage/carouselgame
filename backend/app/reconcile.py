@@ -49,7 +49,8 @@ def apply_correction(conn: sqlite3.Connection, cid: int, *, subject: str, decisi
                      resolves: list[str] | None = None, position_edits: list[dict] | None = None,
                      rulings: list[dict] | None = None, trap_records: list[dict] | None = None,
                      item_edits: list[dict] | None = None, lore: list[tuple[str, str, str]] | None = None,
-                     places: list[dict] | None = None) -> dict:
+                     places: list[dict] | None = None, floor_deadline: int | None = None, constitution: bool = False,
+                     gm_notes: list[tuple[str, str]] | None = None) -> dict:
     if not evidence:
         raise ValueError("a correction needs evidence")
     if not decided_by.strip():
@@ -67,6 +68,17 @@ def apply_correction(conn: sqlite3.Connection, cid: int, *, subject: str, decisi
             conn.execute("INSERT INTO locations (campaign_id, floor, name, description, discovered, visibility, visited) VALUES (?,?,?,?,1,'player',?)",
                          (cid, pl["floor"], pl["name"], pl["description"], int(pl["visited"])))
             results.append({"summary": f"Place recorded: {pl['name']} ({'visited' if pl['visited'] else 'known, not entered'})"})
+        if floor_deadline is not None:  # the floor clock (game minute of collapse); no engine op sets it
+            before = one(conn, "SELECT floor_deadline_minutes FROM campaigns WHERE id = ?", (cid,))["floor_deadline_minutes"]
+            conn.execute("UPDATE campaigns SET floor_deadline_minutes = ? WHERE id = ?", (floor_deadline, cid))
+            results.append({"summary": f"Floor collapse set at game minute {floor_deadline}", "before": before, "after": floor_deadline})
+        if constitution:  # the default GM constitution for a campaign started without a ledger (gm/constitution.py)
+            from .gm import constitution as default_constitution
+            results.append({"summary": f"{default_constitution.install(conn, cid)} default constitution sections added"})
+        for subject_, content in gm_notes or []:  # GM-only continuity, shown to the GM every turn, never to the player
+            conn.execute("INSERT INTO gm_secrets (campaign_id, subject, kind, content, source, created_at) VALUES (?,?,?,?,?,?)",
+                         (cid, subject_, "plot", content, "correction", now_iso()))
+            results.append({"summary": f"GM note: {subject_}"})
         if lore:  # player-known facts (subject, fact, source); duplicates are skipped
             from .memory.journal import add_player_known
             results.append({"summary": f"{add_player_known(conn, cid, lore)} player-known facts added"})
@@ -775,3 +787,61 @@ def floor_3_places_correction(conn: sqlite3.Connection, cid: int, decided_by: st
     return apply_correction(conn, cid, subject="Floor 3 places", evidence=evidence, ops=[], decided_by=decided_by, places=todo,
                             decision="Recorded the Floor 3 places the party knows for the map: The Molting Pigeon (saferoom), Heavensworth, "
                                      "Secondhand Saviors, and Fallen Watch as known but not entered.")
+
+
+SAVAGE_STATS = {"strength": 4, "intelligence": 2, "constitution": 3, "dexterity": 4, "charisma": 5}
+SAVAGE_MODS = {"strength": 2, "intelligence": 1, "constitution": 2, "dexterity": 2, "charisma": 2}
+
+
+def savage_opening_correction(conn: sqlite3.Connection, cid: int, decided_by: str) -> dict:
+    """Audit of the Savage Crawling opening (owner request 2026-10-26): what the first 61 turns settled but could not
+    record (Marn, the starting sheet), what the books owed (floor clock, Game Guide AI Favor), and the GM procedure a
+    console-started campaign lacked. Nothing is invented: every value is from the transcript or a cited page."""
+    camp = one(conn, "SELECT name, active_character_id, floor_deadline_minutes FROM campaigns WHERE id = ?", (cid,))
+    if not camp or camp["name"] != "Savage Crawling":
+        raise ValueError("this correction is for the Savage Crawling campaign")
+    pc = one(conn, "SELECT * FROM characters WHERE id = ?", (camp["active_character_id"],))
+    if (pc.get("stats") or {}).get("stats") or pc["hp_max"] is not None or pc["ai_favor"]:
+        raise ValueError(f"{pc['name']}'s sheet is no longer blank; re-review")
+    if one(conn, "SELECT id FROM characters WHERE campaign_id = ? AND lower(name) = 'marn'", (cid,)):
+        raise ValueError("Marn is already recorded; re-review")
+    ops = [
+        {"op": "npc", "name": "Marn", "role": "Game Guide", "category": "allied_npcs", "location": "Tutorial Guild — reception",
+         "description": "A squat, gray-skinned woman in a mustard-colored vest, spectacles on a chain around her neck; keeps burnt "
+                        "coffee on a hot plate behind the reception counter.",
+         "personality": "Dry, exact and patient; corrects herself when she was fishing; protective of her furniture.",
+         "voice": "Clipped and deadpan; short warnings with a sting in the tail.",
+         "known_motivation": "Get Drake to leave reception knowing his next step and how to come back alive."},
+        {"op": "initialize_sheet", "character": "player", "stats": SAVAGE_STATS, "modifiers": SAVAGE_MODS, "health_slots": 10,
+         "health_per_slot": 2, "mana_max": 2, "level": 1, "race": "Human",
+         "source": "rolled in play (turn 45; modifiers Crawlers & Customization p. 18; Health and Mana turn 46, Core p. 113); "
+                   "Level 1, Race Human (Atlas p. 14)"},
+        {"op": "ai_favor", "character": "player", "delta": 1,
+         "reason": "followed his Game Guide's advice (Heal on the Hotlist, turn 64) with no AI Favor; Toolkit p. 11"},
+    ]
+    owed = ("The opening skipped the System's entry sequence and every tutorial achievement. Owed, and due at the next natural "
+            "beat (the System 'catching up on processing' is fine): the entrance slamming shut and 'Welcome, Crawler. Welcome "
+            "to the First Floor.'; crawler name and number; Level 1, Race Human 'probably' (C&C p. 8, Atlas p. 14); and the "
+            "starter achievements the opening earned (entering the Dungeon, scavenging an armory from a tailgate, character "
+            "creation, first Inventory and Hotlist use, the Evade drill), each recorded with op achievement and any box as an "
+            "unopened item (Atlas p. 24: plentiful and generous). The Tutorial Guild being at the foot of the stairs stands "
+            "as played (Marn called it a favor); later guilds are found in the halls.")
+    evidence = [
+        {"source": "turns 22-69 (Tutorial Guild reception)", "says": "Marn introduced herself as Drake's Game Guide and ran character "
+                                                                     "creation; no op recorded her, so People and the GM briefing did not know her."},
+        {"source": "turns 45-46; GM note #16", "says": "Stats rolled STR 4, INT 2, CON 3, DEX 4, CHA 5 (+2,+1,+2,+2,+2); 10 Health slots "
+                                                     "of 2; Mana 2. The engine had no way to record a new sheet (allocate_stats needs banked points)."},
+        {"source": "Game Master's Campaign Toolkit p. 11", "says": "Following a Game Guide's advice usually grants a crawler 1 AI Favor if they have none."},
+        {"source": "Game Master's Campaign Toolkit p. 19", "says": "The First Floor: Time to Collapse 5 Days. The campaign had no floor clock; "
+                                                                  "the Dungeon opened at game minute 12 (turn 13)."},
+        {"source": "Atlas p. 24; Core Rulebook p. 17; Crawlers & Customization p. 8",
+         "says": "Tutorial achievements are plentiful on the first two floors; Tutorial Guilds are seeded through the floor; the "
+                 "System welcomes each crawler on entry. None of it happened: a campaign started in the console had no constitution."},
+        {"source": "owner, 2026-10-26", "says": "Asked for an audit of the beginning of the game: Marn missing from People, the tutorial "
+                                                "door, and no achievements, announcements, rewards or flavor."},
+    ]
+    return apply_correction(conn, cid, subject="Savage Crawling opening audit", evidence=evidence, ops=ops, decided_by=decided_by,
+                            floor_deadline=12 + 5 * 24 * 60, constitution=True, gm_notes=[("Owed: the System's opening", owed)],
+                            decision="Recorded Marn (Game Guide) and Drake's starting sheet from the transcript, granted the Game "
+                                     "Guide's 1 AI Favor, started the 5-day First Floor clock from the opening, added the default "
+                                     "GM constitution, and left the GM a note that the entry sequence and tutorial achievements are owed.")

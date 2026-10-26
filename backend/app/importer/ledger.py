@@ -24,7 +24,7 @@ from typing import Any
 
 import yaml
 
-from ..db import now_iso, transaction
+from ..db import next_campaign_id, now_iso, transaction
 from ..memory.snapshots import create_save_point
 
 ALWAYS_INCLUDE_SECTIONS = {"2", "3.1", "3.2", "4.1", "4.2", "5.5", "5.6", "5.10", "6.2", "6.3", "6.4", "7", "7.9", "7.10", "17", "18"}
@@ -347,14 +347,15 @@ def import_ledger(conn: sqlite3.Connection, root: Path, *, name_suffix: str = ""
         location = camp.get("current_location")
         if camp.get("current_area") and location:
             location = f"{location} — {camp['current_area']}"
-        cid = conn.execute(
-            """INSERT INTO campaigns (name, is_demo, data_source, current_floor, current_location, safe_room, game_time_minutes,
+        cid = next_campaign_id(conn)
+        conn.execute(
+            """INSERT INTO campaigns (id, name, is_demo, data_source, current_floor, current_location, safe_room, game_time_minutes,
                                       floor_deadline_minutes, active_objective, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            ((camp.get("campaign_name") or camp.get("campaign_id") or "Imported campaign") + name_suffix, 0, "ledger_import",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (cid, (camp.get("campaign_name") or camp.get("campaign_id") or "Imported campaign") + name_suffix, 0, "ledger_import",
              _int(camp.get("current_floor")), location, int(str(camp.get("safe_room_status")).lower() == "true"), elapsed or 0, deadline,
              camp.get("active_objective"), now_iso(), now_iso()),
-        ).lastrowid
+        )
         rep.count("campaigns")
 
         # characters

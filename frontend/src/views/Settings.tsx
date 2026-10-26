@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { DeviceSettings } from "./DeviceSettings";
 import { BackupsPanel, RestorePreview } from "./Backups";
+import { CampaignsPanel } from "./Campaigns";
 import * as Dialog from "@radix-ui/react-dialog";
 import { AlertTriangle, Bot, Copy, Database, Download, Eye, EyeOff, History, KeyRound, Save, Smartphone } from "lucide-react";
 import { api, Prefs, SavePoint } from "../api";
@@ -15,7 +16,7 @@ function Resolution({ e }: { e: ReportEntry }) {
   return e.correction ? <Chip tone="green" title={e.correction.subject}>correction #{e.correction.id}</Chip> : <Chip tone="amber">open</Chip>;
 }
 
-export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: number; version: number; onChanged: () => void; onCampaign: (id: number) => void }) {
+export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: number; version: number; onChanged: () => void; onCampaign: (id: number | null) => void }) {
   const [prefs, setPrefs] = useState<Prefs | null>(null);
   const [saves, setSaves] = useState<SavePoint[] | null>(null);
   const [label, setLabel] = useState("");
@@ -27,7 +28,7 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
   const [access, setAccess] = useState<Awaited<ReturnType<typeof api.access>> | null>(null);
   useEffect(() => { api.settings().then(setPrefs); api.importReports().then(setReports); api.access().then(setAccess).catch(() => setAccess(null)); }, []);
   const [showCode, setShowCode] = useState(false);  // the device passcode stays masked until deliberately revealed
-  useEffect(() => { api.saves(cid).then(setSaves); }, [cid, version]);
+  useEffect(() => { if (cid) api.saves(cid).then(setSaves).catch(() => setSaves([])); }, [cid, version]);
 
   const update = async (p: Partial<Prefs>) => { setPrefs(await api.saveSettings(p)); setMsg("Settings saved."); };
   const save = async () => {
@@ -50,7 +51,8 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
     <div className="view-inner">
       <div className="h1">Saves &amp; settings</div>
       {msg && <div className="card" style={{ margin: "10px 0", borderColor: "var(--cyan-dim)" }}>{msg}</div>}
-      <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", marginTop: 12 }}>
+      <div id="campaigns" style={{ marginTop: 12, scrollMarginTop: 12 }}><CampaignsPanel cid={cid} onCampaign={onCampaign} /></div>
+      <div className="settings-grid" style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", marginTop: 12 }}>
         <DeviceSettings />
         <Panel title={<><Save size={13} /> Save points</>}>
           <div className="row"><input className="input" placeholder="Label (optional)" value={label} onChange={(e) => setLabel(e.target.value)} /><button className="btn primary" onClick={save}>Save</button></div>
