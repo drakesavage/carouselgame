@@ -40,6 +40,7 @@ def real_repo(tmp_path):
         pytest.skip("real campaign ledger clone not present")
     root = tmp_path / "real"
     subprocess.run(["git", "-c", "core.longpaths=true", "clone", "-q", "--no-hardlinks", str(REAL), str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "checkout", "-q", "353576c"], check=True)  # before the console's write-back (ec2c47d)
     return root
 
 

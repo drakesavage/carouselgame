@@ -129,14 +129,18 @@ export function InventoryView({ cid, version }: { cid: number; version: number }
   );
 }
 
-export function QuestsView({ cid, version }: { cid: number; version: number }) {
+export function QuestsView({ cid, version, focus }: { cid: number; version: number; focus?: number | null }) {
   const { data } = useLoad(() => api.quests(cid), [cid, version]);
+  useEffect(() => { // arriving from the story's objective or an alert: bring that quest into view
+    if (data && focus != null) document.getElementById(`quest-${focus}`)?.scrollIntoView({ block: "center" });
+  }, [data, focus]);
   if (!data) return <div className="muted">Loading…</div>;
   const section = (title: string, list: Quest[]) => list.length > 0 && (
     <section><div className="h2">{title} <span className="muted">{list.length}</span></div>
       <div className="grid">{list.map((q) => (
-        <div key={q.id} className="card">
-          <div className="row"><Flag size={14} color={q.priority === 1 ? "var(--magenta)" : "var(--muted)"} /><b className="grow">{q.title}</b><Chip>{q.kind}</Chip></div>
+        <div key={q.id} id={`quest-${q.id}`} className={`card ${q.id === focus ? "focused" : ""}`}>
+          <div className="row"><Flag size={14} color={q.priority === 1 ? "var(--magenta)" : "var(--muted)"} /><b className="grow">{q.title}</b>
+            {q.immediate && <Chip tone="cyan" title="Part of the immediate objective">now</Chip>}<Chip>{q.kind}</Chip></div>
           {q.description && <div className="sub" style={{ marginTop: 6 }}>{q.description}</div>}
           {q.progress && <div style={{ marginTop: 6, fontSize: 13 }}>{q.progress}</div>}
           {q.giver && <div className="sub">From: {q.giver}</div>}

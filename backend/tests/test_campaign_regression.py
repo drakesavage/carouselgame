@@ -20,12 +20,16 @@ from app.rules.engine import ChangeError, apply_change
 
 REAL = Path(__file__).resolve().parents[2] / "campaign_sources" / "dccrepository"
 pytestmark = pytest.mark.skipif(not (REAL / ".git").exists(), reason="real campaign ledger clone not present")
+# The ledger as the M1 corrections and owner rulings were decided against: the commit before the console's own
+# write-back (ec2c47d), which already contains them and so makes each correction refuse to re-apply.
+BASELINE = "353576c"
 
 
 @pytest.fixture
 def denton(conn, tmp_path):
     root = tmp_path / "ledger"
     subprocess.run(["git", "-c", "core.longpaths=true", "clone", "-q", "--no-hardlinks", str(REAL), str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "checkout", "-q", BASELINE], check=True)
     cid, _ = import_ledger(conn, root)
     yield cid
     shutil.rmtree(root, ignore_errors=True)

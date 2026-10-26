@@ -5,13 +5,13 @@ import {
   AlertTriangle, ArrowUpCircle, Award, Backpack, Bookmark, ChevronDown, ChevronRight, Clock3, Flag, Footprints, Hammer, Handshake,
   MapPin, Skull, Sparkles, Sun, Swords, TrendingUp, Trophy, Wrench, Zap,
 } from "lucide-react";
-import { Campaign, CharacterCard, Encounter, fmtMinutes, Manifest, Quest } from "../api";
+import { Campaign, CharacterCard, Encounter, fmtMinutes, Group, Manifest, Quest } from "../api";
 import { Bar, Chip, humanize, Panel, Portrait } from "../ui";
 import { ArtButton, ArtQueue } from "./Art";
 
 // ------------------------------------------------------------------ local artwork
 export const ManifestContext = createContext<Manifest>({ locations: {}, characters: {} });
-const useManifest = () => useContext(ManifestContext);
+export const useManifest = () => useContext(ManifestContext);
 
 function locationArt(m: Manifest, ...names: (string | null | undefined)[]): string | null {
   const hay = names.filter(Boolean).join(" ").toLowerCase();
@@ -70,24 +70,48 @@ function sameplace(a?: string | null, b?: string | null) {
   return first(a) === first(b);
 }
 
-export function SceneBanner({ campaign, onArt }: { campaign: Campaign; onArt?: () => void }) {
+/** The player character's group: who is physically with them right now. */
+export function pcGroup(campaign: Campaign) {
+  const key = campaign.roster.find((c) => c.id === campaign.active_character_id)?.assignment;
+  return campaign.groups.find((g) => g.key === key) ?? null;
+}
+
+/** Compact scene header pinned above the transcript: where, what, who is here. */
+export function SceneBanner({ campaign, onArt, openCharacter }: { campaign: Campaign; onArt?: () => void; openCharacter?: (id: number) => void }) {
   const m = useManifest();
   const [open, setOpen] = useState(false);
   const s = campaign.scene;
   const art = (s && campaign.art?.scene[String(s.id)]) || locationArt(m, s?.location, s?.title, campaign.current_location);
-  const group = campaign.groups.find((g) => g.key === s?.group_key);
+  const here = pcGroup(campaign);
+  const others = (here?.members ?? []).filter((c) => c.id !== campaign.active_character_id);
+  const safe = campaign.safe_room && sameplace(s?.location, campaign.current_location);
+  const now = campaign.active_objective ?? campaign.quests.find((q) => q.immediate)?.title;
   return (
-    <header className={`banner ${open ? "open" : ""}`}>
+    <header className={`banner ${open ? "open" : ""}`} aria-label="Current scene">
       {art ? <img className="banner-art" src={art} alt="" /> : <BannerArt seed={s?.location ?? campaign.current_location ?? campaign.name} />}
       <div className="banner-shade" />
       <div className="banner-body">
-        <div className="banner-kicker"><MapPin size={12} /> {s?.location ?? campaign.current_location ?? "Unknown location"}{campaign.safe_room && sameplace(s?.location, campaign.current_location) ? " · saferoom" : ""}</div>
+        <div className="banner-kicker">
+          <MapPin size={12} /> {s?.location ?? campaign.current_location ?? "Unknown location"}
+          <span className={`safety ${safe ? "safe" : "exposed"}`}>{safe ? "saferoom" : "exposed"}</span>
+        </div>
         <div className="banner-title">{s?.title ?? "No scene recorded"}{s && <span className="banner-paint"><ArtButton cid={campaign.id} kind="scene" subjectId={s.id} subjectName={s.title} label="" onChanged={onArt} /></span>}</div>
         <div className="banner-meta">
+          {others.length > 0 && (
+            <span className="banner-with" title={`With you: ${others.map((c) => c.name).join(", ")}`}>
+              <span className="sr-only">With you:</span>
+              {others.slice(0, 7).map((c) => (
+                <button key={c.id} className="mini-face" onClick={() => openCharacter?.(c.id)} aria-label={`${c.name}: open dossier`} title={c.name}>
+                  <Portrait name={c.name} src={portraitSrc(c, m)} crop={c.portrait_crop} size={22} />
+                </button>
+              ))}
+              {others.length > 7 && <span className="muted">+{others.length - 7}</span>}
+            </span>
+          )}
           <span><Sun size={12} /> Day {campaign.day.day} · reset in {fmtMinutes(campaign.day.minutes_to_reset)}</span>
-          {group && <span><Footprints size={12} /> {group.label} ({group.members.length})</span>}
-          {s?.situation && <button className="banner-toggle" onClick={() => setOpen((o) => !o)}>{open ? "Hide situation" : "Situation"} {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</button>}
+          {s?.situation && <button className="banner-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>Situation {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</button>}
         </div>
+        {now && <div className="banner-now narrow-only"><Flag size={11} /> {now}</div>}
         {open && s?.situation && <div className="banner-situation">{s.situation}</div>}
       </div>
     </header>
@@ -100,35 +124,69 @@ function findSpeaker(roster: CharacterCard[], label: string): CharacterCard | un
   return roster.find((c) => c.name.toLowerCase() === l) ?? roster.find((c) => c.name.toLowerCase().split(" ")[0] === l) ?? roster.find((c) => c.slug === l);
 }
 
+/** A stable hue per speaker, so each voice keeps its colour across the transcript. */
+export function speakerHue(name: string) {
+  return hash(name.toLowerCase()) % 360;
+}
+
+const nodeText = (n: any): string => (n?.type === "text" ? n.value : (n?.children ?? []).map(nodeText).join(""));
+const OPENS_QUOTE = /^\s*[:\-—]?\s*["“‘']/;
+
+/** The paragraph that asks the player for a decision (the narration's closing question), if any. */
+export function splitDecision(text: string): [string, string | null] {
+  const paras = text.trimEnd().split(/\n\s*\n/);
+  const last = paras[paras.length - 1]?.trim() ?? "";
+  const asks = /\?\**\s*$/.test(last) || /^\**(your )?(next )?(decision|move)\b/i.test(last);
+  if (paras.length < 2 || !asks || last.length > 320 || /^[-|>#]|^\*\s/.test(last)) return [text, null];
+  return [paras.slice(0, -1).join("\n\n"), last];
+}
+
+/**
+ * Narration with visual-novel dialogue: a paragraph led by a bold "Name:" label is a spoken line when the rest opens
+ * with a quotation ("**Nate:** “Together is good.”"), shown with the speaker's portrait and colour; "Erin, over HUD:"
+ * names the channel. Any other bold label ("**Floor time:** …", "**Margit:** She accepted…") is a record line, not speech.
+ */
 export function StoryText({ text, roster }: { text: string; roster: CharacterCard[] }) {
   const m = useManifest();
+  const components = {
+    h1: ({ children }: any) => <h2 className="story-heading">{children}</h2>,
+    h2: ({ children }: any) => <h2 className="story-heading">{children}</h2>,
+    h3: ({ children }: any) => <h3 className="story-heading small">{children}</h3>,
+    p: ({ node, children }: any) => {
+      const first: any = node?.children?.[0];
+      const label = first?.type === "element" && first.tagName === "strong" ? nodeText(first).trim() : "";
+      const rest = (node?.children ?? []).slice(1).map(nodeText).join("");
+      const labelled = label.length > 0 && label.length < 48 && (/:$/.test(label) || /^\s*:/.test(rest));
+      if (!labelled) return <p>{children}</p>;
+      const [rawName, channel] = label.replace(/:$/, "").split(/\s*(?:,|—|–| - )\s*/, 2);
+      const who = findSpeaker(roster, rawName);
+      const kids = Array.isArray(children) ? children.slice(1) : [];
+      if (!OPENS_QUOTE.test(rest)) return <p className="record-line">{children}</p>;
+      const name = who?.name ?? rawName;
+      return (
+        <div className="vn-line" style={{ ["--hue" as any]: speakerHue(name) }}>
+          <Portrait name={name} src={portraitSrc(who, m)} crop={who?.portrait_crop} size={52} />
+          <div className="vn-body">
+            <div className="vn-name">{name}{channel && <span className="vn-channel">{channel}</span>}</div>
+            <p className="vn-text">{kids}</p>
+          </div>
+        </div>
+      );
+    },
+  };
   return (
     <div className="narration story">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          h1: ({ children }) => <h2 className="story-heading">{children}</h2>,
-          h2: ({ children }) => <h2 className="story-heading">{children}</h2>,
-          h3: ({ children }) => <h3 className="story-heading small">{children}</h3>,
-          p: ({ node, children }) => {
-            const first: any = node?.children?.[0];
-            const label = first?.type === "element" && first.tagName === "strong" ? String(first.children?.[0]?.value ?? "") : "";
-            if (label && /:\s*$/.test(label) && label.length < 40) {
-              const who = findSpeaker(roster, label);
-              const kids = Array.isArray(children) ? children.slice(1) : [];
-              return (
-                <div className="dialogue">
-                  <Portrait name={who?.name ?? label.replace(/:\s*$/, "")} src={portraitSrc(who, m)} crop={who?.portrait_crop} size={34} />
-                  <div><span className="speaker">{who?.name ?? label.replace(/:\s*$/, "")}</span><p>{kids}</p></div>
-                </div>
-              );
-            }
-            return <p>{children}</p>;
-          },
-        }}
-      >
-        {text}
-      </ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{text}</ReactMarkdown>
+    </div>
+  );
+}
+
+/** The decision in front of the player, set apart as the last thing before the input. */
+export function Decision({ text }: { text: string }) {
+  return (
+    <div className="decision narration story" role="note" aria-label="Your decision">
+      <span className="decision-tag">Your move</span>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
     </div>
   );
 }
@@ -225,44 +283,81 @@ export function RosterPanel({ campaign, openCharacter }: { campaign: Campaign; o
     if (!campaign.groups.length) return [{ key: "_party", label: "Party", location: campaign.current_location, activity: null, members: campaign.party }];
     return [...campaign.groups].sort((a, b) => (a.key === pcGroup ? -1 : b.key === pcGroup ? 1 : 0));
   }, [campaign, pcGroup]);
-  const grouped = new Set(groups.flatMap((g) => g.members.map((m) => m.id)));
+  const grouped = new Set(groups.flatMap((g) => g.members.map((c) => c.id)));
   const others = campaign.roster.filter((c) => !grouped.has(c.id) && c.id !== pcId);
-  const [showOthers, setShowOthers] = useState(false);
   // counts come from the groups (who is physically together), not from the stored party flag
-  const pcName = campaign.roster.find((c) => c.id === pcId)?.name.split(" ")[0] ?? "you";
   const withPc = groups.find((g) => g.key === pcGroup)?.members.length ?? 0;
   const away = groups.filter((g) => g.key !== pcGroup && g.key !== "_party").reduce((n, g) => n + g.members.length, 0);
+  const here = groups.filter((g) => g.key === pcGroup || g.key === "_party");
+  const offscreen = groups.filter((g) => g.key !== pcGroup && g.key !== "_party" && g.members.length > 0);
   return (
-    <Panel title="Roster" accent={pcGroup ? `${withPc} with ${pcName} · ${away} elsewhere` : campaign.roster.length || campaign.party.length}>
+    <Panel title="Roster" accent={pcGroup ? `${withPc} here · ${away} offscreen` : campaign.roster.length || campaign.party.length}>
       <div className="roster">
-        {groups.map((g) => (
-          <section key={g.key} className={`roster-group ${g.key === pcGroup || g.key === "_party" ? "here" : ""}`}>
+        {here.map((g) => (
+          <section key={g.key} className="roster-group here" aria-label={g.key === "_party" ? g.label : "You are here"}>
             <div className="roster-head">
-              <span className="roster-label">{g.key === pcGroup ? `With ${pcName}` : g.key === "_party" ? g.label : `Elsewhere: ${g.label}`}</span>
-              {g.location ? <span className="roster-loc"><MapPin size={10} /> {g.location}</span>
-                : g.key !== "_party" && <span className="roster-loc muted"><MapPin size={10} /> position not recorded</span>}
+              <span className="roster-label">{g.key === "_party" ? g.label : "You are here"}</span>
+              {g.location && <span className="roster-loc"><MapPin size={10} /> {g.location}</span>}
             </div>
-            {g.activity && g.key !== pcGroup && <div className="roster-activity">{g.activity.replace(/\s*\(checkpoints\/latest\.md\)$/, "")}</div>}
-            {g.members.sort((a, b) => (a.id === pcId ? -1 : b.id === pcId ? 1 : 0)).map((c) => <Tile key={c.id} c={c} pc={c.id === pcId} openCharacter={openCharacter} />)}
+            {[...g.members].sort((a, b) => (a.id === pcId ? -1 : b.id === pcId ? 1 : 0)).map((c) => <Tile key={c.id} c={c} pc={c.id === pcId} openCharacter={openCharacter} />)}
           </section>
         ))}
+        {offscreen.length > 0 && <div className="roster-divider">Offscreen party</div>}
+        {offscreen.map((g) => <OffscreenGroup key={g.key} g={g} openCharacter={openCharacter} />)}
         {others.length > 0 && (
-          <section className="roster-group">
-            <button className="roster-head as-button" onClick={() => setShowOthers((s) => !s)}>
-              {showOthers ? <ChevronDown size={12} /> : <ChevronRight size={12} />}<span className="roster-label">Contacts &amp; elsewhere ({others.length})</span>
-            </button>
-            {showOthers && others.map((c) => <Tile key={c.id} c={c} pc={false} openCharacter={openCharacter} />)}
-          </section>
+          <Collapsible label={`Contacts & elsewhere (${others.length})`}>
+            {others.map((c) => <Tile key={c.id} c={c} pc={false} openCharacter={openCharacter} />)}
+          </Collapsible>
         )}
       </div>
     </Panel>
   );
 }
 
+function Collapsible({ label, extra, children, summary }: { label: string; extra?: ReactNode; summary?: ReactNode; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className={`roster-group ${open ? "open" : ""}`}>
+      <button className="roster-head as-button" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}<span className="roster-label">{label}</span>{extra}
+      </button>
+      {open ? children : summary}
+    </section>
+  );
+}
+
+/** An offscreen group: collapsed to faces, place and orders; expands to full tiles. */
+function OffscreenGroup({ g, openCharacter }: { g: Group; openCharacter: (id: number) => void }) {
+  const m = useManifest();
+  const hurt = g.members.filter((c) => c.hp_max && c.hp_current != null && c.hp_current / c.hp_max <= 0.3 || c.statuses.some((s) => s.polarity === "debuff"));
+  const activity = g.activity?.replace(/\s*\(checkpoints\/latest\.md\)$/, "");
+  return (
+    <Collapsible
+      label={`${g.label} (${g.members.length})`}
+      extra={hurt.length > 0 ? <span className="roster-alert" title={`Needs attention: ${hurt.map((c) => c.name).join(", ")}`}><AlertTriangle size={11} /> {hurt.length}</span> : undefined}
+      summary={
+        <div className="roster-summary">
+          <div className="faces">{g.members.map((c) => (
+            <button key={c.id} className="mini-face" onClick={() => openCharacter(c.id)} title={c.name} aria-label={`${c.name}: open dossier`}>
+              <Portrait name={c.name} src={portraitSrc(c, m)} crop={c.portrait_crop} size={24} />
+            </button>))}
+          </div>
+          <div className="roster-loc-line"><MapPin size={10} /> {g.location ?? <span className="muted">position not recorded</span>}</div>
+          {activity && <div className="roster-activity">{activity}</div>}
+        </div>
+      }
+    >
+      <div className="roster-loc-line"><MapPin size={10} /> {g.location ?? <span className="muted">position not recorded</span>}</div>
+      {activity && <div className="roster-activity">{activity}</div>}
+      {g.members.map((c) => <Tile key={c.id} c={c} pc={false} openCharacter={openCharacter} />)}
+    </Collapsible>
+  );
+}
+
 // ------------------------------------------------------------------ campaign sidebar
 const KIND_ICON: Record<string, typeof Flag> = { quest: Flag, project: Hammer, crafting: Wrench, commitment: Handshake, reservation: Bookmark };
 
-function Objective({ q, now }: { q: Quest; now: number }) {
+export function Objective({ q, now }: { q: Quest; now: number }) {
   const [open, setOpen] = useState(false);
   const Icon = KIND_ICON[q.kind] ?? Flag;
   const details = Object.entries(q.details ?? {}).filter(([k]) => k !== "ledger_source" && !k.includes("/"));
@@ -287,41 +382,80 @@ function Objective({ q, now }: { q: Quest; now: number }) {
   );
 }
 
-export function CampaignSidebar({ campaign, onArt }: { campaign: Campaign; onArt?: () => void }) {
+type Alert = { key: string; tone: "red" | "amber"; text: string; quest?: number; character?: number };
+
+/** What needs the player's attention now: overdue or imminent deadlines, and hurt or afflicted people in the PC's group. */
+export function urgentAlerts(campaign: Campaign): Alert[] {
+  const out: Alert[] = [];
+  const now = campaign.game_time_minutes;
+  for (const q of campaign.quests) {
+    if (q.due_at_minutes == null) continue;
+    const due = q.due_at_minutes - now;
+    if (due < 0) out.push({ key: `q${q.id}`, tone: "red", text: `Overdue: ${q.title}`, quest: q.id });
+    else if (due < 180) out.push({ key: `q${q.id}`, tone: "amber", text: `${q.title} in ${fmtMinutes(due)}`, quest: q.id });
+  }
+  for (const c of pcGroup(campaign)?.members ?? []) {
+    const low = c.hp_max && c.hp_current != null && c.hp_current / c.hp_max <= 0.3;
+    const bad = c.statuses.filter((s) => s.polarity === "debuff").map((s) => s.name);
+    if (low || bad.length) out.push({ key: `c${c.id}`, tone: low ? "red" : "amber", character: c.id,
+      text: `${c.name.split(" ")[0]}: ${[low ? `HP ${c.hp_current}/${c.hp_max}` : "", ...bad].filter(Boolean).join(", ")}` });
+  }
+  const fc = campaign.floor_clock.remaining_minutes;
+  if (fc != null && fc < 12 * 60) out.unshift({ key: "floor", tone: "red", text: `Floor collapses in ${fmtMinutes(fc)}` });
+  return out;
+}
+
+export function CampaignSidebar({ campaign, onArt, openQuest, openCharacter }: {
+  campaign: Campaign; onArt?: () => void; openQuest?: (id?: number) => void; openCharacter?: (id: number) => void;
+}) {
   const fc = campaign.floor_clock;
   const hours = fc.remaining_minutes != null ? fc.remaining_minutes / 60 : null;
   const tone = hours == null ? "" : hours < 12 ? "danger" : hours > 72 ? "calm" : "";
   const adv = campaign.clocks.find((c) => c.key === "advancement_cycles");
+  const safe = campaign.safe_room && sameplace(campaign.scene?.location, campaign.current_location);
+  const linked = campaign.quests.filter((q) => q.immediate);
+  const alerts = urgentAlerts(campaign);
   return (
     <>
-      <Panel title="Floor" accent={campaign.current_floor ?? "?"} className="floor-panel">
-        <div className="sub">Floor collapse in</div>
+      <Panel title={`Floor ${campaign.current_floor ?? "?"}`} accent={<span className={`safety ${safe ? "safe" : "exposed"}`}>{safe ? "saferoom" : "exposed"}</span>} className="floor-panel">
+        <div className="sub">Collapse in</div>
         <div className={`countdown ${tone}`}>{fc.remaining_minutes != null ? fmtMinutes(fc.remaining_minutes) : "unknown"}</div>
-        <div className="sub" style={{ marginBottom: 8 }}><Sun size={11} /> Day {campaign.day.day} · daily reset in {fmtMinutes(campaign.day.minutes_to_reset)}</div>
-        <div className="stat-line"><span className="k">Location</span><span style={{ textAlign: "right" }}>{campaign.scene?.location ?? campaign.current_location ?? "unknown"}</span></div>
-        <div className="stat-line"><span className="k">Saferoom</span><span>{campaign.safe_room && sameplace(campaign.scene?.location, campaign.current_location)
-          ? <Chip tone="green">protected</Chip> : campaign.safe_room ? <Chip tone="amber" title={`Campaign record: ${campaign.current_location}`}>record says saferoom</Chip> : <Chip tone="red">exposed</Chip>}</span></div>
+        <div className="sub"><Sun size={11} /> Day {campaign.day.day} · daily reset in {fmtMinutes(campaign.day.minutes_to_reset)}</div>
+        {!safe && campaign.safe_room ? <div className="sub" style={{ color: "var(--amber)" }} title={`Campaign record: ${campaign.current_location}`}>The record still says saferoom; the scene is elsewhere.</div> : null}
         {adv && (
-          <div style={{ marginTop: 8 }}>
-            <div className="row"><span className="k sub grow">Advancement cycles</span><span className="mono">{adv.current}/{adv.maximum}</span></div>
+          <div className="adv-line" title="Advancement cycles toward the next checkpoint">
+            <span className="k">Advancement</span>
             <div className="segments" style={{ gridTemplateColumns: `repeat(${adv.maximum ?? 12}, 1fr)` }}>
               {Array.from({ length: adv.maximum ?? 12 }, (_, i) => <i key={i} className={i < adv.current ? "on" : ""} />)}
             </div>
+            <span className="mono">{adv.current}/{adv.maximum}</span>
           </div>
         )}
       </Panel>
       {campaign.encounter && <CombatPanel enc={campaign.encounter} campaign={campaign} onArt={onArt} />}
-      <ArtQueue cid={campaign.id} onChanged={onArt} />
-      {/* linked quests are the immediate objective (tagged "now" below); the stored string only shows when none are linked */}
-      {campaign.active_objective && !campaign.quests.some((q) => q.immediate) && <Panel title="Immediate objective"><div style={{ fontSize: 13.5 }}>{campaign.active_objective}</div></Panel>}
-      <Panel title="Objectives" accent={campaign.quests.length || ""}>
-        {campaign.quests.length ? campaign.quests.map((q) => <Objective key={q.id} q={q} now={campaign.game_time_minutes} />) : <div className="muted">None active.</div>}
+      <Panel title={<><Flag size={13} /> Now</>} className="now-panel">
+        {/* linked quests are the immediate objective; the stored string is its summary */}
+        {campaign.active_objective ? <div className="now-text">{campaign.active_objective}</div>
+          : linked.length === 0 && <div className="muted">No immediate objective recorded.</div>}
+        {linked.map((q) => (
+          <button key={q.id} className="now-quest" onClick={() => openQuest?.(q.id)}><Flag size={11} /> <span className="grow">{q.title}</span><ChevronRight size={12} /></button>
+        ))}
+        <button className="link-btn" onClick={() => openQuest?.()}>All objectives ({campaign.quests.length}) <ChevronRight size={12} /></button>
       </Panel>
-      {campaign.recent_events.length > 0 && (
-        <Panel title="Recently">
-          <div className="recent">{campaign.recent_events.map((e) => <div key={e.id}>{e.summary}</div>)}</div>
+      {alerts.length > 0 && (
+        <Panel title={<><AlertTriangle size={13} /> Alerts</>} accent={alerts.length} className="alerts-panel">
+          <ul className="alerts">
+            {alerts.map((a) => (
+              <li key={a.key} className={a.tone}>
+                {a.quest || a.character ? (
+                  <button onClick={() => (a.quest ? openQuest?.(a.quest) : openCharacter?.(a.character!))}>{a.text} <ChevronRight size={11} /></button>
+                ) : <span>{a.text}</span>}
+              </li>
+            ))}
+          </ul>
         </Panel>
       )}
+      <ArtQueue cid={campaign.id} onChanged={onArt} />
     </>
   );
 }

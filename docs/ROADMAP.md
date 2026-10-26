@@ -6,8 +6,8 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 |---|---|---|---|---|---|---|---|
 | M0 Safe upgrade workflow | P0 | Done | none | 385d7dd | 155 backend; typecheck/build; isolation probe PASS | Settings passcode masked | ledger behind by 2 (see below) |
 | M1 Canonical-state reconciliation | P0 | Exit gate met | M0 | (pending) | 166 backend; consistency 21/21 | HUD roster + objectives | 7 uncounted-gear items stay open for owner counts; 44 house rules move to M2/M7 |
-| M2 Mechanics reliability & GM gates | P0 | In progress | M1 | | 187 backend | n/a | M2.1 done; owner rulings applied (arrows, training, trap records) |
-| M3 Main story HUD | P1 | Backlog | M1 underway | | | | |
+| M2 Mechanics reliability & GM gates | P0 | Done | M1 | 4933fed | 187 backend; playtest 2 gate met; isolation probe PASS | n/a | P2 gaps in docs/RULES_COVERAGE.md |
+| M3 Main story HUD | P1 | Built, owner review | M2 | (pending) | 187 backend; typecheck/build | live campaign at 1440/1100/375 px; 100-message disposable transcript | exit gate is the owner's read: who is with Cliff, what is happening, where, the decision |
 | M4 Characters, party, people | P1 | Backlog | M3 | | | | |
 | M5 Inventory, crafting, economy | P1 | Backlog | M3 | | | | |
 | M6 Quests, memory, timeline | P1 | Backlog | M3 | | | | |
@@ -263,3 +263,8 @@ in `docs/trap-records-draft.md` for the owner's approval. Pending ledger write-b
 **Trap records approved** as drafted and applied as correction #13 (save point #25): all nine traps are now deployable
 under CORE 13.7; out of combat a trap's attack takes the target's Evade (`target_number`). Records and condition live in
 the console; writing them back to the ledger is the remaining P2 gap.
+
+**M2 closed (2026-10-25).** Isolation probe re-run after the M2 upgrades: PASS (no tools visible to the GM; no file
+written, canary not leaked, the watcher saw no unauthorized events). Exit gate met by playtest 2. Carried to the backlog:
+the P2 gaps in `docs/RULES_COVERAGE.md` (trap record/condition write-back, the AI Favor reroll, opposed and surprise
+tests, Taunt and the Healing Interrupt, salvage, level-award sizes) and the owner's counts for the uncounted gear.

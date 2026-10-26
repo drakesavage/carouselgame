@@ -858,7 +858,8 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
             f = (FRONTEND_DIST / path).resolve()
             if path and f.is_file() and FRONTEND_DIST.resolve() in f.parents:
                 return FileResponse(f)
-            return FileResponse(FRONTEND_DIST / "index.html")
+            # revalidate the page so a rebuilt frontend loads at once (its hashed assets stay cacheable)
+            return FileResponse(FRONTEND_DIST / "index.html", headers={"Cache-Control": "no-cache"})
     else:
         @app.get("/", include_in_schema=False)
         def no_frontend():
