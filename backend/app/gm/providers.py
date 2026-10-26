@@ -181,6 +181,19 @@ def gm_exec_args(binary: str, job: Path, *, developer: str, schema: Path | None,
     return args
 
 
+def _event_error(lines: list[str]) -> str:
+    """The last error message in Codex's --json event stream (it reports usage limits there, not on stderr)."""
+    for line in reversed(lines):
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        msg = ev.get("message") or (ev.get("error") or {}).get("message") if isinstance(ev, dict) else None
+        if ev.get("type") in ("error", "turn.failed") and msg:
+            return str(msg)
+    return ""
+
+
 def secure_dir(path: Path) -> None:
     """Limit a folder to this account (plus SYSTEM and Administrators): no inherited 'Authenticated Users' access."""
     path.mkdir(parents=True, exist_ok=True)
@@ -309,7 +322,9 @@ class CodexCliProvider:
                     return final.read_text(encoding="utf-8"), meta
                 if CAPACITY.search(stderr) and attempt < len(self.retry_delays):
                     continue
-                tail = "\n".join(stderr.strip().splitlines()[-6:])
+                tail = "\n".join(stderr.strip().splitlines()[-6:]) or _event_error(lines)
+                if re.search(r"usage limit", tail, re.I):  # the ChatGPT plan's limit: say so instead of "exited with code 1"
+                    raise ProviderError(f"Codex usage limit reached on your ChatGPT plan: {tail[:300]}")
                 raise ProviderError(f"Codex exited with code {proc.returncode}: {tail or 'no output'}")
             raise ProviderError("Codex is at capacity; try again shortly")
         finally:

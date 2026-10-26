@@ -9,9 +9,10 @@ Rest (§11.4): short/long/full-day in a saferoom, healing by Health Bar slots.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..db import now_iso, one, rows
 from .engine import ChangeError, Ctx, resolve_character
@@ -117,6 +118,62 @@ def _apply_ai_favor(ctx: Ctx, op: AiFavor) -> dict:
 
 
 # ------------------------------------------------------------------ party organization
+# ------------------------------------------------------------------ one location model (playtest 1, H4/H5)
+# The campaign's location is where the player character's group is; a group's location is where its members are.
+def _place(text: str | None) -> str:
+    return re.split(r"[,—]", text or "")[0].strip().lower()
+
+
+def pc_group(ctx: Ctx) -> dict | None:
+    camp = one(ctx.conn, "SELECT active_character_id FROM campaigns WHERE id = ?", (ctx.campaign_id,))
+    pc = one(ctx.conn, "SELECT assignment FROM characters WHERE id = ?", (camp["active_character_id"],)) if camp and camp["active_character_id"] else None
+    if not pc or not pc["assignment"]:
+        return None
+    return one(ctx.conn, "SELECT * FROM party_groups WHERE campaign_id = ? AND key = ? AND status = 'active'", (ctx.campaign_id, pc["assignment"]))
+
+
+def known_saferoom(ctx: Ctx, location: str) -> bool:
+    """A place is a saferoom only if it was recorded as one: the campaign is there in a saferoom now, set_location marked
+    it (meta saferooms:<cid>), a party group named for the saferoom is stationed there, or a past location change said so."""
+    camp = one(ctx.conn, "SELECT current_location, safe_room FROM campaigns WHERE id = ?", (ctx.campaign_id,))
+    if camp["safe_room"] and _place(camp["current_location"]) == _place(location):
+        return True
+    m = one(ctx.conn, "SELECT value FROM meta WHERE key = ?", (f"saferooms:{ctx.campaign_id}",))
+    if m and _place(location) in json.loads(m["value"]):
+        return True
+    for g in rows(ctx.conn, "SELECT key, label, location FROM party_groups WHERE campaign_id = ? AND status = 'active'", (ctx.campaign_id,)):
+        if "saferoom" in f"{g['key']} {g['label']}".lower() and _place(g["location"]) == _place(location):
+            return True
+    for e in rows(ctx.conn, "SELECT payload_json FROM events WHERE campaign_id = ? AND type = 'location_changed' AND rolled_back = 0 ORDER BY id DESC", (ctx.campaign_id,)):
+        p = e.get("payload") or {}
+        if _place(p.get("location")) == _place(location) and p.get("safe_room") is not None:
+            return bool(p["safe_room"])
+    return False
+
+
+def remember_saferoom(ctx: Ctx, location: str) -> None:
+    key = f"saferooms:{ctx.campaign_id}"
+    m = one(ctx.conn, "SELECT value FROM meta WHERE key = ?", (key,))
+    places = set(json.loads(m["value"])) if m else set()
+    if _place(location) not in places:
+        places.add(_place(location))
+        ctx.conn.execute("INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, json.dumps(sorted(places))))
+
+
+def campaign_follows_group(ctx: Ctx, g: dict, location: str | None) -> None:
+    """The player character's group moved: the campaign's location (and saferoom status) moves with it."""
+    pg = pc_group(ctx)
+    if not pg or pg["key"] != g["key"] or not location:
+        return
+    camp = one(ctx.conn, "SELECT current_location FROM campaigns WHERE id = ?", (ctx.campaign_id,))
+    if camp["current_location"] == location:
+        return
+    safe = known_saferoom(ctx, location)
+    ctx.conn.execute("UPDATE campaigns SET current_location = ?, safe_room = ?, updated_at = ? WHERE id = ?", (location, int(safe), now_iso(), ctx.campaign_id))
+    ctx.event("location_changed", f"Party moves to {location} (with {g['label']})" + ("" if safe else " — not a saferoom"),
+              {"location": location, "safe_room": None, "followed_group": g["key"]})
+
+
 class GroupUpsert(BaseModel):
     op: Literal["group"]
     key: str = Field(min_length=1, max_length=60)
@@ -136,6 +193,9 @@ def _apply_group(ctx: Ctx, op: GroupUpsert) -> dict:
         ctx.conn.execute("UPDATE party_groups SET label = COALESCE(?, label), location = COALESCE(?, location), activity = COALESCE(?, activity), "
                          "status = COALESCE(?, status) WHERE id = ?", (op.label, op.location, op.activity, op.status, g["id"]))
     g = one(ctx.conn, "SELECT * FROM party_groups WHERE campaign_id = ? AND key = ?", (ctx.campaign_id, op.key))
+    if op.location:
+        ctx.conn.execute("UPDATE characters SET location = ? WHERE campaign_id = ? AND assignment = ?", (g["location"], ctx.campaign_id, op.key))
+        campaign_follows_group(ctx, g, g["location"])
     names = []
     if op.members is not None:
         ctx.conn.execute("UPDATE characters SET assignment = NULL WHERE campaign_id = ? AND assignment = ?", (ctx.campaign_id, op.key))
@@ -169,6 +229,7 @@ def _apply_move_group(ctx: Ctx, op: MoveGroup) -> dict:
     ctx.conn.execute("UPDATE characters SET location = ? WHERE campaign_id = ? AND assignment = ?", (op.destination, ctx.campaign_id, op.key))
     summary = f"{g['label']} ({', '.join(m['name'].split(' ')[0] for m in members)}) → {op.destination} — {op.reason}"
     ctx.event("group_moved", summary, {"key": op.key, "from": g["location"], "to": op.destination})
+    campaign_follows_group(ctx, g, op.destination)
     return {"summary": summary}
 
 
@@ -195,9 +256,18 @@ def _apply_move_character(ctx: Ctx, op: MoveCharacter) -> dict:
 
 
 # ------------------------------------------------------------------ scene & memory
+SCENE_ALIASES = {"end": "close", "finish": "close", "stop": "close", "begin": "start", "open": "start", "new": "start",
+                 "set": "update", "change": "update", "edit": "update"}
+
+
 class SceneChange(BaseModel):
     op: Literal["scene"]
     action: Literal["start", "update", "close"]
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def _alias(cls, v):  # the GM kept sending "end" and "set" (playtest 1, M4)
+        return SCENE_ALIASES.get(str(v).lower(), v)
     title: str | None = None
     location: str | None = None
     group: str | None = None
@@ -257,6 +327,14 @@ class Remember(BaseModel):
     content: str = Field(min_length=3, max_length=2000)
     visibility: Literal["player", "gm"] = "player"   # gm = private beat / hidden reaction
     importance: int = Field(default=2, ge=1, le=3)
+
+    @field_validator("importance", mode="before")
+    @classmethod
+    def _clamp(cls, v):  # out-of-range importance (not a gameplay value) once rejected a whole turn (playtest 1, M5)
+        try:
+            return min(3, max(1, int(v)))
+        except (TypeError, ValueError):
+            return 2
 
 
 def _apply_remember(ctx: Ctx, op: Remember) -> dict:
@@ -354,10 +432,29 @@ def _apply_rest(ctx: Ctx, op: Rest) -> dict:
             if ctx.conn.execute("DELETE FROM status_effects WHERE character_id = ? AND name = ?", (c["id"], name)).rowcount:
                 lines.append(f"{c['name']}: {name} removed")
     reset_uses(ctx, ("short_rest",) if op.kind == "short" else ("short_rest", "long_rest"))
-    t = _apply_advance_time(ctx, AdvanceTime(op="advance_time", minutes=REST_MINUTES[op.kind], reason=f"{op.kind.replace('_', ' ')} rest — {op.reason}"))
+    # the rest is the clock for its own hours: if this turn already advanced time for the rest, do not count it twice
+    covered = rest_time_already_advanced(ctx, REST_MINUTES[op.kind])
+    t = {"summary": f"the clock already advanced {covered} minutes for this rest this turn"} if covered else         _apply_advance_time(ctx, AdvanceTime(op="advance_time", minutes=REST_MINUTES[op.kind], reason=f"{op.kind.replace('_', ' ')} rest — {op.reason}"))
     summary = f"{op.kind.replace('_', ' ').title()} rest ({REST_MINUTES[op.kind] // 60}h)"
     ctx.event("rest", summary, {"kind": op.kind, "lines": lines})
     return {"summary": summary, "lines": lines, "time": t["summary"]}
+
+
+REST_WORDS = re.compile(r"\b(rest|rests|resting|sleep|sleeps|sleeping|overnight)\b", re.I)
+
+
+def rest_time_already_advanced(ctx: Ctx, minutes: int) -> int:
+    """Minutes this turn's advance_time calls already spent on a rest (reason mentions rest/sleep), when they cover it."""
+    if ctx.turn_id is None:
+        return 0
+    spent = 0
+    for e in rows(ctx.conn, "SELECT summary, payload_json FROM events WHERE campaign_id = ? AND turn_id = ? AND type = 'time_advanced' AND rolled_back = 0",
+                  (ctx.campaign_id, ctx.turn_id)):
+        p = e.get("payload") or {}
+        reason = re.sub(r"^\d+ minutes pass\W+", "", e["summary"]).lower()
+        if REST_WORDS.search(reason) and not reason.startswith(("short rest", "long rest", "full day rest")):  # not the rest op's own advance
+            spent += int(p.get("after", 0)) - int(p.get("before", 0))
+    return spent if spent >= minutes else 0
 
 
 def apply_mending(ctx: Ctx, refs: list[str] | str, hours: int) -> list[str]:

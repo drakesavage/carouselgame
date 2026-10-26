@@ -3,7 +3,10 @@
 Turn types (decided before any model is called, from the player's words and the campaign state):
 * meta    recaps, status and rules questions        -> gemini-3.5-flash-lite (500/day)
 * talk    conversation and roleplay, no mechanics   -> gemini-3.8-flash, then gemini-3.6-flash (20/day each)
-* action  anything with rolls, combat, purchases, travel or other state changes, or any turn during combat -> Codex
+* action  anything with rolls, combat, purchases, travel or other state changes, or any turn during combat -> Codex;
+          also any turn that involves characters who are not with the player character (messages, reports, debriefs,
+          "when they get back"), discoveries or scouting: what absent people did must be resolved, not narrated
+          (playtest 1, H3)
 A model without enough quota left for a turn is skipped; when none is left the turn goes to Codex.
 
 Gemini turns run in conversation mode: only low-risk tools (lookups, notes, NPC memories and attitudes, facts,
@@ -27,16 +30,18 @@ MIN_REQUESTS = {"meta": 2, "talk": 3}  # a turn can take a few calls; don't star
 
 SAFE_TOOLS = {"search_rules", "read_rule_page", "lookup_records", "read_record", "record_ruling", "gm_note", "system_notice",
               "count_cycle", "suggest_image", "apply_changes"}
-SAFE_OPS = {"remember", "npc_attitude", "fact"}
+SAFE_OPS = {"remember", "npc_attitude"}   # no "fact": conversation never establishes canon (playtest 1, H3)
 ESCALATE_SPEC = {"name": "escalate",
                  "description": "Hand this turn to the mechanics GM. Call it (alone, with narration null) as soon as the player's action needs "
                                 "dice, a check, combat, time passing, travel, money, items, rest or any other state change you can't make here.",
                  "parameters": {"reason": "str"}}
 CONVERSATION_MODE = """# CONVERSATION MODE (this turn)
 This turn was routed to you as conversation, roleplay or a question. You have only lookup, note, memory, attitude, fact,
-cycle and picture tools; apply_changes accepts only the ops remember, npc_attitude and fact. If answering properly needs
+cycle and picture tools; apply_changes accepts only the ops remember and npc_attitude. If answering properly needs
 dice, a check, combat, time passing, travel, money, items, rest or any other state change, call `escalate` immediately
-instead of narrating it. Never narrate an outcome that would need a mechanic you can't run."""
+instead of narrating it. Never narrate an outcome that would need a mechanic you can't run. Never say what a character
+or group who is not present did, found, saw or says now (a report, a reply on the party chat, a return) beyond what
+the records already state: call `escalate`. Never present anything new as established fact."""
 
 RECAP = re.compile(r"\b((?:give|tell|show) me (?:a |the )?(?:quick )?(?:recap|summary|rundown|status)\w*|what do the rules say(?: about)?|recap|previously on|remind me|status check|status update|where (?:is|are) (?:everyone|we|the)|what do (?:i|we) know|"
                    r"what(?:'s| is) (?:my|our|the) |how many|how much|rules? (?:question|for|say|on)|what do the rules|how does .* work|"
@@ -51,10 +56,22 @@ TALK = re.compile(r"[\"“”]|\b(ask|asks|tell|tells|say|says|talk|chat|reply|r
                   r"listen|wonder|confide|chat|banter|whisper|smile|nod|laugh|sigh|introduce|share|admit|promise)\w*", re.I)
 
 
-def classify(text: str, combat_active: bool) -> tuple[str, str]:
-    """(kind, reason) for routing. Errs toward 'action' (Codex) when unsure."""
+OFFSCREEN = re.compile(r"\b(message|messages|text|ping|radio|chat|contact|check in|report|reports|debrief|status report|hear back|"
+                       r"news from|when (?:they|he|she) (?:arrive|arrives|return|returns|get back|gets back|come back|comes back)|"
+                       r"(?:they|he|she) (?:should be|must be) back|recon team|the others|discover|discovers|find out|learn)\w*", re.I)
+
+
+def classify(text: str, combat_active: bool, absent: set[str] | frozenset = frozenset()) -> tuple[str, str]:
+    """(kind, reason) for routing. Errs toward 'action' (Codex) when unsure. `absent`: names and group labels of
+    characters who are not with the player character."""
     if combat_active:
         return "action", "combat is active"
+    off = OFFSCREEN.search(text)
+    if off:
+        return "action", f"involves absent characters or discoveries ('{off.group(0)}')"
+    who = next((n for n in sorted(absent, key=len, reverse=True) if len(n) > 2 and re.search(rf"\b{re.escape(n)}\b", text, re.I)), None)
+    if who:
+        return "action", f"mentions {who}, who is not with the player character"
     recap = RECAP.search(text)
     plain = RECAP.sub(" ", text)
     act = None
@@ -66,7 +83,7 @@ def classify(text: str, combat_active: bool) -> tuple[str, str]:
         if found:
             act = found
             break
-    if recap and not act:
+    if recap and (not act or act.group(0).lower().startswith("gold")):   # "how much Gold do we have" is a question
         return "meta", "recap, status or rules question"
     if act:
         return "action", f"mentions '{act.group(0)}'"
@@ -197,8 +214,8 @@ class AutoGM:
         p.conversation = conversation
         return p
 
-    def route(self, text: str, combat_active: bool) -> tuple[object, dict]:
-        kind, why = classify(text, combat_active)
+    def route(self, text: str, combat_active: bool, absent: set[str] | frozenset = frozenset()) -> tuple[object, dict]:
+        kind, why = classify(text, combat_active, absent)
         model = pick_model(kind, self.quota, bool(self.settings.gemini_api_key()))
         info = {"kind": kind, "reason": why, "provider": "gemini" if model else "codex", "model": model or (self.codex_model or "codex default")}
         if kind != "action" and not model:

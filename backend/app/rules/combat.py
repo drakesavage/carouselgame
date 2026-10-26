@@ -435,17 +435,21 @@ class Combat:
         return {"summary": f"{c['name']} calls a play: {a['name']} — {action}" + (f" (vs {mob['name']})" if mob else "")
                            + f". Called Play bonus +{r.total}.", "bonus": r.total, "actions_left": c["actions_left"]}
 
-    def intervene(self, who: str) -> dict:
+    def intervene(self, who: str, attacker: str | None = None) -> dict:
+        """+1d6 to a missed Attack this round (by `attacker`, else the latest eligible one). Resolution order does not
+        matter: an earlier miss stays eligible after other Attacks (playtest 1, M2)."""
         enc = _require(self.conn, self.cid)
         st = _state(enc)
-        last = st.get("last_attack")
         c = _find(st, who, "party")
-        if not last or last["round"] != st["round"]:
-            raise ChangeError("Intervene answers another crawler's Attack result this round; there is none to change")
+        mine = _find(st, attacker, "party")["id"] if attacker else None
+        misses = [x for x in st.get("attacks_round", []) if x["round"] == st["round"] and not x["hit"] and not x.get("intervened")
+                  and (mine is None or x["attacker"] == mine)]
+        if not misses:
+            raise ChangeError("Intervene answers another crawler's missed Attack this round; there is none to change"
+                              + (" (that Attack already hit or was already Intervened on)" if st.get("attacks_round") else ""))
+        last = misses[-1]
         if last["attacker"] == c["id"]:
             raise ChangeError("Intervene helps another crawler, not your own Attack")
-        if last["hit"] or last.get("intervened"):
-            raise ChangeError("that Attack " + ("already hit" if last["hit"] else "has already been Intervened on"))
         a, mob = _find(st, last["attacker"]), _find(st, last["mob"])
         if mob["defeated"]:
             raise ChangeError(f"{mob['name']} is already defeated")
@@ -478,7 +482,12 @@ class Combat:
 
     def _ammo(self, ch: dict, skill: str, entry: dict | None, override: str | None) -> dict | None:
         """The item an Attack spends one of (BOOK p. 183: 'Each Attack requires proper ammunition'), or None."""
-        text = override or (entry or {}).get("ammunition")
+        named = (entry or {}).get("ammunition")
+        if override and named and _singular(override) != _singular(re.sub(r"\b(shared|supply|the|of)\b", " ", named.lower())):
+            # a sheet that names its supply keeps it: spending another stock instead is the owner's decision (playtest 1, M1)
+            raise ChangeError(f"{ch['name']}'s sheet names {named!r} as this attack's ammunition; using {override!r} instead needs "
+                              "an owner ruling first (ask; then record_ruling)")
+        text = override or named
         if not text:
             if skill.lower() in AMMO_SKILLS:
                 raise ChangeError(f"{ch['name']}'s {skill} Attack needs ammunition: give `ammunition` (the item it spends)")
@@ -625,9 +634,12 @@ class Combat:
                 r.total += play["bonus"]
                 r.degree = boosted
         r.outcome = "success" if is_success(r.degree) else "failure"
+        if play:  # the record shows the roll, the bonus and the effective total that set the degree (playtest 1, M3)
+            r.detail.update({"called_play": {"by": _find(st, play["caller"])["name"], "bonus": play["bonus"],
+                                             "applied_to": "damage" if play_damage else "check", "rolled_total": r.total - (0 if play_damage else play["bonus"])}})
         r.detail.update({"natural": nat, "d20s": [d.value for d in r.dice if d.sides == 20],
                          "summary": f"{ch['name']} — {skill}: d20 {nat} + Rank {rank} + {stat_key[:3].upper()} {smod:+d}{f' {extra:+d}' if extra else ''} = {r.total} vs Evade {mob['evade']} → {r.degree}"})
-        self.conn.execute("UPDATE dice_rolls SET degree = ?, outcome = ?, detail_json = ? WHERE id = ?", (r.degree, r.outcome, json.dumps(r.detail), r.id))
+        self.conn.execute("UPDATE dice_rolls SET total = ?, degree = ?, outcome = ?, detail_json = ? WHERE id = ?", (r.total, r.degree, r.outcome, json.dumps(r.detail), r.id))
         marked = False
         if srow and rank > 0:
             marked = bool(self.conn.execute("UPDATE skills SET marked = 1 WHERE character_id = ? AND lower(name) = lower(?) AND kind = 'skill' AND marked = 0 AND passive = 0",
@@ -637,6 +649,7 @@ class Combat:
             lines.append(f"Spent 1 {ammo['name']} ({ammo['quantity'] - 1} left)")
         st["last_attack"] = {"attacker": a["id"], "mob": mob["id"], "round": st["round"], "natural": nat, "total": r.total, "degree": r.degree,
                              "hit": is_success(r.degree), "damage": dmg_expr, "damage_bonus": play_damage}
+        st.setdefault("attacks_round", []).append(st["last_attack"])
         if sk == "handgun" and r.degree in ("Major Fail", "Critical Fail"):
             a["reload"] = True
         if is_success(r.degree):
@@ -697,7 +710,7 @@ class Combat:
         st["plays"] = [p for p in st.get("plays", []) if not p["used"] and p["round"] >= st["round"]]
         if lapsed:
             lines.append("Called Play lapsed: " + "; ".join(f"{_find(st, p['ally'])['name']} — {p['action']}" for p in lapsed))
-        st["last_attack"] = None
+        st["last_attack"], st["attacks_round"] = None, []
         st["round"] += 1
         st["phase"], st["declared"] = "mob_declaration", []
         foes_left = [c["name"] for c in st["combatants"] if c["side"] == "foe" and not c["defeated"]]
@@ -723,7 +736,7 @@ class Combat:
         self.conn.execute("UPDATE encounters SET status = 'resolved', combatants_json = ?, summary = COALESCE(summary, '') || ? WHERE id = ?",
                           (json.dumps(st), f"\nOutcome: {outcome}", enc["id"]))
         defeated = [c["name"] for c in st["combatants"] if c["side"] == "foe" and c["defeated"]]
-        ctx.event("encounter_end", f"Combat ends: {enc['name']} — {outcome}", {"defeated": defeated, "rounds": st["round"]})
+        ctx.event("encounter_end", f"Combat ends: {enc['name']} — {outcome}", {"defeated": defeated, "rounds": st["round"], "encounter_id": enc["id"]})
         return {"summary": f"Combat over after {st['round']} round(s): {outcome}", "lines": lines, "defeated": defeated,
                 "ammunition_fired": st.get("shots") or {}}
 

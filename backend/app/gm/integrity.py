@@ -19,7 +19,7 @@ def _shingles(text: str, n: int = 8) -> set[str]:
 
 
 def check(conn: sqlite3.Connection, cid: int, player_input: str, narration: str, changes: list[str], rolls: list[dict],
-          errors: list[str], notices: list[dict]) -> list[dict]:
+          errors: list[str], notices: list[dict], turn_id: int | None = None) -> list[dict]:
     flags: list[dict] = []
     text = narration + " " + " ".join(n.get("text", "") for n in notices)
     ch = " ".join(changes).lower()
@@ -34,8 +34,9 @@ def check(conn: sqlite3.Connection, cid: int, player_input: str, narration: str,
 
     for e in errors:
         flag("warn", f"A requested change was rejected: {e[:240]}")
-    if re.search(r"\b\d[\d,]*\s+gold\b", text, re.I) and re.search(r"\b(pay|paid|spend|spent|cost|buy|bought|earn|loot|receive)", text, re.I) \
-            and "gold" not in ch:
+    statements = " ".join(x for x in re.split(r"(?<=[.!?])\s+", text) if not x.rstrip("*_ ").endswith("?"))  # an offer is a question
+    if re.search(r"\b(?:you |cliff |we )?(?:pay|pays|paid|spend|spends|spent|buy|buys|bought|earn|earned|loot|looted|receive|received)\b[^.]{0,40}?\b\d[\d,]*\s+gold\b",
+                 statements, re.I) and "gold" not in ch:   # a quoted price or an offer is not a transaction (playtests 1-2, L3)
         flag("warn", "Narration mentions spending or gaining Gold, but no Gold change was recorded.", recounting=True)
     if re.search(r"\b(heal(?:s|ed)?|lose[s]?|take[s]?|took|suffer(?:s|ed)?)\s+\d+\s*(damage|hp|health|slots?)\b", text, re.I) \
             and not re.search(r"\bhp\b|health bar|slot|heals|loses", ch):
@@ -50,6 +51,26 @@ def check(conn: sqlite3.Connection, cid: int, player_input: str, narration: str,
             flag("warn", f"Narration quotes a d20 result ({m.group(1)}) that the server did not roll this turn.")
     if RECAP.search(player_input) and "advancement cycles" in ch:
         flag("warn", "An advancement cycle was counted on what looks like a recap/status/rules turn (CORE_MECHANICS 14.3).")
+    # An absent character speaking or reporting in the narration needs an off-screen resolution this turn (CORE 15.2;
+    # playtest 1, H3: an invented recon report and return)
+    if turn_id is not None:
+        from .orchestrator import absent_names
+        resolved = rows(conn, "SELECT 1 AS x FROM events WHERE campaign_id = ? AND turn_id = ? AND type = 'offscreen_resolved'", (cid, turn_id))
+        speakers = {m.group(1).strip() for m in re.finditer(r"\*\*\[?(?:Party Chat\]\s*)?([A-Z][\w' -]{1,30}?)(?:\s*\([^)]*\))?:\*\*", text)}
+        absent = {n for n in absent_names(conn, cid) if " " not in n or n[0].isupper()}
+        # people who left during this turn were present when they spoke (playtest 2: Marcus and Selina heading out)
+        for e in rows(conn, "SELECT payload_json FROM events WHERE campaign_id = ? AND turn_id = ? AND type IN ('group_moved', 'group_updated', 'character_moved')",
+                      (cid, turn_id)):
+            key = (e.get("payload") or {}).get("key")
+            for c in rows(conn, "SELECT name FROM characters WHERE campaign_id = ? AND assignment = ?", (cid, key)) if key else []:
+                absent -= {c["name"], c["name"].split()[0]}
+            if (e.get("payload") or {}).get("character_id"):
+                c = rows(conn, "SELECT name FROM characters WHERE id = ?", ((e.get("payload") or {}).get("character_id"),))
+                absent -= {c[0]["name"], c[0]["name"].split()[0]} if c else set()
+        quoted = sorted(s for s in speakers if s in absent or s.split()[0] in absent)
+        if quoted and not resolved:
+            flag("warn", f"Narration has {', '.join(quoted)} (not with the player character) speaking or reporting, but nothing was "
+                         "resolved off-screen this turn (CORE 15.2): check that the report is from the records, not invented.")
     secret_text = " ".join(s["content"] for s in rows(conn, "SELECT content FROM gm_secrets WHERE campaign_id = ? AND revealed = 0", (cid,)))
     leak = _shingles(text) & _shingles(secret_text)
     if leak:

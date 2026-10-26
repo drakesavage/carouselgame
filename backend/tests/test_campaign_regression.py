@@ -664,3 +664,169 @@ def test_traps_need_a_record_lock_while_deployed_and_spend_real_costs(conn, dent
     assert "ready" in tool([1], action="stow", trap="Porcupine Pod")["result"]["summary"]
     t1 = clock()
     assert tool([1], action="deploy", trap="Porcupine Pod", location="saferoom door")["ok"] and clock() == t1 + 10   # out of combat: time
+
+
+def test_advancement_cycles_need_a_consequential_decision_and_one_combat_earns_one(conn, denton):
+    """Playtest 1, H2: bookkeeping, travel, rests and every instruction inside one fight each counted a cycle."""
+    from app.db import now_iso
+    from app.gm.tools import ToolRunner
+    from app.rules.combat import Combat, MobAttack, StartCombat, StatBlock
+    from app.rules.dice import DiceRoller
+    from tests.conftest import scripted
+    cyc = lambda: one(conn, "SELECT current FROM clocks WHERE campaign_id = ? AND key = 'advancement_cycles'", (denton,))["current"]
+
+    def turn(words, changes=(), dice=(10,)):
+        with transaction(conn):
+            tid = conn.execute("INSERT INTO turns (campaign_id, idempotency_key, status, player_input, created_at) VALUES (?,?,?,?,?)",
+                               (denton, uuid.uuid4().hex, "processing", words, now_iso())).lastrowid
+        run = ToolRunner(conn, None, DiceRoller(source=scripted(list(dice))), denton, tid)
+        with transaction(conn):
+            if changes:
+                assert run.run("apply_changes", {"changes": list(changes)})["ok"]
+            return run, run.run("count_cycle", {"decision": words, "resolution": "resolved"})
+
+    c0 = cyc()
+    for words, changes, why in (
+            ("Quick status check: where is everyone?", [], "recap, status"),
+            ("Marcus, hand your bolas to Priya.", [{"op": "transfer_item", "from_character": "Marcus", "to_character": "Priya", "name": "Bolas"}], "bookkeeping"),
+            ("We walk back to the Molting Pigeon.", [{"op": "advance_time", "minutes": 20, "reason": "walk back"}], "bookkeeping"),
+            ("I make my decision.", [], "nothing consequential")):
+        _, res = turn(words, changes)
+        assert not res["ok"] and why in res["result"]["error"], (words, res)
+    assert cyc() == c0
+    _, res = turn("If the armor is under 100 Gold, I buy it for Nate.", [
+        {"op": "remove_item", "character": "shared", "name": "Gold", "quantity": 70, "cause": "armor"},
+        {"op": "add_item", "character": "Nate", "name": "Used Fitted Torso Armor"}])
+    assert res["ok"] and cyc() == c0 + 1
+    audit = one(conn, "SELECT payload_json FROM events WHERE campaign_id = ? AND type = 'clock_changed' ORDER BY id DESC", (denton,))["payload"]
+    assert audit["player_input"].startswith("If the armor") and audit["qualifying_events"]
+    run = ToolRunner(conn, None, DiceRoller(), denton, one(conn, "SELECT max(id) AS m FROM turns", ())["m"])
+    assert "already earned its cycle" in run.run("count_cycle", {"decision": "again", "resolution": "again"})["result"]["error"]
+
+    # one combat earns one cycle, however many turns and instructions it takes
+    Combat(conn, denton, None, DiceRoller(source=scripted([1]))).start(StartCombat(name="alley", party=["Cliff", "Marcus"], setup="test",
+                                                                                      foes=[StatBlock(name="Rat", health_bar=[1] * 3, evade=30)]))
+    Combat(conn, denton, None, DiceRoller()).declare([])
+    Combat(conn, denton, None, DiceRoller(source=scripted([1]))).resolve()
+    with transaction(conn):
+        tid = conn.execute("INSERT INTO turns (campaign_id, idempotency_key, status, player_input, created_at) VALUES (?,?,?,?,?)",
+                           (denton, uuid.uuid4().hex, "processing", "Marcus, smash it.", now_iso())).lastrowid
+    Combat(conn, denton, tid, DiceRoller(source=scripted([5]))).attack("Marcus", "Rat", attack="Pipe Club")
+    with transaction(conn):
+        first = ToolRunner(conn, None, DiceRoller(), denton, tid).run("count_cycle", {"decision": "fight the rat", "resolution": "fighting"})
+    assert first["ok"]
+    with transaction(conn):
+        tid2 = conn.execute("INSERT INTO turns (campaign_id, idempotency_key, status, player_input, created_at) VALUES (?,?,?,?,?)",
+                            (denton, uuid.uuid4().hex, "processing", "Keep hitting it.", now_iso())).lastrowid
+    Combat(conn, denton, tid2, DiceRoller()).end_round()
+    Combat(conn, denton, tid2, DiceRoller()).declare([])
+    Combat(conn, denton, tid2, DiceRoller(source=scripted([1]))).resolve()
+    Combat(conn, denton, tid2, DiceRoller(source=scripted([5]))).attack("Marcus", "Rat", attack="Pipe Club")
+    Combat(conn, denton, tid2, DiceRoller()).end("rat fled")
+    with transaction(conn):
+        second = ToolRunner(conn, None, DiceRoller(), denton, tid2).run("count_cycle", {"decision": "keep hitting", "resolution": "it fled"})
+    assert not second["ok"] and "this combat already earned its cycle" in second["result"]["error"]
+    assert cyc() == c0 + 2
+
+
+def test_an_absent_characters_report_without_offscreen_resolution_is_flagged(conn, denton):
+    from app.db import now_iso
+    from app.gm.integrity import check as integrity
+    from app.ledger import sync
+    from app.reconcile import location_correction, positions_correction
+    location_correction(conn, denton, decided_by="owner (test)")   # as on the live campaign: Cliff at Gilded Feathers, recon unknown
+    positions_correction(conn, denton, sync.link(conn, denton)["root"], decided_by="owner (test)")
+    with transaction(conn):
+        tid = conn.execute("INSERT INTO turns (campaign_id, idempotency_key, status, player_input, created_at) VALUES (?,?,?,?,?)",
+                           (denton, uuid.uuid4().hex, "processing", "I message the recon team.", now_iso())).lastrowid
+    story = '**[Party Chat] Scout:** "Found three entry points!" **Maya (Party HUD):** "Six Brain Boilers in the courtyard."'
+    flags = integrity(conn, denton, "I message the recon team.", story, [], [], [], [], tid)
+    assert any("not with the player character" in f["message"] and "Maya" in f["message"] and "Scout" in f["message"] for f in flags)
+    with transaction(conn):
+        conn.execute("INSERT INTO events (campaign_id, turn_id, type, summary, payload_json, visibility, created_at) VALUES (?,?,?,?,?,?,?)",
+                     (denton, tid, "offscreen_resolved", "Prison Recon (off-screen): report", "{}", "gm", now_iso()))
+    assert not any("not with the player character" in f["message"] for f in integrity(conn, denton, "x", story, [], [], [], [], tid))
+
+
+def test_one_location_model_campaign_group_and_members_move_together(conn, denton):
+    """Playtest 1, H4/H5: the campaign and Cliff's group drifted apart, and a group placed somewhere left its members behind."""
+    from app.consistency import summary
+    from app.reconcile import location_correction, positions_correction
+    from app.ledger import sync
+    location_correction(conn, denton, decided_by="owner (test)")
+    positions_correction(conn, denton, sync.link(conn, denton)["root"], decided_by="owner (test)")
+    do(conn, denton, {"op": "set_location", "location": "Secondhand Saviors, Gilded Feathers, Heavensworth", "safe_room": False})
+    camp = one(conn, "SELECT current_location, safe_room FROM campaigns WHERE id = ?", (denton,))
+    g = one(conn, "SELECT location FROM party_groups WHERE campaign_id = ? AND key = 'training-market'", (denton,))
+    assert g["location"] == camp["current_location"] == "Secondhand Saviors, Gilded Feathers, Heavensworth"
+    assert one(conn, "SELECT location FROM characters WHERE campaign_id = ? AND name = 'Nate Holloway'", (denton,))["location"] == g["location"]
+    do(conn, denton, {"op": "move_group", "key": "training-market", "destination": "The Molting Pigeon, Heavensworth, Over City", "reason": "home"})
+    camp = one(conn, "SELECT current_location, safe_room FROM campaigns WHERE id = ?", (denton,))
+    assert camp["current_location"].startswith("The Molting Pigeon") and camp["safe_room"] == 1      # known saferoom: the support group is there
+    do(conn, denton, {"op": "move_group", "key": "training-market", "destination": "Rear alley behind The Molting Pigeon", "reason": "sweep"})
+    assert one(conn, "SELECT safe_room FROM campaigns WHERE id = ?", (denton,))["safe_room"] == 0             # the flag never follows the party out
+    do(conn, denton, {"op": "group", "key": "prison-recon", "location": "Ruined brick masonry yard, northwest of Fallen Watch"})
+    scout = one(conn, "SELECT location FROM characters WHERE campaign_id = ? AND name = 'Scout'", (denton,))["location"]
+    assert scout == "Ruined brick masonry yard, northwest of Fallen Watch"                                     # members move with their group
+    assert one(conn, "SELECT current_location FROM campaigns WHERE id = ?", (denton,))["current_location"] == "Rear alley behind The Molting Pigeon"
+    assert [c["check"] for c in summary(conn, denton)["checks"] if not c["ok"] and ("position" in c["check"] or "where" in c["check"] or "Location" in c["check"])] == []
+
+
+def test_playtest_one_medium_fixes(conn, denton, client, settings):
+    """Playtest 1, M1-M6 and L3, on the disposable copy."""
+    from app.gm.integrity import check as integrity
+    from app.ledger import sync
+    from app.reconcile import ammunition_correction
+    from app.rules.combat import Combat, MobAttack, StartCombat, StatBlock
+    from app.rules.dice import DiceRoller
+    from tests.conftest import scripted
+    cb = lambda dice: Combat(conn, denton, None, DiceRoller(source=scripted(dice)))
+    ammunition_correction(conn, denton, sync.link(conn, denton)["root"], decided_by="owner (test)")
+    cb([1]).start(StartCombat(name="test", party=["Cliff", "Marcus", "Erin", "Terri", "Vada"], setup="test",
+                              foes=[StatBlock(name="Boiler", health_bar=[10] * 10, evade=25, attacks=[MobAttack(name="Lash", to_hit=10, damage="1d4")])]))
+    cb([1]).declare([])
+    cb([1]).resolve()
+    # M2: Marcus's Near Miss stays open to Intervene after Cliff's later Attack
+    assert "Near Miss" in cb([9]).attack("Marcus", "Boiler", attack="Pipe Club")["summary"]
+    cb([3]).attack("Cliff", "Boiler", attack="Light Crossbow")
+    iv = cb([6, 3, 3]).intervene("Vada", attacker="Marcus")
+    assert iv["hit"] and "Marcus's total 29" in iv["summary"]
+    # M1: a sheet that names its supply keeps it
+    with pytest.raises(ChangeError, match="owner ruling"):
+        cb([20]).attack("Erin", "Boiler", attack="Shortbow", stat="dexterity", ammunition="Recovered Arrow Cache")
+    # M3: a Called Play's roll records the rolled total, the bonus and the effective total that set the degree
+    cb([1]).end_round(); cb([1]).declare([]); cb([1]).resolve()
+    cb([6, 2]).call_play("Vada", "Terri", "shoot the Boiler", target="Boiler")
+    cb([10, 3, 3]).attack("Terri", "Boiler", attack="Service Pistol")
+    r = one(conn, "SELECT total, target, degree, detail_json FROM dice_rolls WHERE campaign_id = ? AND reason LIKE 'Terri Campion attacks%' ORDER BY id DESC", (denton,))
+    assert r["total"] == 26 and r["degree"] == "Success" and r["detail"]["called_play"]["rolled_total"] == 20 and r["detail"]["called_play"]["bonus"] == 6
+    cb([1]).end("test over")
+    # M4 scene aliases, M5 importance clamp
+    do(conn, denton, {"op": "scene", "action": "begin", "title": "Test scene", "location": "the loft", "summary": "the market scene ended"},
+       {"op": "scene", "action": "end", "summary": "it ended"},
+       {"op": "remember", "subject": "Vada", "content": "Vada was brave in the loft", "importance": 4})
+    assert one(conn, "SELECT importance FROM memories WHERE campaign_id = ? ORDER BY id DESC", (denton,))["importance"] == 3
+    # L3: a quoted price is not a Gold transaction; a payment still is
+    msg = lambda story: [f["message"] for f in integrity(conn, denton, "how much is it?", story, [], [], [], []) if "Gold" in f["message"]]
+    assert msg("The vendor says it costs 70 Gold.") == [] and msg("**Buy one for Nate for 70 Gold?**") == [] and msg("You pay 70 Gold for the armor.")
+
+
+def test_explicit_save_creates_a_save_point_and_a_checkpoint_leaves_level_up_work(client, conn, denton, settings):
+    """Playtest 1, M6 (a narrated bookmark, no save) and M5 (unprocessed Level-up benefits)."""
+    from app.rules.checks import resolve_advancement_checkpoint
+    from app.rules.dice import DiceRoller
+    class Save(MockProvider):
+        def complete(self, system, steps, tools, *, job_label):
+            if not any(s["kind"] == "tool_results" for s in steps):
+                return ProviderResponse([ToolCall("save_game", {"label": "Before the prison"})], "")
+            return ProviderResponse([], "Saved.")
+    client.app_state.turns = TurnService(settings, Save, run_async=False)
+    r = client.post(f"/api/campaigns/{denton}/turns", json={"text": "Let's save here.", "idempotency_key": uuid.uuid4().hex})
+    assert r.status_code == 200, r.text
+    sp = one(conn, "SELECT label, kind FROM save_points WHERE campaign_id = ? AND label = 'Before the prison'", (denton,))
+    assert sp and sp["kind"] == "manual"
+    with transaction(conn):
+        conn.execute("UPDATE clocks SET current = 12 WHERE campaign_id = ? AND key = 'advancement_cycles'", (denton,))
+        resolve_advancement_checkpoint(conn, conn, DiceRoller(), denton, None, "test checkpoint")
+    q = one(conn, "SELECT status, details_json FROM quests WHERE campaign_id = ? AND title = 'Level-up benefits: test checkpoint'", (denton,))
+    assert q["status"] == "active" and q["details"]["crawlers"]

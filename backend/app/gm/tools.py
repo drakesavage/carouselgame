@@ -17,7 +17,7 @@ from ..rules.dice import DiceError, DiceRoller, record_roll
 from ..rules.engine import ChangeError, apply_change, ops_reference, resolve_character
 
 # Tools whose results the model does not need before narrating (see OUTPUT_PROTOCOL).
-BOOKKEEPING_TOOLS = {"apply_changes", "count_cycle", "record_ruling", "gm_note", "system_notice", "reveal_secret", "suggest_image"}
+BOOKKEEPING_TOOLS = {"apply_changes", "count_cycle", "record_ruling", "gm_note", "system_notice", "reveal_secret", "suggest_image", "save_game"}
 
 TOOL_SPECS: list[dict] = [
     {"name": "skill_check",
@@ -38,7 +38,7 @@ TOOL_SPECS: list[dict] = [
                     "Use skill/level/ai_favor for training and awards, group/move_group/move_character for party splits (never teleport "
                     "people: only move who actually goes), scene to keep the current scene current, remember for NPC memories and private "
                     "beats, quest kind commitment/reservation for promises and held items (a reservation is never an owned item), "
-                    "use_ability for limited uses, rest in saferooms, advance_time mending for calm hours. Scene fields, quest details, groups "
+                    "use_ability for limited uses, rest in saferooms (a rest advances the clock itself: never also advance_time for it), advance_time mending for calm hours. Scene fields, quest details, groups "
                     "and remember(visibility player) are SHOWN TO THE PLAYER: put hidden material only in gm_note or remember(visibility gm). Ops:\n" + ops_reference(),
      "parameters": {"changes": "[change objects]"}},
     {"name": "search_rules",
@@ -73,7 +73,10 @@ TOOL_SPECS: list[dict] = [
                     "subject already has a picture.",
      "parameters": {"kind": "str", "subject": "str (name; ignored for scene)", "description": "str (visual only, <= 60 words)", "reason": "str?"}},
     {"name": "count_cycle",
-     "description": "Count one substantive decision-and-resolution cycle toward the advancement checkpoint (12 = one Level interval).",
+     "description": "Count one substantive decision-and-resolution cycle toward the advancement checkpoint (12 = one Level interval), "
+                    "AFTER the decision is resolved. The server refuses recaps/status/rules/save turns, turns with only bookkeeping (time, "
+                    "travel, scenes, rests, transfers, notes), a second cycle in one turn, and a second cycle in one combat. A refusal is normal: "
+                    "do not retry it.",
      "parameters": {"decision": "str", "resolution": "str"}},
     {"name": "resolve_advancement_checkpoint",
      "description": "Resolve a due advancement checkpoint: +1 Level for the active HUD party, d20-vs-Rank checks for marked Rank 0-4 Skills, "
@@ -116,9 +119,10 @@ COMBAT_SPECS: list[dict] = [
                     "through the next round.",
      "parameters": {"caller": "str", "ally": "str", "action": "str", "target": "str?"}},
     {"name": "combat_intervene",
-     "description": "Interrupt (Intervene, BOOK pp. 84, 93): right after another crawler's Attack misses (usually a Near Miss), a crawler "
-                    "spends an Action to add 1d6 to that total; a hit then deals damage. Once per Attack.",
-     "parameters": {"crawler": "str"}},
+     "description": "Interrupt (Intervene, BOOK pp. 84, 93): after another crawler's Attack misses this round (usually a Near Miss), a "
+                    "crawler spends an Action to add 1d6 to that total; a hit then deals damage. Once per Attack. attacker: whose miss "
+                    "(default: the latest eligible one), so other Attacks can be resolved first.",
+     "parameters": {"crawler": "str", "attacker": "str?"}},
     {"name": "combat_action", "description": "Spend an Action on anything else (Move, Help, Retrieve, Reload, Use Hotlist Item, non-attack Spell, Taunt...). Resolve its check/effect with the normal tools.",
      "parameters": {"combatant": "str", "action": "str"}},
     {"name": "combat_damage", "description": "Apply other damage (traps, debuffs, environment, Mob-vs-Mob): amount or dice expression; bypass_dr for Debuff damage.",
@@ -156,6 +160,9 @@ TOOL_SPECS.extend([
                     "damage, ammunition spent. action reset (trap, by). action stow (trap). action status: every trap's record and condition.",
      "parameters": {"action": "record|deploy|trigger|reset|stow|status", "trap": "str?", "spec": "object?", "location": "str?", "by": "str?",
                     "target": "str?", "operator": "str?", "advantage": "int?"}},
+    {"name": "save_game",
+     "description": "The player asked to save: creates a named manual save point when this turn commits (restore it from Saves & Settings).",
+     "parameters": {"label": "str"}},
     {"name": "craft",
      "description": "One crafting attempt (CORE 13.1-13.6; BOOK pp. 223-227), declared in full first: nothing is spent unless every "
                     "material is on hand with an established count. kind common: 1 Misc. Junk, no Check. kind mundane: give size "
@@ -207,6 +214,7 @@ class TurnEffects:
     notices: list[dict] = field(default_factory=list)
     rules_cited: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    save_label: str | None = None                            # save_game: a manual save point after the turn commits
 
 
 class ToolRunner:
@@ -323,6 +331,10 @@ class ToolRunner:
         self.effects.changes.extend(out.get("lines") or [out["summary"]])
         return out
 
+    def t_save_game(self, a: dict) -> dict:
+        self.effects.save_label = (str(a.get("label") or "").strip() or "Player save")[:120]
+        return {"summary": f"Save point '{self.effects.save_label}' will be created when this turn commits"}
+
     def t_craft(self, a: dict) -> dict:
         from ..rules.crafting import CraftRequest, craft
         req = CraftRequest.model_validate(a)
@@ -387,7 +399,7 @@ class ToolRunner:
         return self._combat("call_play", str(a["caller"]), str(a["ally"]), str(a.get("action") or ""), a.get("target"))
 
     def t_combat_intervene(self, a: dict) -> dict:
-        return self._combat("intervene", str(a["crawler"]))
+        return self._combat("intervene", str(a["crawler"]), a.get("attacker"))
 
     def t_combat_action(self, a: dict) -> dict:
         return self._combat("spend_action", str(a["combatant"]), str(a.get("action") or "Action"))

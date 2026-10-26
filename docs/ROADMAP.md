@@ -6,7 +6,7 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 |---|---|---|---|---|---|---|---|
 | M0 Safe upgrade workflow | P0 | Done | none | 385d7dd | 155 backend; typecheck/build; isolation probe PASS | Settings passcode masked | ledger behind by 2 (see below) |
 | M1 Canonical-state reconciliation | P0 | Exit gate met | M0 | (pending) | 166 backend; consistency 21/21 | HUD roster + objectives | 7 uncounted-gear items stay open for owner counts; 44 house rules move to M2/M7 |
-| M2 Mechanics reliability & GM gates | P0 | In progress | M1 | | 176 backend | n/a | coverage matrix and all P1 gaps done; next: trap records (owner), P2 gaps, 30-turn playtest |
+| M2 Mechanics reliability & GM gates | P0 | In progress | M1 | | 185 backend | n/a | M2.1 fixes done; playtest 2 met the state-integrity gate; owner rulings pending (arrows, training, traps) |
 | M3 Main story HUD | P1 | Backlog | M1 underway | | | | |
 | M4 Characters, party, people | P1 | Backlog | M3 | | | | |
 | M5 Inventory, crafting, economy | P1 | Backlog | M3 | | | | |
@@ -232,3 +232,23 @@ the disposable copy through one fight. None of the party's existing traps has a 
 details only for the Murder Drum Battery's Skyhook Harpoon and Kill-Lane Wings. Trap condition is not yet written back
 to the ledger (P2). Coverage: 47 tested, 2 missing; no P1 gaps remain. All Core Rulebook citations added in M2 now use
 the rulebook index's page numbers (what search_rules and read_rule_page return).
+
+**Playtest 1 (exit gate: not met).** 47 turns on a disposable copy (auto routing; live campaign and ledger untouched); full
+report in `docs/playtests/M2-playtest-1.md`. Gold, Misc. Junk, ammunition, inventory and HP all matched the narration.
+Not explained: time (a long rest counted twice), advancement cycles (inflated to a premature checkpoint), and positions
+(campaign vs group, group vs members). Issues: 5 high (H1 double rest time, H2 cycle inflation, H3 Gemini inventing
+off-screen outcomes, H4 campaign/group location drift, H5 group moves leaving members behind), 7 medium, 3 low.
+
+**M2.1 integrity repair and playtest 2.** All five high issues and the medium/low issues from playtest 1 fixed, each
+with a regression test on a disposable copy (185 backend tests): a rest is the only clock for its own hours (H1);
+the server decides cycle eligibility, at most one per turn and one per combat, with an audit of what qualified (H2);
+contact with or reports from absent characters route to the mechanics GM, the conversation path cannot record facts,
+and narration of an absent character speaking without an off-screen resolution is flagged (H3); one location model:
+moving the campaign moves the player character's group and members, moving that group moves the campaign, a group
+move carries its members, saferoom status follows known saferooms only (H4/H5); Intervene reaches any eligible miss
+this round; a Called Play's roll records the boosted total; scene aliases; memory importance clamped; a checkpoint
+leaves an explicit Level-up task; `save_game` creates a real save point; the post-turn lock race; quoted prices and
+offers no longer flagged; a sheet's named ammunition cannot be swapped without an owner ruling; Codex's usage limit
+is reported plainly. Playtest 2 (`docs/playtests/M2-playtest-2.md`, 30 turns including inventive non-linear play,
+save/load and restarts): zero unexplained changes to Gold, items, ammunition, HP, Mana, location, time, cycles or
+Levels, and no fabricated canonical outcomes. Pending owner rulings: Erin's arrows, paid training, trap records.

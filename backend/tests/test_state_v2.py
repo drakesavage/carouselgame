@@ -152,3 +152,25 @@ def test_interrupted_turns_are_failed_at_startup(conn, demo_id):
                  (demo_id, "k-interrupted", "processing", "x", now_iso()))
     assert recover_interrupted_turns(conn) == 1
     assert rows(conn, "SELECT status, error FROM turns")[0]["error"].startswith("Interrupted")
+
+
+def test_a_rest_is_counted_once_on_the_clock(conn, demo_id):
+    from app.rules.engine import ChangeError, apply_change
+    from app.db import one, transaction
+    with transaction(conn):
+        conn.execute("UPDATE campaigns SET safe_room = 1 WHERE id = ?", (demo_id,))
+        tid = conn.execute("INSERT INTO turns (campaign_id, idempotency_key, player_input, status, created_at) VALUES (?, hex(randomblob(8)), 'rest', 'processing', '2026')", (demo_id,)).lastrowid
+    t = lambda: one(conn, "SELECT game_time_minutes FROM campaigns WHERE id = ?", (demo_id,))["game_time_minutes"]
+    t0 = t()
+    with transaction(conn):   # the GM advanced the night first, then applied the rest: 8 hours, not 16 (playtest 1, H1)
+        apply_change(conn, demo_id, tid, {"op": "advance_time", "minutes": 480, "reason": "overnight long rest"})
+        apply_change(conn, demo_id, tid, {"op": "rest", "kind": "long", "reason": "overnight"})
+    assert t() == t0 + 480
+    with transaction(conn):
+        tid2 = conn.execute("INSERT INTO turns (campaign_id, idempotency_key, player_input, status, created_at) VALUES (?, hex(randomblob(8)), 'rest', 'processing', '2026')", (demo_id,)).lastrowid
+    with transaction(conn):   # rest first, then an extra advance for the same rest is refused
+        apply_change(conn, demo_id, tid2, {"op": "rest", "kind": "short", "reason": "patch up"})
+        with pytest.raises(ChangeError, match="already advanced"):
+            apply_change(conn, demo_id, tid2, {"op": "advance_time", "minutes": 120, "reason": "short rest"})
+        apply_change(conn, demo_id, tid2, {"op": "advance_time", "minutes": 30, "reason": "walk to the market"})   # other time still passes
+    assert t() == t0 + 480 + 120 + 30

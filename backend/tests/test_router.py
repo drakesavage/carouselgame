@@ -66,7 +66,7 @@ class FakeAuto:
     def __init__(self, gemini, codex, kind="talk"):
         self.g, self.c, self.kind = gemini, codex, kind
 
-    def route(self, text, combat):
+    def route(self, text, combat, absent=frozenset()):
         return self.g, {"kind": self.kind, "reason": "test", "provider": "gemini", "model": "gemini-3.8-flash"}
 
     def codex(self):
@@ -153,7 +153,7 @@ def test_quota_exhausted_mid_turn_reroutes(client, settings, demo_id):
     class Auto(FakeAuto):
         calls = 0
 
-        def route(self, text, combat):
+        def route(self, text, combat, absent=frozenset()):
             Auto.calls += 1
             return (Spent(), {"kind": "talk", "model": "gemini-3.8-flash"}) if Auto.calls == 1 else (Next(), {"kind": "talk", "model": "gemini-3.6-flash"})
 
@@ -162,3 +162,20 @@ def test_quota_exhausted_mid_turn_reroutes(client, settings, demo_id):
     assert body["status"] == "completed" and body["result"]["narration"] == "3.6 answers."
     usage = one(connect(settings.campaign_db), "SELECT usage_json FROM turn_diagnostics WHERE turn_id = ?", (body["turn_id"],))["usage"]
     assert usage["route"]["model"] == "gemini-3.6-flash" and usage["route"]["rerouted_from"] == "gemini-3.8-flash"
+
+
+def test_offscreen_contact_and_reports_go_to_the_mechanics_gm():
+    """Playtest 1, H3: these were routed as conversation and Gemini invented the recon team's report and return."""
+    away = frozenset({"Scout", "Maya", "Prison Recon", "prison recon"})
+    for text in ("I message the recon team on the fist-bump chat: 'Status? Pull back if anything looks wrong.' What do I hear back?",
+                 "The recon team should be back by now. When they arrive, I debrief them: what did they learn about Fallen Watch?",
+                 "Scout, how are you holding up out there?",
+                 "I ask Maya what she found at the gate."):
+        assert classify(text, False, away)[0] == "action", text
+    assert classify("I tell Vada she did great.", False, away)[0] == "talk"
+    assert classify("Quick status check: how much Gold do we have?", False, away)[0] == "meta"
+
+
+def test_conversation_mode_cannot_record_canon():
+    assert check_call("apply_changes", {"changes": [{"op": "fact", "subject": "recon", "fact": "holding at the loft"}]})
+    assert check_call("apply_changes", {"changes": [{"op": "remember", "character": "Vada", "content": "x"}]}) is None

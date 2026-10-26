@@ -83,7 +83,7 @@ MATRIX: dict[str, dict] = {
     "7.5": R("tested", "untrained: Disadvantage, Stat Mod only", ("test_untrained_check_rolls_disadvantage_without_rank",)),
     "7.6": R("tested", "Advantage and Disadvantage cancel one for one", ("test_advantage_cancels_disadvantage",)),
     "7.7": R("tested", "Help: 1d6 with Ranks, 1d2 without, per helper; Intervene: combat_intervene adds 1d6 after another crawler's Attack",
-             ("test_stat_check_cannot_receive_help", "test_prison_assault_mechanics_ammo_called_play_intervene_and_catcher"),
+             ("test_stat_check_cannot_receive_help", "test_prison_assault_mechanics_ammo_called_play_intervene_and_catcher", "test_playtest_one_medium_fixes"),
              gap="Intervene on an Evade or a non-Attack Check in combat is not a tool", priority="P3"),
     "7.8": R("tested", "party_check tool: everyone rolls vs one Difficulty, no Help, half or more succeed; Amazing/Critical lifts one "
              "failure, Major/Critical Fail drags down another's Success (applied at once: INTERPRETATION)",
@@ -118,7 +118,7 @@ MATRIX: dict[str, dict] = {
     "11.3": R("partial", "Major Evade failures add an injury after combat; rest removes injuries",
               ("test_evade_major_fail_adds_floor_damage_and_injury_after_combat",),
               gap="repeated injuries never become long-term", priority="P3"),
-    "11.4": R("tested", "rest op: saferoom only; short and long rest heal and clear injuries", ("test_rest_requires_saferoom_and_heals_by_slots",)),
+    "11.4": R("tested", "rest op: saferoom only; short and long rest heal and clear injuries", ("test_rest_requires_saferoom_and_heals_by_slots", "test_a_rest_is_counted_once_on_the_clock")),
     "12.1": R("tested", "no overspending, no duplicates, unknown counts cannot be spent",
               ("test_inventory_cannot_overspend_or_duplicate", "test_unknown_quantity_cannot_be_spent_until_established")),
     "12.2": R("missing", gap="the hotlist is on the sheets but retrieval Action costs are not enforced", priority="P3"),
@@ -147,7 +147,8 @@ MATRIX: dict[str, dict] = {
     "14.1": R("reference", "there is no XP pool by design"),
     "14.2": R("partial", "level op records source (quest, boss, grind, crawler kill)", ("test_level_award_banks_stat_points_and_resets_grind_progress",),
               gap="award sizes (Quest >= 1; Boss tiers 1-6) are not checked", priority="P2"),
-    "14.3": R("tested", "count_cycle; checkpoint at 12; overflow carries", ("test_advancement_checkpoint", "test_checkpoint_not_due_is_rejected")),
+    "14.3": R("tested", "count_cycle with server-side eligibility (no recaps, bookkeeping, travel or rest turns; one per turn; one per "
+              "combat), audited; checkpoint at 12 leaves an explicit Level-up task; overflow carries", ("test_advancement_checkpoint", "test_checkpoint_not_due_is_rejected", "test_advancement_cycles_need_a_consequential_decision_and_one_combat_earns_one")),
     "14.4": R("tested", "banked Stat points from Levels; allocate_stats", ("test_allocate_stats_requires_bank_and_keeps_modifier_unless_given",)),
     "14.5": R("tested", "marks on trained non-Passive Checks; Rank 0-4 at checkpoints, 5+ at floor end",
               ("test_skill_check_math_default_dc_and_mark", "test_floor_end_checks_marked_rank_five_plus")),
@@ -158,7 +159,7 @@ MATRIX: dict[str, dict] = {
     "14.8": R("reference", "one-time pre-Floor-3 audit, completed"),
     "15.1": R("tested", "group op: members, location, activity", ("test_groups_move_only_their_members", "test_group_departure_moves_only_that_group")),
     "15.2": R("tested", "party_check offscreen: only a group without the player character; objective and stakes declared before "
-              "the roll; secret rolls; outcome logged for the GM", ("test_offscreen_recon_is_resolved_secretly_with_declared_stakes",)),
+              "the roll; secret rolls; outcome logged for the GM", ("test_offscreen_recon_is_resolved_secretly_with_declared_stakes", "test_offscreen_contact_and_reports_go_to_the_mechanics_gm")),
     "15.3": R("gm_ruling"),
     "16.1": R("tested", "every turn commits its validated changes at once", ("test_turn_persists_transcript_and_state",)),
     "16.2": R("tested", "autosave per turn; manual save points", ("test_autosaves_are_pruned", "test_save_change_restore_and_undo_restore")),

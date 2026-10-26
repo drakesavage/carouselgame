@@ -12,6 +12,7 @@ Guarantees
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 import traceback
@@ -129,7 +130,7 @@ class TurnService:
             existing = one(conn, "SELECT * FROM turns WHERE campaign_id = ? AND idempotency_key = ?", (campaign_id, idempotency_key))
             if existing and existing["status"] in ("completed", "processing"):
                 return self.describe(existing, replayed=existing["status"] == "completed")
-            if not WRITE_LOCK.acquire(blocking=False):
+            if not WRITE_LOCK.acquire(timeout=5 if not one(conn, "SELECT 1 AS x FROM turns WHERE status = 'processing'", ()) else 0.01):
                 raise BusyError("The GM is still resolving another turn")
             try:
                 if existing:  # failed earlier: retry the same turn row
@@ -189,7 +190,7 @@ class TurnService:
             provider, route = forced
         elif hasattr(provider, "route"):
             combat = one(conn, "SELECT 1 AS x FROM encounters WHERE campaign_id = ? AND status = 'active'", (cid,)) is not None
-            provider, route = provider.route(turn["player_input"], combat)
+            provider, route = provider.route(turn["player_input"], combat, absent_names(conn, cid))
         conversation = bool(getattr(provider, "conversation", False))
         tools = [t for t in TOOL_SPECS if t["name"] in SAFE_TOOLS] + [ESCALATE_SPEC] if conversation else TOOL_SPECS
         system = SYSTEM_PROMPT + "\n\n" + CONVERSATION_MODE if conversation else SYSTEM_PROMPT
@@ -254,8 +255,13 @@ class TurnService:
                 conn.execute("UPDATE turns SET status = 'completed', provider = ?, response_json = ?, stage_json = NULL, completed_at = ? WHERE id = ?",
                              (provider.name, json.dumps(response), now_iso(), turn_id))
                 create_save_point(conn, cid, f"After turn {turn_id}", kind="auto", turn_id=turn_id, keep_auto=self.settings.autosave_keep)
+                if runner.effects.save_label:  # the player asked to save (save_game): a manual point, never pruned (playtest 1, M6)
+                    create_save_point(conn, cid, runner.effects.save_label, kind="manual", turn_id=turn_id)
                 fx = runner.effects
-                flags = check_integrity(conn, cid, turn["player_input"], narration, fx.changes, fx.rolls, fx.errors, fx.notices)
+                flags = check_integrity(conn, cid, turn["player_input"], narration, fx.changes, fx.rolls, fx.errors, fx.notices, turn_id)
+                from ..consistency import run as consistency_run
+                flags += [{"level": "warn", "message": f"Records disagree after this turn: {c['check']} {c['values']}"}
+                          for c in consistency_run(conn, cid) if not c["ok"]]
                 t_after = one(conn, "SELECT game_time_minutes FROM campaigns WHERE id = ?", (cid,))["game_time_minutes"]
                 self._save_diagnostics(conn, turn_id, cid, steps, usage, flags, {"game_time_before": t_before, "game_time_after": t_after,
                                                                                    "changes": fx.changes, "errors": fx.errors,
@@ -279,9 +285,10 @@ class TurnService:
                 c2 = connect(self.settings.campaign_db)
                 try:
                     combat = one(c2, "SELECT 1 AS x FROM encounters WHERE campaign_id = ? AND status = 'active'", (cid,)) is not None
+                    absent = absent_names(c2, cid)
                 finally:
                     c2.close()
-                nxt, again = root.route(turn["player_input"], combat)
+                nxt, again = root.route(turn["player_input"], combat, absent)
                 info = {**again, "rerouted_from": (route or {}).get("model"), "reroute_reason": str(exc)[:300]}
             conn.close()
             if rule_conn is not None:
@@ -388,3 +395,20 @@ class TurnService:
         return {"player_message_id": pmsg, "gm_message_id": gmsg, "notice_message_ids": notice_ids, "narration": narration,
                 "rolls": fx.rolls, "changes": fx.changes, "notices": fx.notices, "rules_cited": meta["rules_cited"],
                 "state_changed": bool(fx.changes)}
+
+
+def absent_names(conn, cid: int) -> frozenset:
+    """First names, full names and group labels of everyone not with the player character (router: playtest 1, H3)."""
+    camp = one(conn, "SELECT active_character_id FROM campaigns WHERE id = ?", (cid,)) or {}
+    pc = one(conn, "SELECT assignment FROM characters WHERE id = ?", (camp.get("active_character_id"),)) if camp.get("active_character_id") else None
+    here = (pc or {}).get("assignment")
+    spot = lambda t: re.split(r"[,—]", t or "")[0].strip().lower()   # people at the same place as the player character are present
+    where = spot((one(conn, "SELECT current_location FROM campaigns WHERE id = ?", (cid,)) or {}).get("current_location"))
+    out = set()
+    for c in rows(conn, "SELECT name, assignment, location FROM characters WHERE campaign_id = ? AND status NOT IN ('deceased','dead') AND assignment IS NOT NULL", (cid,)):
+        if here and c["assignment"] != here and spot(c["location"]) != where:
+            out.update({c["name"], c["name"].split()[0]})
+    for g in rows(conn, "SELECT key, label, location FROM party_groups WHERE campaign_id = ? AND status = 'active'", (cid,)):
+        if g["key"] != here and spot(g["location"]) != where:
+            out.update({g["label"], g["key"].replace("-", " ")})
+    return frozenset(out)

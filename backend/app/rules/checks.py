@@ -233,7 +233,14 @@ def resolve_advancement_checkpoint(state: sqlite3.Connection, audit: sqlite3.Con
            VALUES (?,?,?,?,?,?,(SELECT game_time_minutes FROM campaigns WHERE id = ?),?)""",
         (campaign_id, turn_id, "advancement_checkpoint", summary, json.dumps({"lines": lines}), "player", campaign_id, now_iso()),
     )
-    lines.append("Race/Class level-up benefits (e.g. Human AI Favor) and Stat allocation still need GM/player handling.")
+    from .engine import apply_change
+    leveled = [l.split(":")[0].strip() for l in lines if "Level" in l and "→" in l and not l.startswith(" ")]
+    apply_change(state, campaign_id, turn_id, {
+        "op": "quest", "kind": "project", "title": f"Level-up benefits: {occasion}"[:160], "priority": 1,
+        "progress": "Open: allocate the new Stat points and apply each Race/Class per-Level benefit, one crawler at a time.",
+        "details": {"crawlers": leveled, "stat_points": "3 per new Level (banked; allocate_stats)", "race_class_benefits": "per sheet, e.g. Human AI Favor",
+                    "done": []}})
+    lines.append("Level-up benefits are now an open task (a project quest): resolve them one crawler at a time, not inside unrelated turns.")
     return {"summary": summary, "lines": lines, "cycles_remaining": clock["current"] - required}
 
 

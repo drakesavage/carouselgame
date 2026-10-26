@@ -379,6 +379,11 @@ def _apply_remove_status(ctx: Ctx, op: RemoveStatus) -> dict:
 
 
 def _apply_advance_time(ctx: Ctx, op: AdvanceTime) -> dict:
+    if ctx.turn_id is not None and one(ctx.conn, "SELECT 1 AS x FROM events WHERE campaign_id = ? AND turn_id = ? AND type = 'rest' AND rolled_back = 0",
+                                       (ctx.campaign_id, ctx.turn_id)):
+        from .state_ops import REST_WORDS
+        if REST_WORDS.search(op.reason):
+            raise ChangeError("the rest op already advanced the clock for this rest; do not add its hours again")
     camp = one(ctx.conn, "SELECT game_time_minutes, floor_deadline_minutes FROM campaigns WHERE id = ?", (ctx.campaign_id,))
     before = camp["game_time_minutes"]
     after = before + op.minutes
@@ -421,6 +426,15 @@ def _apply_set_location(ctx: Ctx, op: SetLocation) -> dict:
                          (ctx.campaign_id, floor, op.location, op.description))
     summary = f"Party moves to {op.location}" + (f" (Floor {floor})" if floor is not None else "")
     ctx.event("location_changed", summary, {"location": op.location, "floor": floor, "safe_room": op.safe_room})
+    # the player character's group (and so its members) is where the campaign is (playtest 1, H4)
+    from .state_ops import pc_group, remember_saferoom
+    if op.safe_room:
+        remember_saferoom(ctx, op.location)
+    g = pc_group(ctx)
+    if g and g["location"] != op.location:
+        ctx.conn.execute("UPDATE party_groups SET location = ? WHERE id = ?", (op.location, g["id"]))
+        ctx.conn.execute("UPDATE characters SET location = ? WHERE campaign_id = ? AND assignment = ?", (op.location, ctx.campaign_id, g["key"]))
+        ctx.event("group_moved", f"{g['label']} → {op.location} (with the player character)", {"key": g["key"], "from": g["location"], "to": op.location})
     return {"summary": summary}
 
 
@@ -575,6 +589,18 @@ def _apply_clock(ctx: Ctx, op: ClockChange) -> dict:
     clock = one(ctx.conn, "SELECT * FROM clocks WHERE campaign_id = ? AND key = ?", (ctx.campaign_id, op.key))
     if not clock:
         raise ChangeError(f"no clock {op.key!r}")
+    audit: dict = {}
+    if clock["kind"] == "advancement_checkpoint" and op.delta > 0 and ctx.turn_id is not None:
+        # the server decides which turns earn a cycle (rules/advancement.py; playtest 1, H2)
+        from .advancement import eligibility, encounter_for_cycle
+        if op.delta != 1:
+            raise ChangeError("one decision earns one cycle: count cycles one at a time")
+        ok, why, qualifying = eligibility(ctx.conn, ctx.campaign_id, ctx.turn_id)
+        if not ok:
+            raise ChangeError(f"no advancement cycle: {why}")
+        words = (one(ctx.conn, "SELECT player_input FROM turns WHERE id = ?", (ctx.turn_id,)) or {}).get("player_input") or ""
+        audit = {"player_input": words[:300], "qualifying_events": [e["id"] for e in qualifying],
+                 "qualifying": [f"{e['type']}: {e['summary'][:80]}" for e in qualifying], "encounter_id": encounter_for_cycle(ctx.conn, ctx.campaign_id, ctx.turn_id)}
     new = max(0, clock["current"] + op.delta)
     # Advancement cycles carry overflow past the checkpoint (CAMPAIGN 14.3); other clocks clamp.
     if clock["maximum"] is not None and clock["kind"] != "advancement_checkpoint":
@@ -585,7 +611,7 @@ def _apply_clock(ctx: Ctx, op: ClockChange) -> dict:
                   f"{clock['label']} reached {new}/{clock['maximum']} — resolve at the next saferoom, debrief, save point or floor transition",
                   {"key": op.key})
     summary = f"{clock['label']}: {clock['current']} → {new}" + (f"/{clock['maximum']}" if clock["maximum"] else "") + f" — {op.reason}"
-    ctx.event("clock_changed", summary, {"key": op.key, "before": clock["current"], "after": new}, visibility=clock["visibility"])
+    ctx.event("clock_changed", summary, {"key": op.key, "before": clock["current"], "after": new, **audit}, visibility=clock["visibility"])
     return {"summary": summary, "visibility": clock["visibility"]}
 
 

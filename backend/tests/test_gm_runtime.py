@@ -321,3 +321,12 @@ def test_token_pacer_waits_instead_of_exceeding_the_per_minute_cap():
     clock["t"] += 5
     waited = TokenPacer.wait("pace-test", 100_000, 230_000, sleep, now)     # would be 320k: wait for the first to age out
     assert waited > 0 and slept and clock["t"] - 1000.0 >= 60
+
+
+def test_codex_usage_limit_is_reported_plainly():
+    """Playtest 2: the ChatGPT plan's limit arrived in the --json event stream and surfaced as 'exited with code 1: no output'."""
+    from app.gm.providers import _event_error
+    lines = ['{"type":"turn.started"}', '{"type":"error","message":"You have hit your usage limit. Try again at 7:43 PM."}',
+             '{"type":"turn.failed","error":{"message":"You have hit your usage limit. Try again at 7:43 PM."}}']
+    assert "usage limit" in _event_error(lines) and "7:43 PM" in _event_error(lines)
+    assert _event_error(['{"type":"turn.started"}', "not json"]) == ""
