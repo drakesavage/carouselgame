@@ -3,6 +3,8 @@ import { Award, Backpack, Clock3, Coins, Flag, Footprints, Heart, Loader2, Scrol
 import { ArtButton } from "./Art";
 import { api, CharacterCard, EventRow, fmtMinutes, Item, Quest } from "../api";
 import { Bar, Chip, Empty, humanize, Portrait } from "../ui";
+import { portraitSrc, role, useManifest } from "./Hud";
+import { LifeChip } from "./People";
 
 function useLoad<T>(fn: () => Promise<T>, deps: unknown[]) {
   const [data, setData] = useState<T | null>(null);
@@ -14,15 +16,17 @@ function useLoad<T>(fn: () => Promise<T>, deps: unknown[]) {
 export function CharactersView({ cid, version, openCharacter }: { cid: number; version: number; openCharacter: (id: number) => void }) {
   const { data } = useLoad(() => api.characters(cid), [cid, version]);
   const { data: camp } = useLoad(() => api.campaign(cid), [cid, version]);
+  const m = useManifest();
   if (!data) return <div className="muted">Loading…</div>;
   // where people are comes from the party groups; party membership is a separate chip
   const pc = data.find((c) => c.id === camp?.active_character_id);
   const groupOf = (key?: string | null) => camp?.groups.find((g) => g.key === key);
   const heading = (c: CharacterCard) => {
+    if (c.life && c.life.state !== "active" && c.life.state !== "contact") return "Fallen, missing & retired";
     const g = groupOf(c.assignment);
     if (!g) return c.in_party ? "Party (no group)" : humanize(c.roster_category ?? c.kind);
     if (pc && g.key === pc.assignment) return `With ${pc.name.split(" ")[0]}`;
-    return `Elsewhere: ${g.label} @ ${g.location ?? "position not recorded"}`;
+    return `Offscreen: ${g.label} · ${g.location ?? "position not recorded"}`;
   };
   const groups = data.reduce<Record<string, CharacterCard[]>>((acc, c) => { (acc[heading(c)] ??= []).push(c); return acc; }, {});
   return (
@@ -33,22 +37,24 @@ export function CharactersView({ cid, version, openCharacter }: { cid: number; v
           <div className="h2">{g} <span className="muted">{list.length}</span></div>
           <div className="grid">
             {list.map((c) => (
-              <div key={c.id} className="card clickable" onClick={() => openCharacter(c.id)}>
+              <button key={c.id} className={`card clickable char-card ${c.life?.state === "deceased" ? "gone" : ""}`} onClick={() => openCharacter(c.id)}
+                aria-label={`${c.name}: open dossier`}>
                 <div className="row" style={{ alignItems: "flex-start" }}>
-                  <Portrait name={c.name} path={c.portrait_path} crop={c.portrait_crop} size={64} />
+                  <Portrait name={c.name} src={portraitSrc(c, m)} crop={c.portrait_crop} size={64} />
                   <div className="grow">
-                    <div className="pname">{c.name}</div>
-                    <div className="pclass">{[c.level != null ? `L${c.level}` : null, c.race ?? c.species, c.class_name].filter(Boolean).join(" · ")}</div>
-                    <Bar kind="hp" cur={c.hp_current} max={c.hp_max} />
-                    <Bar kind="mana" cur={c.mana_current} max={c.mana_max} />
+                    <div className="pname">{c.name} <span className={`role ${role(c)[1]}`}>{role(c)[0]}</span></div>
+                    <div className="pclass">{[c.level != null ? `L${c.level}` : null, c.race ?? c.species, c.class_name].filter(Boolean).join(" · ") || "class not recorded"}</div>
+                    {c.life?.state === "deceased" ? <div className="sub">{c.life.note ?? "Deceased."}</div> : c.hp_max != null || c.mana_max != null ? (
+                      <><Bar kind="hp" cur={c.hp_current} max={c.hp_max} /><Bar kind="mana" cur={c.mana_current} max={c.mana_max} /></>
+                    ) : <div className="sub">No combat sheet recorded.</div>}
                   </div>
                 </div>
                 <div className="chips" style={{ marginTop: 8 }}>
-                  <Chip tone={c.status === "active" ? "green" : "amber"}>{c.status}</Chip>
+                  <LifeChip life={c.life} />
                   {c.in_party ? <Chip tone="cyan" title="Member of the System party">party member</Chip> : null}
-                  {c.statuses.map((s) => <Chip key={s.id}>{s.name}</Chip>)}
+                  {c.statuses.map((s) => <Chip key={s.id} tone={s.polarity === "buff" ? "green" : s.polarity === "debuff" ? "red" : ""}>{s.name}</Chip>)}
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </section>

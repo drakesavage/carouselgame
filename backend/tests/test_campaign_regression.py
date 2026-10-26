@@ -144,6 +144,44 @@ def test_npc_relationship_evolves_without_losing_personality(conn, denton):
     assert "kite reel" in build_context(conn, denton, "I ask Margit about the siphon cables")["text"]
 
 
+def test_people_show_life_state_whereabouts_promises_and_last_interaction_without_gm_material(client, conn, denton):
+    scout = one(conn, "SELECT id FROM characters WHERE campaign_id = ? AND slug = 'scout'", (denton,))["id"]
+    do(conn, denton, {"op": "remember", "subject": "margit", "content": "Margit sketched the siphon's cable run on a napkin for Cliff.", "importance": 1},
+       {"op": "remember", "subject": "scout", "content": "GMONLY-PEOPLE-BEAT-7781", "visibility": "gm"})
+    with transaction(conn):
+        conn.execute("INSERT INTO events (campaign_id, type, summary, visibility, created_at) VALUES (?,?,?,?,?)",
+                     (denton, "fact_recorded", "GMONLY-PEOPLE-EVENT-7782: Scout is being watched", "gm", "2026-10-25T00:00:00+00:00"))
+        conn.execute("INSERT INTO quests (campaign_id, kind, title, visibility, updated_at) VALUES (?,?,?,?,?)",
+                     (denton, "commitment", "GMONLY-PEOPLE-QUEST-7783 owed by Scout", "gm", "2026-10-25T00:00:00+00:00"))
+    r = client.get(f"/api/campaigns/{denton}/npcs")
+    assert r.status_code == 200
+    assert not any(s in r.text for s in ("GMONLY-PEOPLE-BEAT-7781", "GMONLY-PEOPLE-EVENT-7782", "GMONLY-PEOPLE-QUEST-7783"))
+    secrets = [x["content"][:60] for x in rows(conn, "SELECT content FROM gm_secrets WHERE campaign_id = ?", (denton,))]
+    assert not any(s in r.text for s in secrets if len(s) >= 40)
+    people = {p["slug"]: p for p in r.json()}
+    assert "sheet" not in people["scout"] and "sheet_json" not in people["scout"]
+
+    # life state is separate from HP: Driscoll is deceased; his HP is the last record, labelled as such
+    d = people["mad-driscoll"]
+    assert d["life"]["state"] == "deceased" and d["life"]["note"] and d["hp_max"] is not None
+    assert client.get(f"/api/campaigns/{denton}/characters/{d['id']}/dossier").json()["life"]["state"] == "deceased"
+    assert people["margit-winchgrinder"]["life"]["state"] == "contact" and people["scout"]["life"]["state"] == "active"
+
+    # allegiance and whereabouts come from the record; the group's location stands for its members
+    assert people["scout"]["allegiance"] == "Denton clan (core)"
+    assert people["margit-winchgrinder"]["allegiance"] == "Friendly craft contact"
+    assert people["vada"]["group"]["label"] and people["vada"]["where"] == people["vada"]["group"]["location"]
+
+    # promises link to the quest journal; the last interaction is the latest player-visible memory, never a bookkeeping event
+    assert any(c["title"].startswith("Promise: Cliff promised Scout") for c in people["scout"]["commitments"])
+    assert people["margit-winchgrinder"]["last_interaction"] == {"text": "Margit sketched the siphon's cable run on a napkin for Cliff.",
+                                                                  "game_time_minutes": people["margit-winchgrinder"]["last_interaction"]["game_time_minutes"],
+                                                                  "source": "memory"}
+    assert all((p["last_interaction"] or {}).get("source") != "event" or not p["last_interaction"]["text"].startswith("Record corrected")
+               for p in people.values())
+    assert scout in {p["id"] for p in people.values()}
+
+
 def test_player_payloads_never_carry_gm_material(client, conn, denton):
     secrets = [r["content"][:60] for r in rows(conn, "SELECT content FROM gm_secrets WHERE campaign_id = ?", (denton,))]
     do(conn, denton, {"op": "remember", "subject": "vada", "content": "GMONLY-REGRESSION-BEAT-0042", "visibility": "gm"})

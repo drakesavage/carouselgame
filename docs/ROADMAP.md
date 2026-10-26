@@ -7,8 +7,8 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 | M0 Safe upgrade workflow | P0 | Done | none | 385d7dd | 155 backend; typecheck/build; isolation probe PASS | Settings passcode masked | ledger behind by 2 (see below) |
 | M1 Canonical-state reconciliation | P0 | Exit gate met | M0 | (pending) | 166 backend; consistency 21/21 | HUD roster + objectives | 7 uncounted-gear items stay open for owner counts; 44 house rules move to M2/M7 |
 | M2 Mechanics reliability & GM gates | P0 | Done | M1 | 4933fed | 187 backend; playtest 2 gate met; isolation probe PASS | n/a | P2 gaps in docs/RULES_COVERAGE.md |
-| M3 Main story HUD | P1 | Built, owner review | M2 | (pending) | 187 backend; typecheck/build | live campaign at 1440/1100/375 px; 100-message disposable transcript | exit gate is the owner's read: who is with Cliff, what is happening, where, the decision |
-| M4 Characters, party, people | P1 | Backlog | M3 | | | | |
+| M3 Main story HUD | P1 | Done | M2 | 82fc1b7 | 187 backend; typecheck/build | live campaign at 1440/1100/375 px; 100-message disposable transcript; owner accepted the gate for this pass | journal "now" chip lacks the immediate flag; phone height gap |
+| M4 Characters, party, people | P1 | Built, owner review | M3 | (pending) | 188 backend (people payload + GM-leak test); typecheck/build | live People, Characters, Driscoll dossier at 1440 and 768 px | no console interactions recorded yet, so "last interaction" is mostly empty; truncated promise title (M6) |
 | M5 Inventory, crafting, economy | P1 | Backlog | M3 | | | | |
 | M6 Quests, memory, timeline | P1 | Backlog | M3 | | | | |
 | M7 Rules center | P1 | Backlog | M2 | | | | |

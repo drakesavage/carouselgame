@@ -9,6 +9,15 @@ export type CharacterCard = {
   portrait_crop?: { cx: number; cy: number; k: number; ar: number } | null;
   stats: Stats; derived: Record<string, unknown>; portrait_path?: string | null; statuses: Status[]; equipped: { id: number; name: string; slot?: string }[];
   personality?: string | null; known_motivation?: string | null; attitude?: number | null; voice?: string | null; assignment?: string | null;
+  life?: Life;
+};
+/** Whether someone is around at all, apart from combat HP (a deceased character's HP is the last record). */
+export type Life = { state: "active" | "deceased" | "missing" | "retired" | "contact"; label: string; note: string | null };
+export type Person = CharacterCard & {
+  life: Life; allegiance: string | null; relationship_notes: string[]; where: string | null;
+  group: { label: string; location: string | null; activity: string | null } | null;
+  commitments: { id: number; kind: string; title: string }[];
+  last_interaction: { text: string; game_time_minutes: number | null; source: "memory" | "event" | "profile" } | null;
 };
 export type Skill = { id: number; kind: string; name: string; rank: number | null; mana_cost: number | null; passive: number; marked: number; description?: string | null; properties: Record<string, unknown> };
 export type Item = { id: number; owner_character_id: number | null; owner_name?: string | null; name: string; quantity: number | null; equipped: number; deployed?: number; slot?: string | null; rarity?: string | null; description?: string | null; properties: Record<string, unknown> };
@@ -111,7 +120,7 @@ export const api = {
   dossier: (id: number, cid: number) => req<Record<string, unknown>>(`api/campaigns/${id}/characters/${cid}/dossier`),
   inventory: (id: number) => req<{ shared: Item[]; by_character: Item[] }>(`api/campaigns/${id}/inventory`),
   quests: (id: number) => req<Quest[]>(`api/campaigns/${id}/quests`),
-  npcs: (id: number) => req<CharacterCard[]>(`api/campaigns/${id}/npcs`),
+  npcs: (id: number) => req<Person[]>(`api/campaigns/${id}/npcs`),
   timeline: (id: number) => req<EventRow[]>(`api/campaigns/${id}/timeline`),
   messages: (id: number, before?: number) => req<Message[]>(`api/campaigns/${id}/messages${before ? `?before=${before}` : ""}`),
   houseRules: (id: number) => req<HouseRule[]>(`api/campaigns/${id}/house-rules`),

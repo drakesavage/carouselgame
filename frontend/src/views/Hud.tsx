@@ -239,7 +239,7 @@ const ROLE: Record<string, [string, string]> = {
   player_character: ["You", "cyan"], core_party: ["Party", ""], pets_companions: ["Companion", "violet"], allied_npcs: ["Ally", ""],
   external_contacts: ["Contact", "amber"], deceased_npcs: ["Fallen", "red"],
 };
-function role(c: CharacterCard): [string, string] {
+export function role(c: CharacterCard): [string, string] {
   if (/manager/i.test(c.status)) return ["Manager", "magenta"];
   return ROLE[c.roster_category ?? ""] ?? [humanize(c.kind), ""];
 }

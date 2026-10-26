@@ -5,7 +5,8 @@ import {
   HeartPulse, History, LayoutGrid, MapPin, MessageCircle, Package, Search, Shield, ShieldCheck, Sparkles, Sword, Swords, Upload, Users,
   Wind, Wrench, X, Zap,
 } from "lucide-react";
-import { api } from "../api";
+import { api, Life } from "../api";
+import { LifeChip } from "./People";
 import { Chip, cropStyle, humanize, Portrait, PortraitCrop, Tree } from "../ui";
 import { ArtButton, CropButton } from "./Art";
 import "../dossier.css";
@@ -21,7 +22,7 @@ type Effect = { type: string; name: string; detail: string | null; polarity?: st
 type HistoryEntry = { kind: string; text: string; when: number | null; source: string; at?: string };
 type Dossier = {
   id: number; slug: string; name: string; kind: string; is_player: boolean; crawler_number: string | null; level: number | null; race: string | null;
-  class_name: string | null; status: string; in_party: boolean; roster_category: string | null; portrait_path: string | null; portrait_crop: PortraitCrop | null;
+  class_name: string | null; status: string; life: Life; in_party: boolean; roster_category: string | null; portrait_path: string | null; portrait_crop: PortraitCrop | null;
   role: string | null; group: { key: string; label: string; location: string | null; activity: string | null } | null; location: string | null;
   attributes: Attr[];
   combat: { health: { current: number | null; max: number | null; slots: number | null; per_slot: number | null }; mana: { current: number | null; max: number | null };
@@ -135,14 +136,15 @@ function Hero({ cid, d, onChanged }: { cid: number; d: Dossier; onChanged: () =>
         <div className="hero-line">{[d.level != null ? `Level ${d.level}` : null, d.race, d.class_name].filter(Boolean).join(" · ")}</div>
         <div className="chips hero-chips">
           {d.is_player ? <Chip tone="cyan">Player character</Chip> : <Chip tone="cyan">{humanize(d.roster_category ?? d.kind)}</Chip>}
-          <Chip tone={d.status === "active" ? "green" : "amber"}>{humanize(d.status)}</Chip>
+          {d.life.state === "active" && /^active\b/i.test(d.life.label) ? <Chip tone="green">{d.life.label}</Chip> : <LifeChip life={d.life} />}
           {d.group && <Chip title={d.group.activity ?? ""}><Users size={11} /> {d.group.label}</Chip>}
           {d.combat.statuses.map((s) => <StatusChip key={s.id} s={s} />)}
         </div>
         {d.role && <p className="hero-role">{d.role}</p>}
         {d.location && <div className="hero-location"><MapPin size={12} /> {d.location}</div>}
       </div>
-      <div className="hero-vitals">
+      <div className={`hero-vitals ${d.life.state === "deceased" ? "gone" : ""}`}>
+        {d.life.note && <div className="vitals-note">{d.life.note}</div>}
         <Vital icon={<Heart size={16} />} label="Health" cur={h.current} max={h.max} tone="hp"
           hint={h.slots ? `Health Bar: ${h.slots} slots × ${h.per_slot ?? "?"} HP. Damage and healing move whole slots.` : undefined} slots={h.slots} />
         <Vital icon={<Zap size={16} />} label="Mana" cur={d.combat.mana.current} max={d.combat.mana.max} tone="mana" />

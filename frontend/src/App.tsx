@@ -5,7 +5,8 @@ import { ManifestContext } from "./views/Hud";
 import { Chip } from "./ui";
 import { StoryView, SystemNotice } from "./views/Story";
 import { CharacterSheetDialog } from "./views/Sheet";
-import { CharactersView, InventoryView, NpcView, QuestsView, TimelineView } from "./views/Journals";
+import { CharactersView, InventoryView, QuestsView, TimelineView } from "./views/Journals";
+import { PeopleView } from "./views/People";
 import { RecordsView, RulesView } from "./views/Reference";
 import { SettingsView } from "./views/Settings";
 import { LedgerView } from "./views/Ledger";
@@ -115,7 +116,8 @@ export default function App() {
             {tab === "characters" && <CharactersView cid={cid} version={version} openCharacter={setSheet} />}
             {tab === "inventory" && <InventoryView cid={cid} version={version} />}
             {tab === "quests" && <QuestsView cid={cid} version={version} focus={focusQuest} />}
-            {tab === "people" && <NpcView cid={cid} version={version} openCharacter={setSheet} />}
+            {tab === "people" && <PeopleView cid={cid} version={version} openCharacter={setSheet} openQuest={openQuest}
+              pcAssignment={campaign.roster.find((c) => c.id === campaign.active_character_id)?.assignment} />}
             {tab === "timeline" && <TimelineView cid={cid} version={version} />}
             {tab === "rules" && <RulesView cid={cid} />}
             {tab === "records" && <RecordsView cid={cid} />}

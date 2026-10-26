@@ -12,7 +12,7 @@ import sqlite3
 from typing import Any
 
 from ..db import one, rows
-from .views import character_sheet
+from .views import character_sheet, life_state
 
 STAT_NAMES = {"strength": "STR", "intelligence": "INT", "constitution": "CON", "dexterity": "DEX", "charisma": "CHA"}
 
@@ -260,7 +260,7 @@ def build(conn: sqlite3.Connection, cid: int, char_id: int) -> dict | None:
 
     return {"id": c["id"], "slug": c["slug"], "name": c["name"], "kind": c["kind"], "is_player": camp and camp["active_character_id"] == c["id"],
             "crawler_number": c.get("crawler_number"), "level": c.get("level"), "race": c.get("race") or c.get("species"),
-            "class_name": c.get("class_name"), "status": c.get("status"), "in_party": bool(c.get("in_party")), "roster_category": c.get("roster_category"),
+            "class_name": c.get("class_name"), "status": c.get("status"), "life": life_state(c), "in_party": bool(c.get("in_party")), "roster_category": c.get("roster_category"),
             "portrait_path": c.get("portrait_path"), "portrait_crop": c.get("portrait_crop"), "role": build_info["role"],
             "group": group, "location": story["location"], "attributes": attributes, "combat": combat, "build": build_info,
             "skills": skills, "signature_skill_ids": signature_ids, "category_labels": CATEGORY_LABELS,

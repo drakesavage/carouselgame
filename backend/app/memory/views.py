@@ -6,6 +6,7 @@ GM functions are only reachable through /api/gm (token-guarded).
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 
 from ..db import one, rows
@@ -27,8 +28,27 @@ def _statuses(conn: sqlite3.Connection, char_id: int) -> list[dict]:
     return rows(conn, "SELECT id, name, description, polarity, expires_at_minutes FROM status_effects WHERE character_id = ? ORDER BY id", (char_id,))
 
 
+LIFE_STATES = (  # (pattern on status / roster category, state); first match wins
+    (r"dead|deceas|died|killed", "deceased"),
+    (r"missing|lost", "missing"),
+    (r"retir|dormant|inactive", "retired"),
+    (r"contact|guest|external", "contact"),
+)
+
+
+def life_state(c: dict) -> dict:
+    """Whether someone is around at all, kept apart from combat HP: a deceased character's HP is the last record, not a reading."""
+    hay = f"{c.get('status') or ''} {c.get('roster_category') or ''} {c.get('kind') or ''}".lower()
+    state = next((s for pat, s in LIFE_STATES if re.search(pat, hay)), "active")
+    status = (c.get("status") or "").strip()
+    label = "Deceased" if state == "deceased" else status.replace("_", " ").replace("-", " ").capitalize() if status and status != "active" else state.capitalize()
+    note = "HP shown is the last record before death." if state == "deceased" and c.get("hp_max") is not None else None
+    return {"state": state, "label": label, "note": note}
+
+
 def character_card(conn: sqlite3.Connection, c: dict) -> dict:
     c = dict(c)
+    c["life"] = life_state(c)
     c["statuses"] = _statuses(conn, c["id"])
     c["equipped"] = rows(conn, "SELECT id, name, slot FROM items WHERE owner_character_id = ? AND equipped = 1 ORDER BY id", (c["id"],))
     return c
@@ -113,11 +133,45 @@ def quests(conn: sqlite3.Connection, cid: int) -> list[dict]:
     return rows(conn, "SELECT id, kind, title, description, status, priority, progress, giver, updated_at FROM quests WHERE campaign_id = ? AND visibility = 'player' ORDER BY status = 'active' DESC, priority, id", (cid,))
 
 
+# record-keeping, not something that happened between the party and a person
+BOOKKEEPING_EVENTS = ("time_advanced", "correction", "trap_recorded", "item_added", "item_removed", "item_transferred", "hp_changed",
+                      "mana_changed", "item_count_set", "quest_updated", "clock_changed", "visual_reference", "ledger_synced")
+
+
 def npcs(conn: sqlite3.Connection, cid: int) -> list[dict]:
-    out = rows(conn, f"""SELECT {PUBLIC_CHAR_COLUMNS}, n.personality, n.voice, n.known_motivation, n.attitude, n.last_seen
+    """People as the party knows them: life state, whereabouts, promises and the last thing seen of them.
+    Only player-visible quests, memories and events are read; GM secrets and private beats never enter."""
+    from .dossier import _flat, _mentions
+    out = rows(conn, f"""SELECT {PUBLIC_CHAR_COLUMNS}, c.sheet_json, n.personality, n.voice, n.known_motivation, n.attitude, n.last_seen
                          FROM characters c LEFT JOIN npc_profiles n ON n.character_id = c.id
                          WHERE c.campaign_id = ? AND c.id != COALESCE((SELECT active_character_id FROM campaigns WHERE id = ?), -1)
                          ORDER BY c.roster_category, c.name""", (cid, cid))
+    groups = {g["key"]: g for g in rows(conn, "SELECT key, label, location, activity FROM party_groups WHERE campaign_id = ? AND status = 'active'", (cid,))}
+    quests = rows(conn, """SELECT id, kind, title, description, progress, giver, details_json FROM quests
+                           WHERE campaign_id = ? AND visibility = 'player' AND status IN ('active','paused') ORDER BY priority, id""", (cid,))
+    events = rows(conn, f"""SELECT summary, game_time_minutes FROM events WHERE campaign_id = ? AND visibility = 'player' AND rolled_back = 0
+                            AND type NOT IN ({','.join('?' * len(BOOKKEEPING_EVENTS))}) ORDER BY id DESC LIMIT 400""", (cid, *BOOKKEEPING_EVENTS))
+    for p in out:
+        sheet = p.pop("sheet", None) or {}
+        narrative = sheet.get("narrative") if isinstance(sheet.get("narrative"), dict) else {}
+        p["life"] = life_state(p)
+        # allegiance from the record: clan membership first, then the stated relationship, else the roster role (shown by the client)
+        clan = sheet.get("clan_member")
+        p["allegiance"] = (f"Denton clan{' (' + str(sheet['clan_role']) + ')' if sheet.get('clan_role') else ''}" if clan is True
+                           else str(sheet["relationship_status"]).replace("-", " ").capitalize() if sheet.get("relationship_status") else None)
+        notes = narrative.get("relationship_notes")
+        p["relationship_notes"] = [str(n) for n in notes] if isinstance(notes, list) else [str(notes)] if notes else []
+        g = groups.get(p.get("assignment") or "")
+        p["group"] = {"label": g["label"], "location": g["location"], "activity": g["activity"]} if g else None
+        p["where"] = (g or {}).get("location") or p.get("location")
+        p["commitments"] = [{"id": q["id"], "kind": q["kind"], "title": q["title"]} for q in quests
+                            if _mentions(" ".join(str(q.get(k) or "") for k in ("title", "description", "progress", "giver")) + " " + _flat(q.get("details")), p["name"])]
+        mem = one(conn, """SELECT content, game_time_minutes FROM memories WHERE campaign_id = ? AND character_id = ? AND visibility = 'player'
+                           ORDER BY id DESC LIMIT 1""", (cid, p["id"]))
+        ev = next((e for e in events if _mentions(e["summary"] or "", p["name"])), None)
+        last = mem and {"text": mem["content"], "game_time_minutes": mem["game_time_minutes"], "source": "memory"} \
+            or ev and {"text": ev["summary"], "game_time_minutes": ev["game_time_minutes"], "source": "event"}
+        p["last_interaction"] = last or ({"text": p["last_seen"], "game_time_minutes": None, "source": "profile"} if p.get("last_seen") else None)
     return out
 
 
