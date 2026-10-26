@@ -43,7 +43,8 @@ def _counts(db: Path) -> dict[str, int]:
         c.close()
 
 
-def create(settings: Settings, label: str = "manual") -> Path:
+def create(settings: Settings, label: str = "manual", media: bool = True) -> Path:
+    """A consistent copy of the database; with media (the default) also the art, portraits and assets the app owns."""
     stamp = time.strftime("%Y%m%d-%H%M%S")
     dest = settings.data_dir / "backups" / f"{stamp}-{''.join(ch if ch.isalnum() or ch in '-_' else '-' for ch in label)[:40]}"
     dest.mkdir(parents=True)
@@ -54,14 +55,14 @@ def create(settings: Settings, label: str = "manual") -> Path:
     finally:
         out.close()
         src.close()
-    for name in MEDIA:
+    for name in MEDIA if media else ():
         if (settings.data_dir / name).is_dir():
             shutil.copytree(settings.data_dir / name, dest / name)
     for name in SMALL_FILES:
         if (settings.data_dir / name).is_file():
             shutil.copy2(settings.data_dir / name, dest / name)
     files = {str(p.relative_to(dest)).replace("\\", "/"): _sha(p) for p in sorted(dest.rglob("*")) if p.is_file()}
-    manifest = {"created": stamp, "label": label, "source": str(settings.data_dir), "files": files, "row_counts": _counts(dest / "campaign.db")}
+    manifest = {"created": stamp, "label": label, "media": media, "source": str(settings.data_dir), "files": files, "row_counts": _counts(dest / "campaign.db")}
     (dest / "manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
     return dest
 

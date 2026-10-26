@@ -166,6 +166,12 @@ export const api = {
   quests: (id: number) => req<Quest[]>(`api/campaigns/${id}/quests`),
   npcs: (id: number) => req<Person[]>(`api/campaigns/${id}/npcs`),
   timeline: (id: number) => req<EventRow[]>(`api/campaigns/${id}/timeline`),
+  backups: () => req<{ backups: { name: string; label: string; created: string | null; size_mb: number; has_manifest: boolean; media: boolean; files: number | null }[]; newest_age_s: number | null }>("api/backups"),
+  backupCreate: (label: string, media: boolean) => post<{ name: string; verify: { ok: boolean; problems: string[] } }>("api/backups", { label, media }),
+  backupVerify: (name: string) => post<{ ok: boolean; problems: string[]; files: number; tables: number }>(`api/backups/${encodeURIComponent(name)}/verify`),
+  savePreview: (cid: number, saveId: number) => req<{ save_point: { id: number; label: string; created_at: string }; changes: { what: string; now: string; after_restore: string }[];
+    items: string[]; items_total: number; quests: string[]; characters: string[]; messages_hidden: number; note: string }>(`api/campaigns/${cid}/saves/${saveId}/preview`),
+  problemReport: (cid: number, turnId: number | null, note: string) => post<{ path: string; markdown: string; turn_id: number | null }>(`api/campaigns/${cid}/reports`, { turn_id: turnId, note }),
   places: (id: number) => req<KnownWorld>(`api/campaigns/${id}/places`),
   journal: (id: number) => req<{ kinds: { id: string; label: string }[]; quests: JournalQuest[] }>(`api/campaigns/${id}/journal`),
   loreNotebook: (id: number) => req<LoreFact[]>(`api/campaigns/${id}/lore-notebook`),

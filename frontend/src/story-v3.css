@@ -156,3 +156,10 @@
   .vn-line .portrait { width: 40px !important; height: 40px !important; }
   .msg-player { max-width: 94%; }
 }
+
+/* M9: per-turn problem report, quiet until hovered */
+.msg-tools { display: flex; justify-content: flex-end; margin-top: 4px; opacity: 0.35; transition: opacity 0.15s; }
+.msg-gm:hover .msg-tools, .msg-tools:focus-within { opacity: 1; }
+.report-btn { padding: 2px 6px; }
+.restore-preview { display: grid; gap: 8px; margin: 10px 0; font-size: 13px; }
+.restore-preview ul { margin: 6px 0 0; padding-left: 18px; }

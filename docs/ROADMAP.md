@@ -13,7 +13,7 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 | M6 Quests, memory, timeline | P1 | Done | M5 | (this commit) | 196 backend (exit-gate search + GM context + scope test; visibility crawl covers the new endpoints); typecheck/build | live journal, search (Ctrl+K), chronicle at 1440 px | correction #15 (player-known facts, two promise records) not yet written back to the ledger; lore categories are keyword-based |
 | M7 Rules center | P1 | Done | M6 | (this commit) | 206 backend (exit-gate lookups on the real index, precedence, missing code, ruling review → precedent, endpoints); typecheck/build | live lookup, autocomplete, browse, story citation at 1440 px | no new deterministic engine conversions (none justified yet); 2 existing rulings are owner rulings (precedent) |
 | M8 World visuals | P2 | Done | M7 | (this commit) | 208 backend (map from recorded places only, routes from moves, location art only for known places); typecheck/build | live World map, art library, theatrical announcement, device settings at 1440 px | correction #16 (Floor 3 places) not yet written back to the ledger; no art is generated without a click |
-| M9 Long-session reliability | P2 | Backlog | all | | | | |
+| M9 Long-session reliability | P2 | Done | all | (this commit) | 216 backend (auto-backup, restore preview, redacted problem report); 50-turn endurance run on a disposable copy: 0 failures, 0 consistency issues (docs/PERFORMANCE.md); typecheck/build | live Backups panel, restore preview, report button at 1440 and 375 px | simultaneous turns queue on the write lock (by design, never concurrent); GM input ~67k tokens/turn, only ~5% cached; release/rollback checklist in docs/RELEASE.md |
 
 ## M0 report (2026-10-25)
 

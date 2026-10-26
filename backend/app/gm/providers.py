@@ -548,6 +548,9 @@ class MockProvider:
     name = "mock"
 
     def complete(self, system: str, steps: list[dict], tools: list[dict], *, job_label: str) -> ProviderResponse:
+        delay = float(os.environ.get("MOCK_DELAY_S") or 0)  # endurance tests: stand in for a slow model call
+        if delay > 0:
+            time.sleep(delay)
         player = next(s["text"] for s in steps if s["kind"] == "player")
         text = player.lower()
         results = [r for s in steps if s["kind"] == "tool_results" for r in s["results"]]

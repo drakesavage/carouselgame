@@ -59,6 +59,16 @@ class ReviewIn(BaseModel):
     note: str | None = Field(default=None, max_length=500)
 
 
+class BackupIn(BaseModel):
+    label: str = Field(default="manual", max_length=40)
+    media: bool = True
+
+
+class ReportIn(BaseModel):
+    turn_id: int | None = None
+    note: str = Field(default="", max_length=4000)
+
+
 class ArtIn(BaseModel):
     kind: str
     engine: str | None = None  # codex | comfy (character portraits; others always comfy)
@@ -715,6 +725,47 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         return state.turns.describe(t) if t else None
 
     # ------------------------------------------------------------------ saves
+    # ------------------------------------------------------------------ backups, restore preview, problem reports (M9)
+    @app.get("/api/backups")
+    def backups_list(_=Depends(local_only)):
+        from . import support
+        return {"backups": support.list_backups(settings), "newest_age_s": support.newest_age_s(settings)}
+
+    @app.post("/api/backups")
+    def backups_create(body: BackupIn, _=Depends(local_only)):
+        from . import backup
+        made = backup.create(settings, body.label or "manual", media=body.media)
+        return {"name": made.name, "verify": backup.verify(made)}
+
+    @app.post("/api/backups/{name}/verify")
+    def backups_verify(name: str, _=Depends(local_only)):
+        from . import backup
+        root = (settings.data_dir / "backups").resolve()
+        folder = (root / name).resolve()
+        if folder.parent != root or not (folder / "manifest.json").is_file():
+            raise HTTPException(404, "no verifiable backup by that name")
+        return backup.verify(folder)
+
+    @app.get("/api/campaigns/{cid}/saves/{save_id}/preview")
+    def save_preview(cid: int, save_id: int, c=Depends(db)):
+        """What restoring this save point would change, in player terms; nothing is changed."""
+        from . import support
+        campaign_or_404(c, cid)
+        try:
+            return support.restore_preview(c, cid, save_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc))
+
+    @app.post("/api/campaigns/{cid}/reports")
+    def problem_report(cid: int, body: ReportIn, c=Depends(db)):
+        """A redacted report of one turn (player-visible exchange, timing, tool names, tokens, flags) saved to data/reports."""
+        from . import support
+        campaign_or_404(c, cid)
+        try:
+            return support.problem_report(c, settings, cid, body.turn_id, body.note)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc))
+
     @app.get("/api/campaigns/{cid}/saves")
     def saves(cid: int, c=Depends(db)):
         campaign_or_404(c, cid)
@@ -1030,6 +1081,13 @@ def _start_index(state: AppState, directory: Path) -> None:
     threading.Thread(target=work, daemon=True, name="rulebook-index").start()
 
 
+def _quietly(fn, *args) -> None:
+    try:
+        fn(*args)
+    except Exception:  # noqa: BLE001 - a background chore must never take the server down
+        traceback.print_exc()
+
+
 def _bootstrap(state: AppState, c) -> None:
     """First run: seed the demo campaign, import the ledger if present, index rulebooks if configured."""
     if not views.list_campaigns(c):
@@ -1045,6 +1103,9 @@ def _bootstrap(state: AppState, c) -> None:
     rb_dir = state.prefs().get("rulebook_dir")
     if rb_dir and Path(rb_dir).is_dir() and not state.settings.rulebook_db.exists():
         _start_index(state, Path(rb_dir))
+    # a database-only backup when the newest is over a day old (support.py), off the request path
+    from .support import auto_backup
+    threading.Thread(target=lambda: _quietly(auto_backup, state.settings), daemon=True, name="auto-backup").start()
     # small copies of portraits and art for the roster, inventory and story (cached on disk; existing ones are skipped)
     from .media import warm
     s = state.settings

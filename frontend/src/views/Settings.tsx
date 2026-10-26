@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { DeviceSettings } from "./DeviceSettings";
+import { BackupsPanel, RestorePreview } from "./Backups";
 import * as Dialog from "@radix-ui/react-dialog";
 import { AlertTriangle, Bot, Copy, Database, Download, Eye, EyeOff, History, KeyRound, Save, Smartphone } from "lucide-react";
 import { api, Prefs, SavePoint } from "../api";
@@ -62,6 +63,8 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
             ))}</tbody></table>
           )}
         </Panel>
+
+        <BackupsPanel />
 
         <Panel title={<><Bot size={13} /> AI Game Master</>}>
           {prefs && (
@@ -177,6 +180,7 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
           <Dialog.Content className="modal" aria-describedby={undefined}>
             <Dialog.Title className="h1" style={{ fontSize: 17 }}>Restore “{confirm?.label}”?</Dialog.Title>
             <p className="sub">Current state is backed up automatically first, so this can be undone. Later turns are hidden from the transcript but remain in the audit log.</p>
+            {confirm && <RestorePreview cid={cid} saveId={confirm.id} />}
             <div className="row" style={{ justifyContent: "flex-end" }}>
               <Dialog.Close className="btn ghost">Cancel</Dialog.Close>
               <button className="btn danger" onClick={() => confirm && restore(confirm)}>Restore</button>

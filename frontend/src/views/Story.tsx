@@ -4,6 +4,7 @@ import { api, ApiError, Campaign, CharacterCard, Message, newKey, RollCard, Turn
 import { Chip, Empty, Markdown, Portrait } from "../ui";
 import { RulePageDialog } from "./Reference";
 import { play } from "../prefs";
+import { ReportButton } from "./Report";
 import { CampaignSidebar, CombatPanel, Decision, DiscoveryCards, IMPORTANT_CARDS, portraitSrc, RosterPanel, SceneBanner, splitDecision, StoryText, useManifest } from "./Hud";
 
 const QUIPS = [
@@ -170,7 +171,7 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
                 <p>Start with a recap of where the campaign left off, or just say what {pc?.name.split(" ")[0] ?? "you"} does.</p>
                 <button className="btn primary" onClick={() => send(RECAP_PROMPT)}><Sparkles size={15} /> Previously on…</button>
               </Empty>
-            ) : messages.map((m) => <MessageView key={m.id} m={m} pc={pc} roster={campaign.roster} fresh={!known.current?.has(m.id)} latest={m.id === lastGm && !pending} />)}
+            ) : messages.map((m) => <MessageView key={m.id} cid={cid} m={m} pc={pc} roster={campaign.roster} fresh={!known.current?.has(m.id)} latest={m.id === lastGm && !pending} />)}
             {pending && (
               <>
                 {pending.text && <PlayerLine pc={pc} text={pending.text} />}
@@ -182,6 +183,7 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
                     <div className="row">
                       {pending.text && <button className="btn" onClick={() => send(pending.text, pending.key)}><RotateCcw size={14} /> Retry</button>}
                       <button className="btn ghost" onClick={() => { setDraft(pending.text); setPending(null); textarea.current?.focus(); }}>Edit &amp; resend</button>
+                      <ReportButton cid={cid} turnId={pending.turnId ?? null} compact={false} />
                     </div>
                   </div>
                 ) : (
@@ -238,7 +240,7 @@ function PlayerLine({ pc, text }: { pc?: CharacterCard; text: string }) {
   );
 }
 
-function MessageView({ m, pc, roster, fresh, latest }: { m: Message; pc?: CharacterCard; roster: CharacterCard[]; fresh: boolean; latest: boolean }) {
+function MessageView({ cid, m, pc, roster, fresh, latest }: { cid: number; m: Message; pc?: CharacterCard; roster: CharacterCard[]; fresh: boolean; latest: boolean }) {
   if (m.role === "player") return <div data-mid={m.id}><PlayerLine pc={pc} text={m.content} /></div>;
   if (m.role === "system") return <div data-mid={m.id} className={fresh ? "fresh" : ""}><SystemNotice text={m.content} style={m.meta?.style} /></div>;
   const meta = m.meta ?? {};
@@ -249,6 +251,7 @@ function MessageView({ m, pc, roster, fresh, latest }: { m: Message; pc?: Charac
       <StoryText text={body} roster={roster} />
       <DiscoveryCards cards={meta.cards ?? []} />
       <Mechanics meta={meta} open={fresh && !!meta.rolls?.length} />
+      <div className="msg-tools"><ReportButton cid={cid} turnId={m.turn_id} /></div>
       {ask && <Decision text={ask} />}
     </div>
   );
