@@ -62,8 +62,20 @@ def create(conn: sqlite3.Connection, *, name: str, crawler: str, race: str | Non
             conn.execute("""INSERT INTO lore_facts (campaign_id, subject, fact, certainty, visibility, source, created_at)
                             VALUES (?,?,?,?,?,?,?)""", (cid, "Campaign premise", premise.strip(), "canonical", "player", "campaign setup", t))
         constitution.install(conn, cid)  # the GM procedure an imported ledger would bring (System AI, achievements, opening)
+        add_advancement_clock(conn, cid)
         create_save_point(conn, cid, "Campaign started", kind="manual")
     return cid
+
+
+def add_advancement_clock(conn: sqlite3.Connection, cid: int) -> bool:
+    """The correspondence-advancement counter (12 cycles = one two-hour interval; count_cycle). Without it every cycle the
+    GM counts is silently skipped. Returns False when the campaign already has one."""
+    from .rules.checks import ADVANCEMENT_CLOCK
+    if one(conn, "SELECT id FROM clocks WHERE campaign_id = ? AND key = ?", (cid, ADVANCEMENT_CLOCK)):
+        return False
+    conn.execute("INSERT INTO clocks (campaign_id, key, label, kind, current, maximum, unit) VALUES (?,?,?,?,?,?,?)",
+                 (cid, ADVANCEMENT_CLOCK, "Advancement cycles", "advancement_checkpoint", 0, 12, "cycles"))
+    return True
 
 
 def rename(conn: sqlite3.Connection, cid: int, name: str) -> None:

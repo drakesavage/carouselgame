@@ -1,37 +1,20 @@
 """The default GM constitution for a campaign started in the console (campaigns.py), so a new campaign gets the same
-procedure an imported ledger brings with its CORE_MECHANICS.md: the System AI as a character, achievements and loot
-boxes, the canonical First Floor opening, and people kept as records. Each section is sent to the GM every turn
-(always_include). Written for this app from the published books; page references are to those books.
+procedure an imported ledger brings with its CORE_MECHANICS.md.
+
+constitution.json holds the universal sections of the owner's Denton constitution, generalized (the player character
+instead of Cliff; the app's records, save points and tools instead of ledger files and Git). Sections flagged `always`
+go to the GM every turn; the rest are found with search_rules. Two sections written for the app from the published
+books add what a fresh campaign needs on top: the canonical First Floor opening and recording the people met.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
+from pathlib import Path
 
 SOURCE = "Crawler Console default constitution"
 
-SECTIONS: list[tuple[str, str, str]] = [  # (section, title, text)
-    ("D1", "The System AI is a recurring character", """\
-The System AI owns the show. Its voice is cruelly observant, specific to what this crawler just did, gleeful about
-spectacle, commercially aware of viewers and sponsors, technically accurate and selectively unhelpful. It is a
-character with favorites, grudges and callbacks, not a neutral interface with jokes pasted on.
-
-It speaks through `system_notice` (style notice, achievement, warning or tooltip) at the moments the books give it:
-entering the Dungeon, the first use of the interface (crawler information, Inventory, Hotlist), firsts and thresholds,
-loot, levels, discoveries, embarrassing moments, floor-clock milestones and every announcement. On the tutorial
-floors it is loud. A long run of turns where the AI never appears is a failure of tone, not restraint."""),
-
-    ("D2", "Achievements and rewards", """\
-Achievements on the first two floors are "plentiful and generous": crawlers get flooded with starter achievements,
-gear and loot (Atlas p. 24; Core Rulebook p. 23 Entry and Tutorial achievements; appendix of examples p. 646).
-When a genuine first, threshold, spectacle, humiliation, act of ingenuity or sharp contradiction happens:
-
-1. `system_notice` style achievement: **New Achievement! [Memorable title]**, what the crawler did precisely, an
-   escalation (callback, audience reaction, ugly implication), a knife twist, and the reward (or "none" as the joke).
-2. Record it the same turn: apply_changes op `achievement`, and any reward as a real item (e.g. an unopened
-   "Bronze Adventurer Box" via add_item). Boxes are opened in a saferoom (Par for the Course p. 27; Atlas p. 27).
-
-Rewards are never forgotten, duplicated or silently replaced. Troll achievements with no reward are allowed but rare."""),
-
+APP_SECTIONS: list[tuple[str, str, str]] = [  # (section, title, text); always included
     ("D3", "Entering the World Dungeon (First Floor)", """\
 Canon for the opening of a campaign:
 - The entrance slams shut behind the crawler and the System speaks: "Welcome, Crawler. Welcome to the First Floor."
@@ -46,29 +29,29 @@ Canon for the opening of a campaign:
 - Character creation can happen when the crawler meets their Game Guide (Toolkit p. 8). Record the result with
   apply_changes op `initialize_sheet` (stats, modifiers, Health Bar, Mana, Level) as soon as it is settled.
 - Following a Game Guide's advice usually grants 1 AI Favor if the crawler has none (Toolkit p. 11)."""),
-
     ("D4", "People are records", """\
 Every named person who talks with the party or matters to the story gets apply_changes op `npc` in the turn they
 are met: name, role (e.g. "Game Guide"), what the party saw (description), where they are, personality and voice
 as observed. Update the same record when the party learns more; use `npc_attitude` for later shifts. If it is not
-recorded, the People page and later turns do not know the person exists.
-
-NPCs are people, not extensions of the crawler's action economy: they object, hesitate, joke, conceal and act on
-their own motives. Game Guides know the rules but are bound in what they may say."""),
-
-    ("D5", "Flavor is part of the resolution", """\
-The audience, the sponsors, the System AI and the Dungeon's malicious absurdity are part of how actions are framed
-and resolved, not decoration added afterwards. Danger, absurdity, grief, competence and comedy all belong; snark
-never cancels consequences. Never strip a scene down to tactical inputs and outputs, and never let flavor override
-the player's agency or the recorded state."""),
+recorded, the People page and later turns do not know the person exists."""),
 ]
 
 
+def sections() -> list[dict]:
+    data = json.loads((Path(__file__).with_name("constitution.json")).read_text(encoding="utf-8"))
+    return data + [{"section": s, "title": t, "text": x, "label": "CAMPAIGN", "always": True} for s, t, x in APP_SECTIONS]
+
+
 def install(conn: sqlite3.Connection, cid: int) -> int:
-    """Add the default sections to a campaign that has no constitution yet. Returns how many were added."""
-    if conn.execute("SELECT 1 FROM house_rules WHERE campaign_id = ? AND always_include = 1 LIMIT 1", (cid,)).fetchone():
+    """Give a campaign the default constitution, replacing an older copy of it. A campaign with its own constitution (an
+    imported CORE_MECHANICS.md) is left alone. Returns how many sections are now installed (0 when left alone)."""
+    if conn.execute("SELECT 1 FROM house_rules WHERE campaign_id = ? AND source = 'CORE_MECHANICS.md' LIMIT 1", (cid,)).fetchone():
         return 0
-    for section, title, text in SECTIONS:
+    conn.execute("DELETE FROM house_rules WHERE campaign_id = ? AND source = ?", (cid, SOURCE))
+    rules = sections()
+    for r in rules:
         conn.execute("""INSERT INTO house_rules (campaign_id, section, title, text, label, always_include, status, mechanical_status, source)
-                        VALUES (?,?,?,?,?,?,?,?,?)""", (cid, section, title, text, "CAMPAIGN", 1, "canonical", "narrative_only", SOURCE))
-    return len(SECTIONS)
+                        VALUES (?,?,?,?,?,?,?,?,?)""",
+                     (cid, None if r["section"] == "CR" else r["section"], r["title"], r["text"], r["label"], int(r["always"]),
+                      "canonical", "narrative_only", SOURCE))
+    return len(rules)
