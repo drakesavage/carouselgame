@@ -2,7 +2,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Check, Crop, ImagePlus, Loader2, Paintbrush, RefreshCw, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ArtJob, ArtKind } from "../api";
-import { Chip, Panel, Portrait, PortraitCrop } from "../ui";
+import { Chip, Panel, Portrait, PortraitCrop, sized } from "../ui";
 
 const KIND_LABEL: Record<ArtKind, string> = { character: "portrait", item: "item", mob: "Mob", scene: "scene" };
 
@@ -83,7 +83,7 @@ function ArtDialog({ cid, kind, subjectId, subjectName, onClose }:
           </div>
           <div className="art-grid">
             <div className="art-main">
-              {current?.url ? <img src={current.url} alt={subjectName} /> : <div className="art-empty muted">No picture yet</div>}
+              {current?.url ? <img src={sized(current.url, 512)!} alt={subjectName} /> : <div className="art-empty muted">No picture yet</div>}
               {busy && <div className="art-busy"><Loader2 size={14} className="spin" /> {jobs.find((j) => j.status === "running") ? "Painting… (about a minute; the first picture after a restart takes a few)" : "Waiting in the queue…"}</div>}
             </div>
             <div className="art-side">
@@ -101,7 +101,7 @@ function ArtDialog({ cid, kind, subjectId, subjectName, onClose }:
                         <div className="h2" style={{ marginTop: 10 }}>Reference photos <span className="sub">(optional; the face follows them)</span></div>
                         <div className="art-thumbs">
                           {refs.map((r) => (
-                            <div key={r.name} className="art-thumb ref"><img src={r.url} alt="" />
+                            <div key={r.name} className="art-thumb ref"><img src={sized(r.url, 128)!} alt="" loading="lazy" />
                               <button className="btn small ghost" title="Remove" onClick={async () => setRefs(await api.artRefDelete(cid, subjectId, r.name))}><X size={10} /></button></div>))}
                           {refs.length < 4 && <button className="art-thumb add" onClick={() => refInput.current?.click()}><ImagePlus size={18} /></button>}
                         </div>
@@ -155,7 +155,7 @@ function ArtDialog({ cid, kind, subjectId, subjectName, onClose }:
               <div className="art-thumbs">
                 {done.map((j) => (
                   <button key={j.id} className={`art-thumb ${j.is_current ? "current" : ""}`} onClick={() => act(j, "use")} title={j.prompt}>
-                    <img src={j.url!} alt="" />
+                    <img src={sized(j.url, 128)!} alt="" loading="lazy" />
                   </button>))}
               </div>
             </>

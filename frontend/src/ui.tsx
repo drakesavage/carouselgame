@@ -28,6 +28,14 @@ function hash(s: string) {
   return h >>> 0;
 }
 
+/** A local picture at the width it is shown (CSS pixels): the server sends a cached, scaled-down copy (app/media.py). */
+export function sized(url: string | null | undefined, cssWidth: number): string | null {
+  if (!url) return null;
+  if (!/^\/?media\//.test(url)) return url;
+  const px = Math.ceil(cssWidth * Math.min(window.devicePixelRatio || 1, 2));
+  return `${url}${url.includes("?") ? "&" : "?"}w=${[64, 128, 256, 512, 1024].find((w) => w >= px) ?? 1024}`;
+}
+
 /** Local artwork from /media/portraits when present; otherwise a generated HUD placeholder (never a network image). */
 export type PortraitCrop = { cx: number; cy: number; k: number; ar: number };
 
@@ -44,9 +52,10 @@ export function cropStyle(url: string, crop: PortraitCrop): CSSProperties {
 export function Portrait({ name, path, src, size = 52, crop }: { name: string; path?: string | null; src?: string | null; size?: number; crop?: PortraitCrop | null }) {
   const style = { width: size, height: size };
   const url = src ?? (path ? `media/portraits/${encodeURIComponent(path)}` : null);
-  if (url && crop) return <div className="portrait" role="img" aria-label={name} style={{ ...style, ...cropStyle(url, crop) }} />;
+  // a crop shows part of the picture enlarged: ask for the width the whole picture is drawn at
+  if (url && crop) return <div className="portrait" role="img" aria-label={name} style={{ ...style, ...cropStyle(sized(url, size * crop.ar / (crop.k * Math.min(crop.ar, 1)))!, crop) }} />;
   // Default framing: tall pictures show their top (where the face usually is), not the middle.
-  if (url) return <div className="portrait" style={style}><img src={url} alt={name} style={{ objectPosition: "50% 12%" }} /></div>;
+  if (url) return <div className="portrait" style={style}><img src={sized(url, size)!} alt={name} loading="lazy" style={{ objectPosition: "50% 12%" }} /></div>;
   const h = hash(name);
   const hue = h % 360;
   const initials = name.replace(/\(.*?\)/g, "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("");

@@ -485,8 +485,11 @@ class ToolRunner:
         terms = [t.strip('"') for t in q.split(" OR ")]
         scored = sorted(((sum(t in (h["title"] + " " + h["text"]).lower() for t in terms), h) for h in campaign), key=lambda x: -x[0])
         campaign_hits = [{"source": "CAMPAIGN HOUSE RULE", **h} for s, h in scored[:3] if s >= 2]
-        rulings = [{"source": "ESTABLISHED RULING", **r} for r in rows(self.conn, "SELECT topic, ruling, label, certainty FROM rulings WHERE campaign_id = ? ORDER BY id DESC LIMIT 200", (self.cid,))
-                   if sum(t in (r["topic"] + " " + r["ruling"]).lower() for t in terms) >= 2][:3]
+        from ..reference.rulecenter import ruling_status
+        rulings = [{"source": "PRECEDENT RULING" if st == "precedent" else "PROVISIONAL RULING (not precedent)",
+                    **{k: r[k] for k in ("topic", "ruling", "label", "certainty")}}
+                   for r in rows(self.conn, "SELECT topic, ruling, label, certainty, review FROM rulings WHERE campaign_id = ? ORDER BY id DESC LIMIT 200", (self.cid,))
+                   if (st := ruling_status(r)) != "rejected" and sum(t in (r["topic"] + " " + r["ruling"]).lower() for t in terms) >= 2][:3]
         official = []
         if self.rule_conn is not None:
             for p in rulebooks.search(self.rule_conn, req.queries, limit=req.limit):

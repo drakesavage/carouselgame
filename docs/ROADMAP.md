@@ -11,7 +11,7 @@ Source plan: `CRAWLER_CONSOLE_UPGRADE_PLAN.md` (October 25, 2026). One milestone
 | M4 Characters, party, people | P1 | Done | M3 | d8ebe50 (+ f6b7198 ability explanations) | 188 backend (people payload + GM-leak test); typecheck/build | live People, Characters, Driscoll dossier at 1440 and 768 px | no console interactions recorded yet, so "last interaction" is mostly empty; truncated promise title (M6) |
 | M5 Inventory, crafting, economy | P1 | Done | M4 | (this commit) | 195 backend (counts/stages/materials, reserved-gear guard, uncounted ruling); typecheck/build | live inventory grid, list, filters, expanded items at 1440 px | inventory stays read-only (changes go through GM ops); categories are name-based; correction #14 (no uncounted items remain) not yet written back to the ledger |
 | M6 Quests, memory, timeline | P1 | Done | M5 | (this commit) | 196 backend (exit-gate search + GM context + scope test; visibility crawl covers the new endpoints); typecheck/build | live journal, search (Ctrl+K), chronicle at 1440 px | correction #15 (player-known facts, two promise records) not yet written back to the ledger; lore categories are keyword-based |
-| M7 Rules center | P1 | Backlog | M2 | | | | |
+| M7 Rules center | P1 | Done | M6 | (this commit) | 206 backend (exit-gate lookups on the real index, precedence, missing code, ruling review → precedent, endpoints); typecheck/build | live lookup, autocomplete, browse, story citation at 1440 px | no new deterministic engine conversions (none justified yet); 2 existing rulings are owner rulings (precedent) |
 | M8 World visuals | P2 | Backlog | M3–M6 verified | | | | |
 | M9 Long-session reliability | P2 | Backlog | all | | | | |
 

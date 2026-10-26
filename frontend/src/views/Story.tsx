@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { AlertTriangle, ArrowDown, BookOpen, ChevronRight, Cog, Dices, Eye, Footprints, Hand, Hourglass, MessageSquare, RotateCcw, Send, Shield, ShieldCheck, Sparkles, Swords, Tent, Users } from "lucide-react";
 import { api, ApiError, Campaign, CharacterCard, Message, newKey, RollCard, TurnStatus } from "../api";
 import { Chip, Empty, Markdown, Portrait } from "../ui";
+import { RulePageDialog } from "./Reference";
 import { CampaignSidebar, CombatPanel, Decision, DiscoveryCards, IMPORTANT_CARDS, portraitSrc, RosterPanel, SceneBanner, splitDecision, StoryText, useManifest } from "./Hud";
 
 const QUIPS = [
@@ -275,10 +276,27 @@ function Mechanics({ meta, open }: { meta: Message["meta"]; open: boolean }) {
       {!!rules.length && (
         <div className="ledger">
           <div className="mechanics-sub">Rules consulted</div>
-          <div className="chips">{rules.map((r) => <Chip key={r} tone="violet" title="Rulebook passage retrieved this turn"><BookOpen size={11} /> {r}</Chip>)}</div>
+          <div className="chips">{rules.map((r) => <CitedRule key={r} cite={r} />)}</div>
         </div>
       )}
     </details>
+  );
+}
+
+/** A rule the GM consulted this turn: opens that rulebook page in the local page viewer. */
+function CitedRule({ cite }: { cite: string }) {
+  const [page, setPage] = useState<{ doc: number; page: number } | null>(null);
+  const [missing, setMissing] = useState(false);
+  const open = async () => {
+    try { const c = await api.ruleCite(cite); setPage({ doc: c.document_id, page: c.page }); } catch { setMissing(true); }
+  };
+  return (
+    <>
+      <button className={`chip violet cite-btn`} onClick={open} disabled={missing} title={missing ? "This page isn't in the rulebook index" : "Open this rulebook page"}>
+        <BookOpen size={11} /> {cite}
+      </button>
+      <RulePageDialog page={page} onClose={() => setPage(null)} />
+    </>
   );
 }
 

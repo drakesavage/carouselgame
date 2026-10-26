@@ -83,6 +83,22 @@ export type Chronology = { day_length: number; days: { day: number | null; event
   imported_history: { id: number; fact: string; source: string | null }[] };
 export type SearchHit = { type: "person" | "quest" | "group" | "lore" | "history" | "item" | "event" | "story" | "record"; id?: number; key?: string;
   title: string; snippet: string; score: number; status?: string; kind?: string; owner?: string | null; role?: string; document?: string };
+/** Rules center (reference/rulecenter.py). */
+export type Ruling = { id: number; turn_id: number | null; topic: string; ruling: string; certainty: string; label: string; created_at: string;
+  review: "approved" | "rejected" | null; review_note: string | null; reviewed_at: string | null; status: "precedent" | "provisional" | "rejected" };
+export type Coverage = { status: string; evidence: string; gap: string; priority?: string };
+export type RuleLookup = {
+  query: string;
+  book: { name: string; ref: string; document_id: number; page: number; chapter: string | null; excerpt: string }[];
+  house_rules: (HouseRule & { score: number; coverage: Coverage })[];
+  rulings: Ruling[];
+  implementation: { status: string; evidence: string | null; gap: string; source: string | null };
+  precedence: { layer: "ruling" | "house_rule" | "book" | "gm" | "note"; says: string }[];
+};
+export type RuleSuggestion = { kind: "entry" | "house_rule"; label: string; ref?: string; id?: number; section?: string | null };
+export type RuleBrowse = { books?: { id: number; title: string; entry_count: number; chapters: number }[];
+  book?: { id: number; title: string; page_offset: number } | null; chapters?: { title: string; page: number; sections: { title: string; page: number }[] }[];
+  entries?: { name: string; page: number; chapter: string | null }[] };
 export type Manifest = { locations: Record<string, string>; characters: Record<string, string> };
 export type DiagnosticsRow = { turn_id: number; status: string; input: string; created_at: string; rounds: number; flags: number; input_tokens: number };
 export type TurnStatus = { turn_id: number; status: "processing" | "completed" | "failed"; replayed: boolean; error: string | null;
@@ -151,7 +167,8 @@ export const api = {
   search: (id: number, q: string) => req<SearchHit[]>(`api/campaigns/${id}/search?q=${encodeURIComponent(q)}`),
   messages: (id: number, before?: number) => req<Message[]>(`api/campaigns/${id}/messages${before ? `?before=${before}` : ""}`),
   houseRules: (id: number) => req<HouseRule[]>(`api/campaigns/${id}/house-rules`),
-  rulings: (id: number) => req<{ id: number; topic: string; ruling: string; certainty: string; label: string; created_at: string }[]>(`api/campaigns/${id}/rulings`),
+  rulings: (id: number) => req<Ruling[]>(`api/campaigns/${id}/rulings`),
+  reviewRuling: (id: number, rid: number, decision: "approve" | "reject" | "reopen", note?: string) => post<Ruling>(`api/campaigns/${id}/rulings/${rid}/review`, { decision, note }),
   lore: (id: number) => req<{ id: number; subject: string; fact: string; certainty: string; source: string }[]>(`api/campaigns/${id}/lore`),
   records: (id: number, q?: string) => req<{ id: number; document_path: string; section: string; snippet?: string }[]>(`api/campaigns/${id}/records${q ? `?q=${encodeURIComponent(q)}` : ""}`),
   record: (id: number, sid: number) => req<{ id: number; document_path: string; section: string; content: string }>(`api/campaigns/${id}/records/${sid}`),
@@ -165,6 +182,10 @@ export const api = {
   rulePage: (doc: number, page: number) => req<{ document: string; page: number; page_count: number; text: string }>(`api/rules/page?document_id=${doc}&page=${page}`),
   ruleDocs: () => req<{ documents: { id: number; title: string; filename: string; page_count: number; chunks: number }[]; index_status: Record<string, any> }>("api/rules/documents"),
   indexRules: (directory?: string) => post<Record<string, any>>("api/rules/index", { directory }),
+  ruleLookup: (q: string, cid?: number) => req<RuleLookup>(`api/rules/lookup?q=${encodeURIComponent(q)}${cid ? `&cid=${cid}` : ""}`),
+  ruleSuggest: (q: string, cid?: number) => req<RuleSuggestion[]>(`api/rules/suggest?q=${encodeURIComponent(q)}${cid ? `&cid=${cid}` : ""}`),
+  ruleBrowse: (bookId?: number) => req<RuleBrowse>(`api/rules/browse${bookId ? `?book_id=${bookId}` : ""}`),
+  ruleCite: (ref: string) => req<{ document_id: number; page: number; document: string }>(`api/rules/cite?ref=${encodeURIComponent(ref)}`),
   settings: () => req<Prefs>("api/settings"),
   saveSettings: (p: Partial<Prefs>) => req<Prefs>("api/settings", { method: "PUT", body: JSON.stringify(p) }),
   importLedger: (path?: string) => post<{ campaign_id: number | null; report: any }>("api/import", { path }),

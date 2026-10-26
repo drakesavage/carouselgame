@@ -32,6 +32,7 @@ from .importer.ledger import import_ledger, refresh_mechanical_status, report_ma
 from .ledger import sync as ledger_sync
 from .ledger.sync import LedgerError
 from .memory import journal, snapshots, views
+from .reference import rulecenter
 from .reference import rulebooks
 from .seed.demo import seed_demo
 
@@ -51,6 +52,11 @@ class PrefsIn(BaseModel):
     rulebook_dir: str | None = None
     ledger_dir: str | None = None
     active_campaign_id: int | None = None
+
+
+class ReviewIn(BaseModel):
+    decision: str = Field(pattern="^(approve|reject|reopen)$")
+    note: str | None = Field(default=None, max_length=500)
 
 
 class ArtIn(BaseModel):
@@ -401,13 +407,21 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         except json.JSONDecodeError:
             return {"locations": {}, "characters": {}, "error": "manifest.json is not valid JSON"}
 
+    def picture(path: Path, w: int | None, cache: str) -> FileResponse:
+        """A local picture, or a cached scaled-down copy when ?w= asks for one (app/media.py)."""
+        if w:
+            from .media import thumbnail
+            small, media_type = thumbnail(path, w, settings.data_dir / "thumbs")
+            return FileResponse(small, media_type=media_type, headers={"Cache-Control": cache})
+        return FileResponse(path, headers={"Cache-Control": cache})
+
     @app.get("/media/assets/{name}")
-    def asset_file(name: str):
+    def asset_file(name: str, w: int | None = Query(None, ge=16, le=2048)):
         base = (settings.data_dir / "assets").resolve()
         path = (base / name).resolve()
         if path.parent != base or not path.is_file() or path.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"):
             raise HTTPException(404)
-        return FileResponse(path)
+        return picture(path, w, "public, max-age=86400")
 
     # ------------------------------------------------------------------ art (local ComfyUI)
     @app.post("/api/campaigns/{cid}/visual-reference")
@@ -597,30 +611,30 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         return art_refs(cid, char_id, c)
 
     @app.get("/media/art-refs/{cid}/{char_id}/{name}")
-    def art_ref_file(cid: int, char_id: int, name: str):
+    def art_ref_file(cid: int, char_id: int, name: str, w: int | None = Query(None, ge=16, le=2048)):
         folder = art.refs_dir(settings, cid, char_id).resolve()
         path = (folder / name).resolve()
         if path.parent != folder or not path.is_file():
             raise HTTPException(404, "no such photo")
-        return FileResponse(path)
+        return picture(path, w, "private, max-age=3600")
 
     @app.get("/media/art/{cid}/{name}")
-    def art_file(cid: int, name: str):
+    def art_file(cid: int, name: str, w: int | None = Query(None, ge=16, le=2048)):
         folder = art.art_dir(settings, cid).resolve()
         path = (folder / name).resolve()
         if path.parent != folder or not path.is_file():
             raise HTTPException(404, "no such picture")
-        return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+        return picture(path, w, "public, max-age=31536000, immutable")
 
     @app.get("/media/portraits/{name}")
-    def portrait(name: str):
+    def portrait(name: str, w: int | None = Query(None, ge=16, le=2048)):
         path = (settings.portraits_dir / name).resolve()
         if path.parent != settings.portraits_dir.resolve() or not path.is_file():
             raise HTTPException(404)
-        return FileResponse(path)
+        return picture(path, w, "public, max-age=86400")  # uploaded and generated portraits get new file names
 
     for route, fn in {"inventory": views.inventory, "quests": views.quests, "npcs": views.npcs, "timeline": views.timeline,
-                      "rolls": views.player_rolls, "house-rules": views.house_rules, "rulings": views.rulings, "lore": views.lore,
+                      "rolls": views.player_rolls, "house-rules": views.house_rules, "rulings": rulecenter.rulings, "lore": views.lore,
                       "journal": journal.journal, "lore-notebook": journal.lore_notebook, "chronology": journal.chronology}.items():
         def make(fn=fn):
             def handler(cid: int, c=Depends(db)):
@@ -732,6 +746,65 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
             finally:
                 rc.close()
         return out
+
+    def rules_index(rc):
+        """The rules-center index, rebuilt when the rulebook index file changes."""
+        f = settings.rulebook_db
+        return rulecenter.index(rc, f"{f}:{f.stat().st_mtime_ns}")
+
+    @app.get("/api/rules/browse")
+    def rules_browse(book_id: int | None = None):
+        rc = rule_conn()
+        if rc is None:
+            return {"books": []} if book_id is None else {"book": None}
+        try:
+            return rulecenter.browse(rules_index(rc), book_id)
+        finally:
+            rc.close()
+
+    @app.get("/api/rules/suggest")
+    def rules_suggest(q: str = Query(min_length=1, max_length=100), cid: int | None = None, c=Depends(db)):
+        rc = rule_conn()
+        try:
+            return rulecenter.suggest(rules_index(rc) if rc else None, c, cid, q)
+        finally:
+            if rc:
+                rc.close()
+
+    @app.get("/api/rules/lookup")
+    def rules_lookup(q: str = Query(min_length=2, max_length=200), cid: int | None = None, c=Depends(db)):
+        """Where a rule is written, what overrides it, which rulings stand on it, and whether the console enforces it."""
+        rc = rule_conn()
+        try:
+            return rulecenter.lookup(rules_index(rc) if rc else None, c, cid, q)
+        finally:
+            if rc:
+                rc.close()
+
+    @app.get("/api/rules/cite")
+    def rules_cite(ref: str = Query(min_length=3, max_length=300)):
+        rc = rule_conn()
+        if rc is None:
+            raise HTTPException(404, "no rulebook index")
+        try:
+            out = rulecenter.cite(rules_index(rc), ref)
+        finally:
+            rc.close()
+        if not out:
+            raise HTTPException(404, "citation not found in the index")
+        return out
+
+    @app.post("/api/campaigns/{cid}/rulings/{rid}/review")
+    def review_ruling(cid: int, rid: int, body: ReviewIn, c=Depends(db)):
+        """The owner's review of a GM ruling: approved rulings become precedent in later turns; rejected ones are dropped."""
+        campaign_or_404(c, cid)
+        if not one(c, "SELECT id FROM rulings WHERE campaign_id = ? AND id = ?", (cid, rid)):
+            raise HTTPException(404, "ruling not found")
+        review = {"approve": "approved", "reject": "rejected", "reopen": None}[body.decision]
+        with transaction(c):
+            c.execute("UPDATE rulings SET review = ?, review_note = ?, reviewed_at = ? WHERE id = ?",
+                      (review, body.note, now_iso() if review else None, rid))
+        return next(r for r in rulecenter.rulings(c, cid) if r["id"] == rid)
 
     @app.get("/api/rules/page")
     def rule_page(document_id: int, page: int):
@@ -949,6 +1022,11 @@ def _bootstrap(state: AppState, c) -> None:
     rb_dir = state.prefs().get("rulebook_dir")
     if rb_dir and Path(rb_dir).is_dir() and not state.settings.rulebook_db.exists():
         _start_index(state, Path(rb_dir))
+    # small copies of portraits and art for the roster, inventory and story (cached on disk; existing ones are skipped)
+    from .media import warm
+    s = state.settings
+    folders = [s.portraits_dir, s.data_dir / "assets", *sorted((s.data_dir / "art").glob("c*"))]
+    threading.Thread(target=warm, args=(folders, s.data_dir / "thumbs"), daemon=True, name="thumbnails").start()
 
 
 app = create_app()

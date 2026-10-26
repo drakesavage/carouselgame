@@ -347,9 +347,19 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     if rel_rules:
         label = "Possibly relevant house rules for this action" if B["max_house_rules"] <= 50 else "All other house rules (most relevant first)"
         ru.append(label + ":\n" + cut("HOUSE RULES: relevant", "\n".join(f"- §{h['section'] or ''} {h['title']} ({h['label'] or 'campaign'}): {h['text'][:B['house_rule_each']]}" for h in rel_rules), B["rules_relevant"]))
-    rl = rows(conn, "SELECT topic, ruling, label FROM rulings WHERE campaign_id = ? ORDER BY id DESC LIMIT 8", (cid,))
-    if rl:
-        ru.append("Recent rulings: " + " | ".join(f"({r['label']}) {r['topic']}: {r['ruling'][:240]}" for r in rl))
+    # rulings: only precedents carry forward (approved, or the owner's CAMPAIGN/BOOK rulings); provisional ones only for the
+    # last few turns and labelled as such; rejected ones never (reference/rulecenter.py)
+    from ..reference.rulecenter import ruling_status
+    rl = rows(conn, "SELECT topic, ruling, label, certainty, review, turn_id FROM rulings WHERE campaign_id = ? ORDER BY id DESC LIMIT 300", (cid,))
+    prec = [r for r in rl if ruling_status(r) == "precedent"]
+    prec = sorted(prec, key=lambda r: -len(act & _words(r["topic"] + " " + r["ruling"])))[:8]
+    if prec:
+        ru.append("Precedents (approved rulings; apply them): " + " | ".join(f"({r['label']}) {r['topic']}: {r['ruling'][:240]}" for r in prec))
+    recent_turns = {t["id"] for t in rows(conn, "SELECT id FROM turns WHERE campaign_id = ? ORDER BY id DESC LIMIT 10", (cid,))}
+    prov = [r for r in rl if ruling_status(r) == "provisional" and r["turn_id"] in recent_turns][:5]
+    if prov:
+        ru.append("Provisional rulings from recent turns (keep consistent within the scene; NOT precedent, awaiting the owner's review): "
+                  + " | ".join(f"({r['label']}) {r['topic']}: {r['ruling'][:200]}" for r in prov))
     ru.append("Other constitution sections and the rulebooks: search_rules. Unsupported mechanics: retrieve, then record_ruling a provisional label.")
     sections["HOUSE RULES"] = "\n".join(ru)
     if rule_conn is not None and len(act) >= 2 and B["official_passages"] > 0:

@@ -6,7 +6,7 @@ import {
   MapPin, Skull, Sparkles, Sun, Swords, TrendingUp, Trophy, Wrench, Zap,
 } from "lucide-react";
 import { Campaign, CharacterCard, Encounter, fmtMinutes, Group, Manifest, Quest } from "../api";
-import { Bar, Chip, humanize, Panel, Portrait } from "../ui";
+import { Bar, Chip, humanize, Panel, Portrait, sized } from "../ui";
 import { ArtButton, ArtQueue } from "./Art";
 
 // ------------------------------------------------------------------ local artwork
@@ -88,7 +88,7 @@ export function SceneBanner({ campaign, onArt, openCharacter }: { campaign: Camp
   const now = campaign.active_objective ?? campaign.quests.find((q) => q.immediate)?.title;
   return (
     <header className={`banner ${open ? "open" : ""}`} aria-label="Current scene">
-      {art ? <img className="banner-art" src={art} alt="" /> : <BannerArt seed={s?.location ?? campaign.current_location ?? campaign.name} />}
+      {art ? <img className="banner-art" src={sized(art, 1024)!} alt="" /> : <BannerArt seed={s?.location ?? campaign.current_location ?? campaign.name} />}
       <div className="banner-shade" />
       <div className="banner-body">
         <div className="banner-kicker">
@@ -473,7 +473,7 @@ export function CombatPanel({ enc, campaign, onArt }: { enc: Encounter; campaign
       {enc.phase && <div className="row" style={{ margin: "4px 0 8px" }}><Chip tone={enc.phase === "crawler_reaction" ? "magenta" : "cyan"}>{PHASES[enc.phase] ?? enc.phase}</Chip></div>}
       {foes.map((f) => (
         <div key={f.id} className="combatant">
-          {campaign?.art?.mob[f.name.toLowerCase()] ? <img className="foe-art" src={campaign.art.mob[f.name.toLowerCase()]} alt="" />
+          {campaign?.art?.mob[f.name.toLowerCase()] ? <img className="foe-art" src={sized(campaign.art.mob[f.name.toLowerCase()], 64)!} alt="" />
             : campaign && <ArtButton cid={campaign.id} kind="mob" subjectName={f.name} label="" onChanged={onArt} />}
           <span className={f.defeated ? "muted" : ""} style={{ textDecoration: f.defeated ? "line-through" : undefined }}>{f.name}</span>
           <div className="bar hp" style={{ width: 80 }}><i style={{ width: `${f.hb_percent ?? 0}%`, background: "linear-gradient(90deg,#b8323a,#ff5257)" }} /></div>

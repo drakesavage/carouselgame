@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { api, Life } from "../api";
 import { LifeChip } from "./People";
-import { Chip, cropStyle, humanize, Portrait, PortraitCrop, Tree } from "../ui";
+import { Chip, cropStyle, humanize, Portrait, PortraitCrop, sized, Tree } from "../ui";
 import { ArtButton, CropButton } from "./Art";
 import "../dossier.css";
 
@@ -121,7 +121,7 @@ function Hero({ cid, d, onChanged }: { cid: number; d: Dossier; onChanged: () =>
     <header className="dossier-hero">
       <div className="hero-portrait">
         {url ? <div className="hero-img" role="img" aria-label={d.name}
-          style={d.portrait_crop ? cropStyle(url, { ...d.portrait_crop, k: Math.min(1, d.portrait_crop.k * 1.25) }) : { backgroundImage: `url("${url}")` }} />
+          style={d.portrait_crop ? cropStyle(sized(url, 512)!, { ...d.portrait_crop, k: Math.min(1, d.portrait_crop.k * 1.25) }) : { backgroundImage: `url("${sized(url, 256)}")` }} />
           : <Portrait name={d.name} size={220} />}
         <div className="hero-portrait-actions">
           <input ref={file} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />

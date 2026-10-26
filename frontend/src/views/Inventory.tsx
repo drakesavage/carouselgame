@@ -4,7 +4,7 @@ import {
   Loader2, Package, Search, Shield, Sparkles, Sword, Wrench, X,
 } from "lucide-react";
 import { api, fmtMinutes, Inventory, InvItem, Stage } from "../api";
-import { Chip, Empty } from "../ui";
+import { Chip, Empty, sized } from "../ui";
 import { ArtButton } from "./Art";
 import "../inventory.css";
 
@@ -201,7 +201,7 @@ function ItemEntry({ i, cid, art, look, onArt, list }: { i: InvItem; cid: number
   return (
     <div className={`inv-item ${open ? "open" : ""} ${i.equipped ? "equipped" : ""} ${i.quantity_state === "unknown" ? "unknown" : ""}`}>
       <button className="inv-head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <span className="inv-icon">{art ? <img src={art} alt="" /> : <C.icon size={18} aria-hidden />}</span>
+        <span className="inv-icon">{art ? <img src={sized(art, 32)!} alt="" loading="lazy" /> : <C.icon size={18} aria-hidden />}</span>
         <span className="inv-name">{i.name}</span>
         {list && <span className="inv-cat">{C.label}</span>}
         {list && <span className="inv-owner">{i.owner_name ?? (i.deployed ? "deployed" : "shared")}</span>}

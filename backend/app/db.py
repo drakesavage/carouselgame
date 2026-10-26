@@ -531,6 +531,9 @@ COLUMN_MIGRATIONS = [
     ("art_jobs", "engine", "TEXT NOT NULL DEFAULT 'comfy'"),
     ("characters", "portrait_crop_json", "TEXT"),
     ("corrections", "resolves_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ("rulings", "review", "TEXT"),          # NULL pending | approved | rejected (reference/rulecenter.py: only precedents reach later turns)
+    ("rulings", "review_note", "TEXT"),
+    ("rulings", "reviewed_at", "TEXT"),
     ("campaigns", "objective_quests_json", "TEXT NOT NULL DEFAULT '[]'"),  # ordered quest ids that make up the immediate objective  # {cx, cy, k, ar}: square crop of the portrait image (null = default)  # comfy | codex (art/codex_image.py)  # staged tool calls and roll records while a turn is in flight
 ]
 
