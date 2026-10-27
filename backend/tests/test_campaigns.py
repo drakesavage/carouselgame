@@ -89,7 +89,8 @@ def test_a_new_campaign_gets_the_default_gm_constitution_in_every_briefing(clien
     cid = new(client)
     titles = [r["title"] for r in rows(conn, "SELECT title FROM house_rules WHERE campaign_id = ? AND always_include = 1", (cid,))]
     assert {"Achievement procedure", "Entering the World Dungeon (First Floor)", "People are records", "GM fairness constraints",
-            "Crazy Dungeon critical flourish", "The Collapse"} <= set(titles) and len(titles) == 20
+            "Crazy Dungeon critical flourish", "The Collapse", "Achievements as the novels write them",
+            "Borant announcements and admin notices"} <= set(titles) and len(titles) == 22
     every = rows(conn, "SELECT title, text FROM house_rules WHERE campaign_id = ?", (cid,))
     assert len(every) > 90 and not [r["title"] for r in every if "Cliff" in r["text"] or "Denton" in r["text"] or ".yaml" in r["text"]]
     assert one(conn, "SELECT current, maximum FROM clocks WHERE campaign_id = ? AND key = 'advancement_cycles'", (cid,)) == {"current": 0, "maximum": 12}
@@ -179,3 +180,49 @@ def test_an_npc_carries_gender_and_pronouns_and_the_gm_is_told_when_they_are_mis
     assert "pronouns she/her" in text and "NOT RECORDED" not in text
     jamie = [p for p in client.get(f"/api/campaigns/{cid}/npcs").json() if p["name"] == "Jamie Cole"][0]
     assert jamie["identity"] == {"gender": "woman", "pronouns": "she/her", "apparent_age": "early 30s"}
+
+
+def test_achievements_reward_boxes_to_companions_and_boxes_open_only_in_a_saferoom(client, conn):
+    import pytest
+    from app.db import transaction
+    from app.rules.engine import ChangeError, apply_change
+    cid = new(client, location="Paintball course")
+    with transaction(conn):
+        apply_change(conn, cid, None, {"op": "npc", "name": "Eli Park", "category": "allied_npcs"})
+        conn.execute("UPDATE characters SET in_party = 1, kind = 'crawler' WHERE campaign_id = ? AND name = 'Eli Park'", (cid,))
+        apply_change(conn, cid, None, {"op": "achievement", "title": "Empty Pockets", "description": "You brought nothing. Bold.",
+                                       "box": "Bronze Adventurer Box", "also": ["Eli Park"]})
+        apply_change(conn, cid, None, {"op": "achievement", "title": "Loner?", "description": "Not quite.", "reward": "Yeah, no."})
+        with pytest.raises(ChangeError):
+            apply_change(conn, cid, None, {"op": "achievement", "title": "Empty Pockets", "box": "Bronze Adventurer Box"})   # no duplicates
+        with pytest.raises(ChangeError):
+            apply_change(conn, cid, None, {"op": "achievement", "title": "Bad", "box": "Shiny Thing"})
+    page = client.get(f"/api/campaigns/{cid}/achievements").json()
+    assert page["total"] == 3 and page["unopened_boxes"] == 2
+    me, eli = page["characters"][0], [c for c in page["characters"] if c["name"] == "Eli Park"][0]
+    assert me["is_player"] and [a["title"] for a in me["achievements"]] == ["Loner?", "Empty Pockets"]
+    assert me["achievements"][0]["reward"] == "Yeah, no." and me["achievements"][1]["reward"] == "You've received a Bronze Adventurer Box!"
+    assert eli["boxes"][0]["name"] == "Bronze Adventurer Box" and eli["boxes"][0]["tier"] == "Bronze"
+    with transaction(conn):
+        with pytest.raises(ChangeError):
+            apply_change(conn, cid, None, {"op": "open_box", "character": "player", "box": "Bronze Adventurer Box"})        # not a saferoom
+        apply_change(conn, cid, None, {"op": "set_location", "location": "Tutorial Guild", "safe_room": True})
+        apply_change(conn, cid, None, {"op": "open_box", "character": "player", "box": "Bronze Adventurer Box"})
+        apply_change(conn, cid, None, {"op": "add_item", "character": "player", "name": "Healing Potion", "quantity": 2})
+    page = client.get(f"/api/campaigns/{cid}/achievements").json()
+    me = page["characters"][0]
+    assert me["boxes"] == [] and me["achievements"][1]["box_opened"] is True and page["unopened_boxes"] == 1
+
+
+def test_an_npc_can_become_a_crawler_in_the_party_and_shows_on_the_achievements_page(client, conn):
+    from app.db import transaction
+    from app.rules.engine import apply_change
+    cid = new(client)
+    with transaction(conn):
+        apply_change(conn, cid, None, {"op": "npc", "name": "Ben Ortiz", "description": "EMT teammate."})
+    assert [c["name"] for c in client.get(f"/api/campaigns/{cid}/achievements").json()["characters"]] == ["Donut Jr"]
+    with transaction(conn):
+        apply_change(conn, cid, None, {"op": "npc", "name": "Ben Ortiz", "crawler": True, "in_party": True})
+    ben = one(conn, "SELECT kind, in_party, roster_category FROM characters WHERE campaign_id = ? AND name = 'Ben Ortiz'", (cid,))
+    assert (ben["kind"], ben["in_party"], ben["roster_category"]) == ("crawler", 1, "core_party")
+    assert [c["name"] for c in client.get(f"/api/campaigns/{cid}/achievements").json()["characters"]] == ["Donut Jr", "Ben Ortiz"]

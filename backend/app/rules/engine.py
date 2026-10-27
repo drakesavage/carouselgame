@@ -143,6 +143,21 @@ class Achievement(BaseModel):
     character: str | None = None
     title: str = Field(min_length=1, max_length=160)
     description: str | None = None
+    reward: str | None = Field(default=None, max_length=400)   # the Reward line: a box, a perk, or the joke ("Bitches don't get rewards.")
+    box: str | None = Field(default=None, max_length=80)       # a loot box granted, e.g. "Silver Adventurer Box" (an unopened item)
+    also: list[str] = Field(default_factory=list)              # companions who earn the same achievement (each gets their own box)
+
+
+BOX_TIERS = ("Bronze", "Silver", "Gold", "Platinum", "Legendary", "Celestial")
+
+
+class OpenBox(BaseModel):
+    """Open a loot box. Boxes are opened in a saferoom (Par for the Course p. 27; Atlas p. 27); add the contents with
+    add_item in the same apply_changes."""
+    op: Literal["open_box"]
+    character: str
+    box: str | None = None        # the box's name, or
+    item_id: int | None = None
 
 
 class RecordFact(BaseModel):
@@ -186,6 +201,8 @@ class NpcUpsert(BaseModel):
     voice: str | None = Field(default=None, max_length=200)
     known_motivation: str | None = Field(default=None, max_length=300)
     attitude: int | None = Field(default=None, ge=-3, le=3)        # only when first recorded; later shifts use npc_attitude
+    crawler: bool | None = None     # true once they have entered the Dungeon as a crawler (they get crawler rules, achievements, boxes)
+    in_party: bool | None = None    # true when they travel and fight with the player character's party
 
 
 class InitializeSheet(BaseModel):
@@ -558,14 +575,54 @@ def _apply_npc_attitude(ctx: Ctx, op: NpcAttitude) -> dict:
 
 
 def _apply_achievement(ctx: Ctx, op: Achievement) -> dict:
-    c = resolve_character(ctx.conn, ctx.campaign_id, op.character or "player")
-    ctx.conn.execute(
-        "INSERT INTO achievements (campaign_id, character_id, title, description, game_time_minutes, created_at) VALUES (?,?,?,?,?,?)",
-        (ctx.campaign_id, c["id"], op.title, op.description, ctx.game_time(), now_iso()),
-    )
-    summary = f"New Achievement! {op.title}"
-    ctx.event("achievement", summary, {"character_id": c["id"], "title": op.title, "description": op.description})
-    return {"summary": summary}
+    box = (op.box or "").strip()
+    if box and not box.lower().endswith("box"):
+        raise ChangeError(f"a loot box is named like 'Silver Adventurer Box', not {box!r}")
+    tier = next((t for t in BOX_TIERS if box.lower().startswith(t.lower())), None)
+    if box and not tier:
+        raise ChangeError(f"a loot box name starts with its tier ({', '.join(BOX_TIERS)}): {box!r}")
+    lines = []
+    for ref in [op.character or "player", *op.also]:
+        c = resolve_character(ctx.conn, ctx.campaign_id, ref)
+        if any(r["character_id"] == c["id"] for r in rows(ctx.conn, "SELECT character_id FROM achievements WHERE campaign_id = ? AND title = ?",
+                                                              (ctx.campaign_id, op.title))):
+            raise ChangeError(f"{c['name']} already has the achievement {op.title!r}; rewards are not duplicated")
+        item_id = None
+        if box:
+            item_id = ctx.conn.execute(
+                "INSERT INTO items (campaign_id, owner_character_id, name, quantity, description, rarity, properties_json) VALUES (?,?,?,?,?,?,?)",
+                (ctx.campaign_id, c["id"], box, 1, f"Unopened. Reward for the achievement {op.title}. Open it in a saferoom.", tier,
+                 json.dumps({"loot_box": True, "tier": tier, "from_achievement": op.title, "opened": False}))).lastrowid
+        ctx.conn.execute(
+            """INSERT INTO achievements (campaign_id, character_id, title, description, reward, box_item_id, game_time_minutes, created_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (ctx.campaign_id, c["id"], op.title, op.description, op.reward or (f"You've received a {box}!" if box else None), item_id,
+             ctx.game_time(), now_iso()))
+        summary = f"New Achievement! {op.title} ({c['name']})" + (f" — {box}" if box else "")
+        ctx.event("achievement", summary, {"character_id": c["id"], "title": op.title, "description": op.description, "box": box or None})
+        lines.append(summary)
+    return {"summary": "; ".join(lines)}
+
+
+def _apply_open_box(ctx: Ctx, op: OpenBox) -> dict:
+    c = resolve_character(ctx.conn, ctx.campaign_id, op.character)
+    camp = one(ctx.conn, "SELECT safe_room, current_location FROM campaigns WHERE id = ?", (ctx.campaign_id,))
+    if not camp["safe_room"]:
+        raise ChangeError("loot boxes are opened in a saferoom (Par for the Course p. 27); this location is not one")
+    if op.item_id:
+        item = _item_by_id(ctx, op.item_id, c)
+    elif op.box:
+        item = _find_item(ctx.conn, ctx.campaign_id, c["id"], op.box)
+    else:
+        raise ChangeError("name the box or give its item_id")
+    props = (item or {}).get("properties") or {}
+    if not item or not props.get("loot_box") or props.get("opened") or not item["quantity"]:
+        raise ChangeError(f"{c['name']} has no unopened loot box matching {op.box or op.item_id!r}")
+    props["opened"] = True
+    ctx.conn.execute("UPDATE items SET quantity = 0, properties_json = ? WHERE id = ?", (json.dumps(props), item["id"]))
+    summary = f"{c['name']} opens the {item['name']}"
+    ctx.event("box_opened", summary, {"character_id": c["id"], "item_id": item["id"], "box": item["name"]})
+    return {"summary": summary, "note": "add the contents with add_item in this same apply_changes"}
 
 
 def _apply_fact(ctx: Ctx, op: RecordFact) -> dict:
@@ -641,14 +698,20 @@ def _apply_npc(ctx: Ctx, op: NpcUpsert) -> dict:
         cid = ctx.conn.execute(
             """INSERT INTO characters (campaign_id, slug, name, kind, roster_category, race, species, status, location, in_party, bio, sheet_json, provenance)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (ctx.campaign_id, slug, name, "npc", op.category or "neutral_npcs", op.race, op.race, "active", op.location, 0,
-             op.description, json.dumps(sheet), f"turn {ctx.turn_id}")).lastrowid
+            (ctx.campaign_id, slug, name, "crawler" if op.crawler else "npc", op.category or ("core_party" if op.in_party else "neutral_npcs"),
+             op.race, op.race, "active", op.location, int(bool(op.in_party)), op.description, json.dumps(sheet), f"turn {ctx.turn_id}")).lastrowid
         ctx.conn.execute("INSERT INTO npc_profiles (character_id, personality, voice, known_motivation, attitude, last_seen) VALUES (?,?,?,?,?,?)",
                          (cid, op.personality, op.voice, op.known_motivation, op.attitude, op.location))
         summary = f"Met {name}" + (f", {op.role}" if op.role else "") + (f" ({op.location})" if op.location else "")
         ctx.event("npc_met", summary, {"character_id": cid, "role": op.role})
         return {"summary": summary, "character_id": cid}
     sets = {k: v for k, v in {"roster_category": op.category, "race": op.race, "location": op.location, "bio": op.description}.items() if v is not None}
+    if op.crawler is not None:
+        sets["kind"] = "crawler" if op.crawler else "npc"
+    if op.in_party is not None:
+        sets["in_party"] = int(op.in_party)
+        if op.in_party and not op.category and c.get("roster_category") in (None, "neutral_npcs", "allied_npcs", "contacts"):
+            sets["roster_category"] = "core_party"
     ident = {k: v for k, v in (("gender", op.gender), ("pronouns", op.pronouns), ("apparent_age", op.apparent_age)) if v}
     if op.role or ident:
         sheet = c.get("sheet") or {}
@@ -763,6 +826,7 @@ CHANGE_OPS: dict[str, tuple[type[BaseModel], Callable[[Ctx, Any], dict]]] = {
     "quest": (QuestUpsert, _apply_quest),
     "npc_attitude": (NpcAttitude, _apply_npc_attitude),
     "achievement": (Achievement, _apply_achievement),
+    "open_box": (OpenBox, _apply_open_box),
     "fact": (RecordFact, _apply_fact),
     # "encounter" (narrative-only) is superseded by rules/combat.py and the combat_* GM tools
     "set_quantity": (SetQuantity, _apply_set_quantity),

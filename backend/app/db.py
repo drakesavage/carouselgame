@@ -538,7 +538,9 @@ COLUMN_MIGRATIONS = [
     ("rulings", "review_note", "TEXT"),
     ("rulings", "reviewed_at", "TEXT"),
     ("campaigns", "archived", "INTEGER NOT NULL DEFAULT 0"),
-    ("campaigns", "floor_clock_pending_minutes", "INTEGER"),  # a floor clock waiting to start (op start_floor_clock); deadline is NULL meanwhile  # 1 = hidden from the campaign picker (campaigns.py)
+    ("campaigns", "floor_clock_pending_minutes", "INTEGER"),
+    ("achievements", "reward", "TEXT"),   # the Reward line as announced ("You've received a Silver Adventurer Box!", or the joke)
+    ("achievements", "box_item_id", "INTEGER"),  # the loot box it granted (items.properties loot_box)  # a floor clock waiting to start (op start_floor_clock); deadline is NULL meanwhile  # 1 = hidden from the campaign picker (campaigns.py)
     ("campaigns", "objective_quests_json", "TEXT NOT NULL DEFAULT '[]'"),  # ordered quest ids that make up the immediate objective  # {cx, cy, k, ar}: square crop of the portrait image (null = default)  # comfy | codex (art/codex_image.py)  # staged tool calls and roll records while a turn is in flight
 ]
 

@@ -71,6 +71,10 @@ export type Combatant = { id: string; name: string; side: "party" | "foe"; defea
   evading?: boolean; hp_current?: number | null; hp_max?: number | null; dead?: boolean; dying?: string | null };
 export type Encounter = { id: number; name: string; round: number; phase?: string; summary?: string | null; combatants: Combatant[] };
 export type CampaignListItem = { id: number; name: string; is_demo: number; data_source: string; current_floor: number | null; current_location: string | null; archived: number };
+export type Achievements = { total: number; unopened_boxes: number; characters: {
+  id: number; name: string; is_player: boolean; in_party: boolean; status: string; portrait_path: string | null; portrait_crop: CharacterCard["portrait_crop"];
+  achievements: { id: number; title: string; description: string | null; reward: string | null; game_time_minutes: number | null; box: string | null; box_opened: boolean | null }[];
+  boxes: { id: number; name: string; tier: string | null; from: string | null }[] }[] };
 export type ManagedCampaign = CampaignListItem & { created_at: string; updated_at: string; turns: number; last_played: string | null; characters: number; crawler: string | null };
 export type RollCard = { roll_id: number; expression: string; dice: { sides: number; value: number; kept: boolean }[]; total: number; target: number | null;
   outcome: string | null; degree: string | null; reason: string | null; detail: Record<string, any> };
@@ -159,6 +163,7 @@ const post = <T,>(path: string, body?: unknown) => req<T>(path, { method: "POST"
 export const api = {
   health: () => req<{ provider: string; codex_cli: string | null; rulebook_index: boolean }>("api/health"),
   campaigns: () => req<CampaignListItem[]>("api/campaigns"),
+  achievements: (cid: number) => req<Achievements>(`api/campaigns/${cid}/achievements`),
   manageCampaigns: () => req<ManagedCampaign[]>("api/campaigns-manage"),
   createCampaign: (body: { name: string; crawler: string; race: string | null; class_name: string | null; floor: number; location: string | null; floor_hours: number | null; premise: string | null; clock_on_entry: boolean }) =>
     post<{ campaign_id: number }>("api/campaigns", body),

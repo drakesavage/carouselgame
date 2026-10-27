@@ -44,11 +44,48 @@ Canon for the opening of a campaign:
 - Character creation can happen when the crawler meets their Game Guide (Toolkit p. 8). Record the result with
   apply_changes op `initialize_sheet` (stats, modifiers, Health Bar, Mana, Level) as soon as it is settled.
 - Following a Game Guide's advice usually grants 1 AI Favor if the crawler has none (Toolkit p. 11)."""),
+    ("D5", "Achievements as the novels write them", """\
+Voice: the System AI, a game-show host with a cruel streak, talking to this crawler about what they just did.
+Shape, and keep it short (2-4 lines):
+  **New Achievement! [Title]**
+  One plain sentence of what they did ("You entered the dungeon without a weapon."). Then the jab: an insult, a
+  pop-culture or celebrity comparison, a your-mom joke, a cheerful reminder they will probably die, a grim statistic
+  ("most crawlers who earn this never earn another"), or a nod to the viewers and the recap episode. Profanity fits.
+  **Reward:** one line.
+- Titles: 1-6 words, punchy, a pun, a movie/TV/meme reference, or a crude exclamation. Specific to the deed.
+- Rewards are one of: a themed box named for the deed ("Gold Shoe Box" for stomping, "Silver Mechanic's Box" for
+  building, "Platinum Lucky Bastard Box" for surviving the impossible, "Bronze Asshole's Box" for being a dick); a
+  small practical perk (signs highlighted, a map marker); or a joke instead of a prize ("That's reward enough.",
+  "Yeah, no.", a cruel twist). Tier follows how hard or spectacular it was: Bronze common, Silver and Gold for real
+  feats, Platinum rare, Legendary and Celestial almost never.
+- Firsts pour in on the tutorial floors: entering the Dungeon (and how: no weapon, no supplies, no pants, alone, with
+  a pet), first sign read, first guild, first damage, first kill, first level, first worn loot, first magic item,
+  first trap, first boss. Several can land at once.
+- Every crawler earns their own. Companions who did the deed get the same achievement and their own box (op
+  achievement `also`). Repeat behavior becomes a running bit the AI escalates (same theme, bigger box).
+- Occasionally add an **Admin Note:** line explaining a mechanic in flat legalese."""),
+    ("D6", "Borant announcements and admin notices", """\
+A different voice from the AI: Borant's announcer, a pleasant corporate manager addressing staff before opening.
+- Opens "Hello, Crawlers!" (or "Welcome, Crawlers, to the [n] floor!"); closes with thanks, "good luck" or "happy
+  crawling", sometimes a chipper "now get out there and kill, kill, kill!"
+- Content: how many crawlers remain, said like a sales figure ("losses are right on projection"); timer news (the
+  floor time, cut to "the minimum legally allowed"); patch notes that fix horrific bugs in a mundane tone; polite
+  warnings that hint at punishment; new programs (sponsors, patrons, fan boxes); rules closed after an exploit that
+  "played well on the recap episode". Never personal; never about one crawler.
+- When: the moment the Dungeon seals (everyone heard it), after each recap episode or daily, at each new floor, at
+  the floor's halfway point. Use system_notice style notice.
+- Admin Notice: one terse line of interface news ("A new tab is available in your interface."), often followed by
+  fine print with a fee or a forfeiture clause.
+- Boss Battle!: a loud arena-announcer card when a boss lair opens; bosses and notable mobs get a short examine
+  card: name, level, type, then a sad little backstory that ends in a dark joke."""),
     ("D4", "People are records", """\
 Every named person who talks with the party or matters to the story gets apply_changes op `npc` in the turn they
 are met: name, role (e.g. "Game Guide"), gender, pronouns, apparent age, what the party saw (description), where they
 are, personality and voice as observed. Update the same record when the party learns more; use `npc_attitude` for
 later shifts. If it is not recorded, the People page and later turns do not know the person exists.
+
+When someone enters the Dungeon with the party they are a crawler: record it with op npc `crawler` true, and
+`in_party` true while they travel and fight with the player character. Crawlers earn their own achievements and boxes.
 
 Decide a person's look the moment they appear: everything someone standing in front of them would take in at once
 (gender, rough age, build, hair, clothing, one distinguishing detail). Never describe a visible person vaguely ("a

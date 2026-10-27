@@ -10,8 +10,9 @@ frontend/dist/
 # campaign sources are separate repositories (include private gm_state/) and personal transcripts
 campaign_sources/
 story history/
-# never commit rulebooks
+# never commit rulebooks or the novels
 *.pdf
+*.epub
 frontend/*.tsbuildinfo
 # API keys for optional providers
 gemini_api_key.txt

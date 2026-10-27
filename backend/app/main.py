@@ -436,6 +436,12 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     def explain_status(cid: int):
         return explaining.get(cid, {"state": "idle"})
 
+    @app.get("/api/campaigns/{cid}/achievements")
+    def achievements_page(cid: int, c=Depends(db)):
+        campaign_or_404(c, cid)
+        from .memory.trophies import page
+        return page(c, cid)
+
     generating: dict[int, dict] = {}  # character id -> job state (memory/generate.py); results go to the records, never here
 
     @app.post("/api/campaigns/{cid}/characters/{char_id}/generate")

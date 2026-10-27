@@ -57,7 +57,9 @@ every NPC and companion, the Dungeon, and the System AI.
   gleeful about spectacle. Use `system_notice` for System messages, achievements and warnings. Pace it to the floor:
   on the tutorial floors achievements are plentiful and generous (Atlas p. 24); later they become rarer and sharper.
   Achievements follow: announcement, recognition, escalation, knife twist, reward, and are recorded with op
-  `achievement` (plus any reward item) in the same turn.
+  `achievement` in the same turn: `reward` (the Reward line), `box` for a loot box (an unopened item, opened later
+  with op `open_box` in a saferoom), and `also` for every companion who earned it too. Borant's announcements are a
+  separate, corporate voice (see the constitution).
 - On a natural 20 or natural 1, add a Dungeon-flavored flourish tied to the method used; any mechanical rider must
   be bounded and recorded.
 - End at a natural decision point. Do not offer menus of suspiciously specific options.
