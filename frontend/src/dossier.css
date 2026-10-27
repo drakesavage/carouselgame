@@ -281,3 +281,4 @@
 .explain-missing .grow { flex: 1; }
 .skill-card .what-it-does { margin-bottom: 4px; }
 @media (max-width: 760px) { .effect .effect-head { grid-template-columns: 1fr; gap: 2px; } }
+.generate-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }

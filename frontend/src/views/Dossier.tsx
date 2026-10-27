@@ -2,7 +2,7 @@ import { KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   Activity, Award, BookOpen, Brain, ChevronDown, ChevronRight, Crosshair, Dumbbell, Footprints, Gauge, Gem, HardHat, Hand, Heart,
-  HeartPulse, History, LayoutGrid, MapPin, MessageCircle, Package, Search, Shield, ShieldCheck, Sparkles, Sword, Swords, Upload, Users,
+  HeartPulse, History, LayoutGrid, Loader2, MapPin, MessageCircle, Package, Search, Shield, ShieldCheck, Sparkles, Sword, Swords, Upload, UserRoundPen, Users,
   Wind, Wrench, X, Zap,
 } from "lucide-react";
 import { api, Life } from "../api";
@@ -37,6 +37,7 @@ type Dossier = {
   skills: Skill[]; signature_skill_ids: number[]; category_labels: Record<string, string>; effects: Effect[];
   equipment: { equipped: Item[]; carried: Item[]; linked_shared: Item[]; commitments: Record<string, any>[]; slot_labels: Record<string, string> };
   story: Record<string, any>; history: HistoryEntry[]; hotlist: unknown[]; explanations_missing?: number;
+  private_sheet: "generated" | "authored" | null;
 };
 
 const TABS = [
@@ -140,11 +141,13 @@ function Hero({ cid, d, onChanged }: { cid: number; d: Dossier; onChanged: () =>
         <div className="chips hero-chips">
           {d.is_player ? <Chip tone="cyan">Player character</Chip> : <Chip tone="cyan">{humanize(d.roster_category ?? d.kind)}</Chip>}
           {d.life.state === "active" && /^active\b/i.test(d.life.label) ? <Chip tone="green">{d.life.label}</Chip> : <LifeChip life={d.life} />}
+          {d.story.identity?.pronouns && <Chip title={[d.story.identity.gender, d.story.identity.apparent_age].filter(Boolean).join(", ")}>{d.story.identity.pronouns}</Chip>}
           {d.group && <Chip title={d.group.activity ?? ""}><Users size={11} /> {d.group.label}</Chip>}
           {d.combat.statuses.map((s) => <StatusChip key={s.id} s={s} />)}
         </div>
         {d.role && <p className="hero-role">{d.role}</p>}
         {d.location && <div className="hero-location"><MapPin size={12} /> {d.location}</div>}
+        {!d.is_player && <GenerateButton cid={cid} d={d} onDone={onChanged} />}
       </div>
       <div className={`hero-vitals ${d.life.state === "deceased" ? "gone" : ""}`}>
         {d.life.note && <div className="vitals-note">{d.life.note}</div>}
@@ -161,6 +164,42 @@ function Hero({ cid, d, onChanged }: { cid: number; d: Dossier; onChanged: () =>
       </div>
       <Dialog.Close className="btn ghost small dossier-close" aria-label="Close dossier"><X size={16} /></Dialog.Close>
     </header>
+  );
+}
+
+/** Flesh out an NPC or companion: look, manner and known background on this page; their private backstory, motives and
+ * secrets go to the GM only (the GM plays them from it, you discover it in play). */
+function GenerateButton({ cid, d, onDone }: { cid: number; d: Dossier; onDone: () => void }) {
+  const [state, setState] = useState<string>("idle");
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { api.generateStatus(cid, d.id).then((s) => setState(s.state === "running" ? "running" : "idle")).catch(() => {}); }, [cid, d.id]);
+  useEffect(() => {
+    if (state !== "running") return;
+    const iv = setInterval(async () => {
+      const s = await api.generateStatus(cid, d.id).catch(() => null);
+      if (!s || s.state === "running") return;
+      setState("idle");
+      if (s.state === "failed") setErr(s.error ?? "Generation failed.");
+      else onDone();
+    }, 2500);
+    return () => clearInterval(iv);
+  }, [state, cid, d.id, onDone]);
+  if (d.private_sheet === "authored") return null;  // a hand-written private sheet is never replaced
+  const again = d.private_sheet === "generated";
+  const go = async () => {
+    if (again && !window.confirm(`Regenerate ${d.name}? What's already on this page stays; the GM's private notes on them are rewritten.`)) return;
+    setErr(null);
+    try { const s = await api.generateCharacter(cid, d.id); setState(s.state); } catch (e) { setErr(String(e instanceof Error ? e.message : e)); }
+  };
+  return (
+    <div className="generate-row">
+      <button className="btn small" disabled={state === "running"} onClick={go}
+        title="Write this person in full: look, personality and the background you'd know here; private backstory, motives and secrets for the GM only">
+        {state === "running" ? <Loader2 size={12} className="spin" /> : <UserRoundPen size={12} />} {state === "running" ? "Writing…" : again ? "Regenerate" : "Generate"}
+      </button>
+      {state === "running" && <span className="sub">about a minute; you can keep playing</span>}
+      {err && <span className="sub" style={{ color: "var(--red)" }}>{err}</span>}
+    </div>
   );
 }
 

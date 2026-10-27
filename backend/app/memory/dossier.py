@@ -236,7 +236,8 @@ def build(conn: sqlite3.Connection, cid: int, char_id: int) -> dict | None:
              "other": {k: v for k, v in narrative.items() if k not in ("current_role", "personality_summary", "traits", "tactical_tendencies", "background")},
              "relationships": c.get("relationships") or [], "profile": c.get("npc_profile"), "quests": mine,
              "appearance": ((sheet.get("visual") or {}).get("reference") or None),
-             "assignment": group, "location": (group or {}).get("location") or c.get("location")}
+             "assignment": group, "location": (group or {}).get("location") or c.get("location"),
+             "identity": sheet.get("identity") if isinstance(sheet.get("identity"), dict) else None}
 
     # history: recorded events and notes only
     history = []
@@ -277,7 +278,10 @@ def build(conn: sqlite3.Connection, cid: int, char_id: int) -> dict | None:
             "skills": skills, "signature_skill_ids": signature_ids, "category_labels": CATEGORY_LABELS,
             "effects": effects, "equipment": {"equipped": equipped, "carried": [i for i in items if not i["equipped"]], "linked_shared": linked,
                                               "commitments": mine, "slot_labels": SLOT_LABELS},
-            "story": story, "history": history, "hotlist": _list(sheet.get("hotlist"))}
+            "story": story, "history": history, "hotlist": _list(sheet.get("hotlist")),
+            # whether Generate has run / is locked by a hand-written private sheet (existence only, never its content)
+            "private_sheet": (lambda s: None if not s else "generated" if s["source"] == "generated" else "authored")(
+                one(conn, "SELECT source FROM gm_secrets WHERE campaign_id = ? AND kind = 'companion_sheet' AND subject = ?", (cid, c["slug"])))}
 
 
 def _history_kind(text: str) -> str:

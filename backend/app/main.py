@@ -436,6 +436,37 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     def explain_status(cid: int):
         return explaining.get(cid, {"state": "idle"})
 
+    generating: dict[int, dict] = {}  # character id -> job state (memory/generate.py); results go to the records, never here
+
+    @app.post("/api/campaigns/{cid}/characters/{char_id}/generate")
+    def generate_character(cid: int, char_id: int, c=Depends(db)):
+        """Flesh out an NPC or companion: player-visible look and manner on their sheet, the rest as a GM-only private sheet."""
+        ch = one(c, "SELECT id, campaign_id FROM characters WHERE campaign_id = ? AND id = ?", (cid, char_id))
+        if not ch:
+            raise HTTPException(404, "character not found")
+        if generating.get(char_id, {}).get("state") == "running":
+            return generating[char_id]
+        generating[char_id] = {"state": "running", "started_at": now_iso()}
+
+        def work():
+            from .memory.generate import generate
+            conn = state.conn()
+            try:
+                out = generate(conn, cid, char_id, settings)
+                generating[char_id] = {"state": "done", "finished_at": now_iso(), "name": out["name"]}
+            except Exception as exc:  # surfaced on the character page
+                traceback.print_exc()
+                generating[char_id] = {"state": "failed", "error": str(exc)[:300]}
+            finally:
+                conn.close()
+
+        threading.Thread(target=work, daemon=True, name=f"generate-{char_id}").start()
+        return generating[char_id]
+
+    @app.get("/api/campaigns/{cid}/characters/{char_id}/generate")
+    def generate_status(cid: int, char_id: int):
+        return generating.get(char_id, {"state": "idle"})
+
     @app.put("/api/campaigns/{cid}/characters/{char_id}/portrait-crop")
     def portrait_crop(cid: int, char_id: int, body: CropIn, c=Depends(db), _=Depends(write_lock)):
         if not one(c, "SELECT id FROM characters WHERE campaign_id = ? AND id = ?", (cid, char_id)):
