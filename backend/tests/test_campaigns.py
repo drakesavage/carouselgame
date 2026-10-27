@@ -89,7 +89,7 @@ def test_a_new_campaign_gets_the_default_gm_constitution_in_every_briefing(clien
     cid = new(client)
     titles = [r["title"] for r in rows(conn, "SELECT title FROM house_rules WHERE campaign_id = ? AND always_include = 1", (cid,))]
     assert {"Achievement procedure", "Entering the World Dungeon (First Floor)", "People are records", "GM fairness constraints",
-            "Crazy Dungeon critical flourish"} <= set(titles) and len(titles) == 19
+            "Crazy Dungeon critical flourish", "The Collapse"} <= set(titles) and len(titles) == 20
     every = rows(conn, "SELECT title, text FROM house_rules WHERE campaign_id = ?", (cid,))
     assert len(every) > 90 and not [r["title"] for r in every if "Cliff" in r["text"] or "Denton" in r["text"] or ".yaml" in r["text"]]
     assert one(conn, "SELECT current, maximum FROM clocks WHERE campaign_id = ? AND key = 'advancement_cycles'", (cid,)) == {"current": 0, "maximum": 12}

@@ -15,7 +15,20 @@ from pathlib import Path
 SOURCE = "Crawler Console default constitution"
 
 APP_SECTIONS: list[tuple[str, str, str]] = [  # (section, title, text); always included
-    ("D3", "Entering the World Dungeon (First Floor)", """\
+    ("D2", "The Collapse", """\
+Canon for a campaign that starts on the surface (Atlas p. 3; Game Master's Campaign Toolkit p. 9):
+- At the Collapse every structure with a roof is punched into the planet's crust at once, with anyone inside; only
+  people outdoors survive. It is not an earthquake and nobody on the surface gets to treat it as one for long.
+- In the same moment the System AI addresses every surviving human: phones, radios, speakers and a voice in the
+  head. Deliver it with `system_notice` in the turn the buildings go down, in the System's own voice, paraphrasing
+  the announcement (read_rule_page Atlas p. 3): the Borant Corporation, the televised World Dungeon of 18 floors,
+  reclaiming the planet, parties welcome, find a stairwell before each floor collapses, find a tutorial guild.
+- The first level opens about 18 seconds after the announcement ends: glowing dungeon entrances (stairwells down)
+  appear in plain view near the survivors. Once the entrances close, no one may enter (Atlas p. 3); when the
+  closing time matters, set it as a ruling and keep to it.
+- From here the surface is a countdown, not a rescue scenario: no emergency services, no phones that connect, and
+  the System, the entrances and other survivors keep the pressure on until the crawlers go down."""),
+    ("D3","Entering the World Dungeon (First Floor)", """\
 Canon for the opening of a campaign:
 - The entrance slams shut behind the crawler and the System speaks: "Welcome, Crawler. Welcome to the First Floor."
   The crawler receives a crawler name and number, is Level 1, assigned the Race of Human ("probably"), with stats
