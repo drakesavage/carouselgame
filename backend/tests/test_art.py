@@ -46,7 +46,7 @@ def test_character_prompt_uses_visual_block_and_skips_negations(conn, demo_id):
                   '"illustration_notes": ["Do not show injuries", "Keep the raincoat bright yellow"]}', c["id"]))
     name, desc = art.subject_text(conn, demo_id, "character", c["id"], None)
     prompt = art.build_prompt("character", desc)
-    assert "patched raincoat" in prompt and "Shopping cart shield" in prompt and "bright yellow" in prompt
+    assert "patched raincoat" in prompt and "shopping cart shield" in prompt.lower() and "bright yellow" in prompt
     assert "Do not show" not in prompt and prompt.endswith(art.STYLE)
 
 
@@ -368,3 +368,23 @@ def test_literal_names_get_no_dont_draw_list(conn, settings, demo_id, monkeypatc
     art.draft_item_looks(conn, settings, demo_id, [iid], overwrite=True)
     assert art.avoid(conn, demo_id, "item", str(iid)) == ""
     assert art._misleads("Porcupine", "Porcupine Pod") and not art._misleads("Hedgehog", "Porcupine Pod") and not art._misleads("", "Arrow")
+
+
+def test_a_portrait_shows_what_the_character_has_equipped_and_armor_lifts_the_no_armor_rule(conn, demo_id):
+    from app.art import service as art
+    from app.db import one, row_to_dict
+    pc = one(conn, "SELECT active_character_id a FROM campaigns WHERE id = ?", (demo_id,))["a"]
+    conn.execute("UPDATE characters SET sheet_json = ? WHERE id = ?",
+                 ('{"visual": {"reference": {"demographic": "human woman", "outfit": "Jeans and a hoodie."}}}', pc))
+    conn.execute("UPDATE items SET equipped = 0 WHERE owner_character_id = ?", (pc,))       # start from street clothes
+    c = row_to_dict(conn.execute("SELECT * FROM characters WHERE id = ?", (pc,)).fetchone())
+    assert "plate armor" in art.character_brief(conn, demo_id, c)["negative"]           # modern clothes: no fantasy armor
+    iid = conn.execute("INSERT INTO items (campaign_id, owner_character_id, name, quantity, equipped, slot) VALUES (?,?,?,?,?,?)",
+                       (demo_id, pc, "Riveted Breastplate", 1, 1, "worn")).lastrowid
+    art.set_appearance(conn, demo_id, "item", str(iid), "A dented steel breastplate lies flat, riveted at the seams.")
+    conn.execute("INSERT INTO items (campaign_id, owner_character_id, name, quantity, equipped) VALUES (?,?,?,?,?)",
+                 (demo_id, pc, "Spare Socks", 3, 0))                                        # not equipped: not drawn
+    brief = art.character_brief(conn, demo_id, c)
+    assert "Riveted Breastplate (dented steel breastplate, riveted at the seams)" in brief["description"]
+    assert "lies flat" not in brief["description"] and "Spare Socks" not in brief["description"]
+    assert "plate armor" not in brief["negative"]

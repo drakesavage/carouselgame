@@ -79,6 +79,26 @@ SHE = re.compile(r"\b(she|her|hers|herself|woman|girl|female|lady)\b", re.I)
 HE = re.compile(r"\b(he|him|his|himself|man|boy|male|guy)\b", re.I)
 
 
+ARMOR = re.compile(r"\b(armor|armour|carapace|plate|mail|cuirass|breastplate|helm|helmet|hard hat|pauldron|gauntlet|harness|vest|shield)\b", re.I)
+
+
+def worn_gear(conn: sqlite3.Connection, cid: int, char_id: int) -> tuple[str, bool]:
+    """What the character is wearing and wielding right now (equipped items), as a picture would show it: each item's
+    own look when one is written (Appearance notes), else its name. Natural armor is the body, already described.
+    Returns (text, wears_armor)."""
+    parts, armored = [], False
+    for i in rows(conn, """SELECT id, name, slot FROM items WHERE campaign_id = ? AND owner_character_id = ? AND equipped = 1
+                           AND COALESCE(quantity, 1) > 0 AND COALESCE(slot, '') != 'natural_armor' ORDER BY id""", (cid, char_id)):
+        look = re.split(r"(?<=[.!?])\s", appearance(conn, cid, "item", str(i["id"])).strip())[0]
+        # item looks are written for a picture of the item on its own ("lies flat", "rests upright"): drop the placement
+        look = re.sub(r",?\s*\b(lies|lie|rests|sits|stands|leans|hangs)\b(\s+(flat|upright|sideways|straight|open|closed|folded))?",
+                      "", look, flags=re.I)
+        look = re.sub(r"^(an?|the)\s+", "", look.strip(), flags=re.I)[:140]
+        parts.append(f"{i['name']} ({look.rstrip('.')})" if look else i["name"])
+        armored = armored or bool(ARMOR.search(i["name"] + " " + look))
+    return ("wearing and carrying: " + ", ".join(parts[:6])) if parts else "", armored
+
+
 def character_brief(conn: sqlite3.Connection, cid: int, c: dict) -> dict:
     """Physical brief for a character portrait, from the record only.
 
@@ -102,8 +122,11 @@ def character_brief(conn: sqlite3.Connection, cid: int, c: dict) -> dict:
             and line.strip(" .").lower() not in (race.lower(), "human")
 
     ref = vis.get("reference") or {}
+    gear, armored = worn_gear(conn, cid, c["id"])
     if ref:
-        return _reference_brief(ref, vis, others)
+        out = _reference_brief(ref, vis, others, armored)
+        out["description"] = "; ".join(x for x in (out["description"], gear) if x)
+        return out
     own_text = json.dumps(vis, ensure_ascii=False) + " " + str(narrative.get("personality_summary") or "") + " " + str(narrative.get("current_role") or "")
     she, he = len(SHE.findall(own_text)), len(HE.findall(own_text))
     if ANIMALS.search(race):
@@ -117,9 +140,9 @@ def character_brief(conn: sqlite3.Connection, cid: int, c: dict) -> dict:
         subject, negative = f"(portrait of a {race.lower() or 'person'}:1.2)", ""
     bits = [_clean(vis.get("summary"))]
     bits += [f for f in _list(vis.get("established_features")) if drawable(f)][:3]
-    gear = _list(vis.get("signature_gear"))
-    if gear:
-        bits.append("carrying " + ", ".join(gear[:3]))
+    # what they actually have equipped now, plus any signature gear (identity pieces) it doesn't already cover
+    sig = [g for g in _list(vis.get("signature_gear")) if str(g).lower() not in gear.lower()]
+    bits += [x for x in (gear, ("carrying " + ", ".join(sig[:3])) if sig else "") if x]
     bits += [n for n in _positive_notes(_list(vis.get("illustration_notes"))) if drawable(n)][:2]
     if not vis:
         bits.append(_clean(narrative.get("current_role")))
@@ -137,7 +160,7 @@ def character_brief(conn: sqlite3.Connection, cid: int, c: dict) -> dict:
 AVOID = re.compile(r"(?:,|—|-|;)?\s*\b(?:rather than|not an?|not the)\s+([^.;,—]+)", re.I)
 
 
-def _reference_brief(ref: dict, vis: dict, others: list[str]) -> dict:
+def _reference_brief(ref: dict, vis: dict, others: list[str], armored: bool = False) -> dict:
     """Brief from an imported visual reference (importer/visual_reference.py): its demographics lead the prompt."""
     demo = _clean(ref.get("demographic"))
     age, size = _clean(ref.get("age")), _clean(ref.get("size"))
@@ -173,7 +196,7 @@ def _reference_brief(ref: dict, vis: dict, others: list[str]) -> dict:
         body = AVOID.sub("", body).strip()
         if body:
             parts.append(label + body)
-    if not animal and not re.search(r"\b(armor|armour|guard|harness|plate|mail)\b", _clean(ref.get("outfit")), re.I):
+    if not animal and not armored and not re.search(r"\b(armor|armour|guard|harness|plate|mail)\b", _clean(ref.get("outfit")), re.I):
         negative += ", (plate armor, pauldrons, shoulder armor, chainmail, metal shoulder guards, breastplate:1.5)"  # modern clothes: keep fantasy armor out
     negative = ", ".join(x for x in [negative, *[a for a in avoid if len(a.split()) >= 2][:4], *[n[:120] for n in negations[:3]]] if x)
     return {"subject": subject, "description": "; ".join(parts), "negative": negative,
