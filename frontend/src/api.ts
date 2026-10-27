@@ -46,7 +46,8 @@ export type Scene = { id: number; title: string; location: string | null; group_
   threats: string | null; participants: string[]; started_game_minutes: number | null };
 export type Group = { key: string; label: string; location: string | null; activity: string | null; members: CharacterCard[] };
 export type DayInfo = { day: number; minutes_into_day: number; minutes_to_reset: number; day_length: number };
-export type FloorClock = { elapsed_minutes: number; deadline_minutes: number | null; remaining_minutes: number | null; remaining_display: string | null };
+export type FloorClock = { elapsed_minutes: number; deadline_minutes: number | null; remaining_minutes: number | null; remaining_display: string | null;
+  pending_minutes?: number | null; pending_display?: string | null };
 export type Clock = { key: string; label: string; kind: string; current: number; maximum: number | null; unit?: string | null };
 export type Campaign = {
   id: number; name: string; is_demo: number; data_source: string; current_floor: number | null; current_location: string | null; safe_room: number;
@@ -158,7 +159,7 @@ export const api = {
   health: () => req<{ provider: string; codex_cli: string | null; rulebook_index: boolean }>("api/health"),
   campaigns: () => req<CampaignListItem[]>("api/campaigns"),
   manageCampaigns: () => req<ManagedCampaign[]>("api/campaigns-manage"),
-  createCampaign: (body: { name: string; crawler: string; race: string | null; class_name: string | null; floor: number; location: string | null; floor_hours: number | null; premise: string | null }) =>
+  createCampaign: (body: { name: string; crawler: string; race: string | null; class_name: string | null; floor: number; location: string | null; floor_hours: number | null; premise: string | null; clock_on_entry: boolean }) =>
     post<{ campaign_id: number }>("api/campaigns", body),
   editCampaign: (id: number, body: { name?: string; archived?: boolean }) => req<{ ok: boolean }>(`api/campaigns/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteCampaign: (id: number, confirmName: string) => post<{ deleted: string; backup: string; pictures_moved: number }>(`api/campaigns/${id}/delete`, { confirm_name: confirmName }),

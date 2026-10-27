@@ -139,3 +139,26 @@ def test_initialize_sheet_sets_a_blank_crawler_once(client, conn):
 def test_the_gm_input_names_no_particular_player():
     from app.gm.providers import render_steps
     assert "Cliff" not in render_steps([{"kind": "player", "text": "hello"}])
+
+
+def test_a_floor_clock_can_wait_until_the_crawler_enters_the_dungeon(client, conn):
+    import pytest
+    from app.db import transaction
+    from app.memory.context import build_context
+    from app.rules.engine import ChangeError, apply_change
+    cid = new(client, floor_hours=120, clock_on_entry=True)
+    fc = client.get(f"/api/campaigns/{cid}").json()["floor_clock"]
+    assert fc["remaining_minutes"] is None and fc["pending_minutes"] == 7200 and fc["pending_display"] == "120h00m"
+    ctx = build_context(conn, cid, "I wait"); text = ctx if isinstance(ctx, str) else getattr(ctx, "text", str(ctx))
+    assert "floor clock NOT STARTED" in text and "start_floor_clock" in text
+    with transaction(conn):
+        apply_change(conn, cid, None, {"op": "advance_time", "minutes": 45, "reason": "tailgating before the collapse"})
+        out = apply_change(conn, cid, None, {"op": "start_floor_clock", "elapsed_minutes": 5, "reason": "Donut Jr steps through the entrance"})
+    assert out["remaining_minutes"] == 7195
+    fc = client.get(f"/api/campaigns/{cid}").json()["floor_clock"]
+    assert fc["remaining_minutes"] == 7195 and fc["pending_minutes"] is None
+    with transaction(conn):
+        with pytest.raises(ChangeError):
+            apply_change(conn, cid, None, {"op": "start_floor_clock", "reason": "twice"})
+    running = new(client, name="Running Clock", floor_hours=120)
+    assert client.get(f"/api/campaigns/{running}").json()["floor_clock"]["remaining_minutes"] == 7200

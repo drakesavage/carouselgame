@@ -20,8 +20,10 @@ def floor_clock(camp: dict) -> dict:
     deadline = camp["floor_deadline_minutes"]
     elapsed = camp["game_time_minutes"]
     remaining = None if deadline is None else max(0, deadline - elapsed)
+    pending = camp.get("floor_clock_pending_minutes") if deadline is None else None  # waiting to start on entry
     return {"elapsed_minutes": elapsed, "deadline_minutes": deadline, "remaining_minutes": remaining,
-            "remaining_display": None if remaining is None else f"{remaining // 60}h{remaining % 60:02d}m"}
+            "remaining_display": None if remaining is None else f"{remaining // 60}h{remaining % 60:02d}m",
+            "pending_minutes": pending, "pending_display": None if pending is None else f"{pending // 60}h{pending % 60:02d}m"}
 
 
 def _statuses(conn: sqlite3.Connection, char_id: int) -> list[dict]:
@@ -61,7 +63,7 @@ def list_campaigns(conn: sqlite3.Connection) -> list[dict]:
 
 def campaign_summary(conn: sqlite3.Connection, cid: int) -> dict | None:
     camp = one(conn, """SELECT id, name, is_demo, data_source, current_floor, current_location, safe_room, game_time_minutes,
-                               floor_deadline_minutes, active_character_id, active_objective, objective_quests_json, updated_at
+                               floor_deadline_minutes, floor_clock_pending_minutes, active_character_id, active_objective, objective_quests_json, updated_at
                         FROM campaigns WHERE id = ?""", (cid,))
     if not camp:
         return None

@@ -86,18 +86,18 @@ export function CampaignsPanel({ cid, onCampaign }: { cid: number; onCampaign: (
 }
 
 function NewCampaign({ open, onClose, onMade }: { open: boolean; onClose: () => void; onMade: (id: number) => void }) {
-  const blank = { name: "", crawler: "", race: "", class_name: "", floor: "1", location: "", floor_hours: "120", premise: "" };  // Floor 1: 5 days (Toolkit p. 19)
+  const blank = { name: "", crawler: "", race: "", class_name: "", floor: "1", location: "", floor_hours: "120", premise: "", clock_on_entry: true };  // Floor 1: 5 days (Toolkit p. 19)
   const [f, setF] = useState(blank);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => { if (open) { setF(blank); setErr(null); } }, [open]);  // eslint-disable-line react-hooks/exhaustive-deps
-  const set = (k: keyof typeof blank) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
+  const set = (k: Exclude<keyof typeof blank, "clock_on_entry">) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const submit = async () => {
     setBusy(true); setErr(null);
     try {
       const r = await api.createCampaign({
         name: f.name.trim(), crawler: f.crawler.trim(), race: f.race.trim() || null, class_name: f.class_name.trim() || null,
-        floor: Number(f.floor) || 1, location: f.location.trim() || null, floor_hours: f.floor_hours ? Number(f.floor_hours) : null, premise: f.premise.trim() || null,
+        floor: Number(f.floor) || 1, location: f.location.trim() || null, floor_hours: f.floor_hours ? Number(f.floor_hours) : null, premise: f.premise.trim() || null, clock_on_entry: f.clock_on_entry,
       });
       onMade(r.campaign_id);
     } catch (e) { setErr(String(e instanceof Error ? e.message : e)); } finally { setBusy(false); }
@@ -119,6 +119,10 @@ function NewCampaign({ open, onClose, onMade }: { open: boolean; onClose: () => 
               <label>Starting floor<input className="input" type="number" min={1} max={18} value={f.floor} onChange={set("floor")} /></label>
               <label>Floor collapses in <span className="sub">(hours; Floor 1 is 5 days)</span><input className="input" type="number" min={1} value={f.floor_hours} onChange={set("floor_hours")} /></label>
             </div>
+            <label className="row" style={{ gap: 8, display: "flex" }}>
+              <input type="checkbox" checked={f.clock_on_entry} onChange={(e) => setF({ ...f, clock_on_entry: e.target.checked })} />
+              <span>Start the floor clock when I enter the Dungeon <span className="sub">(otherwise it runs from the first turn)</span></span>
+            </label>
             <label>Starting location <span className="sub">(optional)</span><input className="input" maxLength={120} value={f.location} onChange={set("location")} /></label>
             <label>Premise <span className="sub">(optional: what the GM should know going in; the party knows it too)</span>
               <textarea className="input" rows={3} maxLength={2000} value={f.premise} onChange={set("premise")} /></label>

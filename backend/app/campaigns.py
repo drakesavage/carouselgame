@@ -38,7 +38,9 @@ def summary(conn: sqlite3.Connection) -> list[dict]:
 
 
 def create(conn: sqlite3.Connection, *, name: str, crawler: str, race: str | None = None, class_name: str | None = None,
-           floor: int = 1, location: str | None = None, floor_hours: int | None = None, premise: str | None = None) -> int:
+           floor: int = 1, location: str | None = None, floor_hours: int | None = None, premise: str | None = None,
+           clock_on_entry: bool = False) -> int:
+    """clock_on_entry: the floor clock waits (floor_clock_pending_minutes) until the GM starts it as the crawler enters the Dungeon."""
     name, crawler = name.strip(), crawler.strip()
     if not name or not crawler:
         raise ValueError("a campaign name and a crawler name are required")
@@ -49,8 +51,9 @@ def create(conn: sqlite3.Connection, *, name: str, crawler: str, race: str | Non
         cid = next_campaign_id(conn)
         conn.execute(
             """INSERT INTO campaigns (id, name, is_demo, data_source, current_floor, current_location, safe_room, game_time_minutes,
-                                      floor_deadline_minutes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (cid, name, 0, "manual", floor, (location or "").strip() or None, 0, 0, floor_hours * 60 if floor_hours else None, t, t))
+                                      floor_deadline_minutes, floor_clock_pending_minutes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (cid, name, 0, "manual", floor, (location or "").strip() or None, 0, 0,
+             floor_hours * 60 if floor_hours and not clock_on_entry else None, floor_hours * 60 if floor_hours and clock_on_entry else None, t, t))
         pc = conn.execute(
             """INSERT INTO characters (campaign_id, slug, name, kind, roster_category, species, race, class_name, level, status, in_party,
                                        party_order, ai_favor, stats_json, derived_json, sheet_json, bio, provenance)

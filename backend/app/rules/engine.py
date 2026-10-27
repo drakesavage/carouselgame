@@ -199,6 +199,13 @@ class InitializeSheet(BaseModel):
     source: str = Field(min_length=3, max_length=200)                # book and page, or the rolls this came from
 
 
+class StartFloorClock(BaseModel):
+    """A floor clock set to wait (new campaign option) starts when the player character enters the Dungeon."""
+    op: Literal["start_floor_clock"]
+    elapsed_minutes: int = Field(default=0, ge=0, le=600)   # minutes since the entry, when it happened earlier this turn
+    reason: str = Field(min_length=3, max_length=200)
+
+
 class SetQuantity(BaseModel):
     op: Literal["set_quantity"]
     item_id: int | None = None   # stable id (preferred over name when known)
@@ -674,6 +681,22 @@ def _apply_initialize_sheet(ctx: Ctx, op: InitializeSheet) -> dict:
     return {"summary": summary}
 
 
+def _apply_start_floor_clock(ctx: Ctx, op: StartFloorClock) -> dict:
+    camp = one(ctx.conn, "SELECT game_time_minutes, floor_deadline_minutes, floor_clock_pending_minutes FROM campaigns WHERE id = ?", (ctx.campaign_id,))
+    if camp["floor_deadline_minutes"] is not None:
+        raise ChangeError("the floor clock is already running")
+    pending = camp["floor_clock_pending_minutes"]
+    if not pending:
+        raise ChangeError("this campaign has no floor clock waiting to start")
+    deadline = camp["game_time_minutes"] - op.elapsed_minutes + pending
+    ctx.conn.execute("UPDATE campaigns SET floor_deadline_minutes = ?, floor_clock_pending_minutes = NULL, updated_at = ? WHERE id = ?",
+                     (deadline, now_iso(), ctx.campaign_id))
+    left = deadline - camp["game_time_minutes"]
+    summary = f"The floor clock starts: {left // 60}h{left % 60:02d}m until collapse — {op.reason}"
+    ctx.event("floor_clock_started", summary, {"deadline": deadline, "length": pending, "elapsed": op.elapsed_minutes})
+    return {"summary": summary, "remaining_minutes": left}
+
+
 def _apply_set_quantity(ctx: Ctx, op: SetQuantity) -> dict:
     owner = resolve_character(ctx.conn, ctx.campaign_id, op.character, allow_shared=True)
     item = _item_by_id(ctx, op.item_id, owner) if op.item_id else _find_item(ctx.conn, ctx.campaign_id, owner["id"] if owner else None, op.name)
@@ -736,6 +759,7 @@ CHANGE_OPS: dict[str, tuple[type[BaseModel], Callable[[Ctx, Any], dict]]] = {
     "allocate_stats": (AllocateStats, _apply_allocate_stats),
     "initialize_sheet": (InitializeSheet, _apply_initialize_sheet),
     "npc": (NpcUpsert, _apply_npc),
+    "start_floor_clock": (StartFloorClock, _apply_start_floor_clock),
     "clock": (ClockChange, _apply_clock),
 }
 

@@ -133,6 +133,7 @@ class CampaignIn(BaseModel):
     floor: int = Field(default=1, ge=1, le=18)
     location: str | None = Field(default=None, max_length=120)
     floor_hours: int | None = Field(default=None, ge=1, le=2000)
+    clock_on_entry: bool = False  # the floor clock waits until the crawler enters the Dungeon
     premise: str | None = Field(default=None, max_length=2000)
 
 

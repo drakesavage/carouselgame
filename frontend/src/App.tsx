@@ -127,7 +127,8 @@ export default function App() {
           {campaign && (
             <>
               {campaign.is_demo ? <span className="demo-ribbon">DEMO DATA</span> : null}
-              <Chip tone="amber" title="Floor collapse (game time)">F{campaign.current_floor ?? "?"} · {fmtMinutes(campaign.floor_clock.remaining_minutes)}</Chip>
+              <Chip tone="amber" title={campaign.floor_clock.pending_minutes != null ? `Floor clock waits: ${campaign.floor_clock.pending_display} once you enter the Dungeon` : "Floor collapse (game time)"}>
+                F{campaign.current_floor ?? "?"} · {campaign.floor_clock.pending_minutes != null ? "clock waiting" : fmtMinutes(campaign.floor_clock.remaining_minutes)}</Chip>
             </>
           )}
           <Chip tone={provider === "codex" ? "cyan" : "amber"} title="Runtime GM provider (change in Saves & Settings)">GM: {provider || "…"}</Chip>

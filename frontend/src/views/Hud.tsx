@@ -431,7 +431,8 @@ export function CampaignSidebar({ campaign, onArt, openQuest, openCharacter }: {
     <>
       <Panel title={`Floor ${campaign.current_floor ?? "?"}`} accent={<span className={`safety ${safe ? "safe" : "exposed"}`}>{safe ? "saferoom" : "exposed"}</span>} className="floor-panel">
         <div className="sub">Collapse in</div>
-        <div className={`countdown ${tone}`}>{fc.remaining_minutes != null ? fmtMinutes(fc.remaining_minutes) : "unknown"}</div>
+        <div className={`countdown ${tone}`}>{fc.remaining_minutes != null ? fmtMinutes(fc.remaining_minutes) : fc.pending_minutes != null ? fc.pending_display : "unknown"}</div>
+        {fc.pending_minutes != null && <div className="sub">starts when you enter the Dungeon</div>}
         <div className="sub"><Sun size={11} /> Day {campaign.day.day} · daily reset in {fmtMinutes(campaign.day.minutes_to_reset)}</div>
         {!safe && campaign.safe_room ? <div className="sub" style={{ color: "var(--amber)" }} title={`Campaign record: ${campaign.current_location}`}>The record still says saferoom; the scene is elsewhere.</div> : null}
         {adv && (

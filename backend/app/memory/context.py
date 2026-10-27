@@ -197,7 +197,9 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
              f"{' [SAFEROOM]' if camp['safe_room'] else ' [NOT a saferoom]'}",
              f"Game time: {now} min elapsed on this floor; dungeon day {d['day']} ({d['minutes_into_day'] // 60}h{d['minutes_into_day'] % 60:02d}m in, "
              f"daily reset in {d['minutes_to_reset'] // 60}h{d['minutes_to_reset'] % 60:02d}m); "
-             + (f"FLOOR COLLAPSE in {clock['remaining_display']} ({clock['remaining_minutes']} min)" if clock["remaining_minutes"] is not None else "floor clock unknown")]
+             + (f"FLOOR COLLAPSE in {clock['remaining_display']} ({clock['remaining_minutes']} min)" if clock["remaining_minutes"] is not None
+                else f"floor clock NOT STARTED ({clock['pending_display']} once it starts): start it with apply_changes op start_floor_clock "
+                     "the moment the player character enters the Dungeon" if clock["pending_minutes"] is not None else "floor clock unknown")]
     if scene and scene.get("location") and camp["current_location"] and             scene["location"].split(",")[0].split(" — ")[0].strip().lower() != camp["current_location"].split(",")[0].split(" — ")[0].strip().lower():
         ident.append(f"NOTE: the campaign record places the party at {camp['current_location']}"
                      f"{' (saferoom)' if camp['safe_room'] else ''}, but the current scene is at {scene['location']}. Records disagree: do not assume "

@@ -23,6 +23,8 @@ Canon for the opening of a campaign:
   System sequence, not narration.
 - The First Floor collapses 5 days after the Dungeon opens; crawlers get no Gold on it; stairwells can be entered
   any time; Bosses stay in their chambers (Game Master's Campaign Toolkit p. 19). Keep the floor clock running.
+  If the briefing says the floor clock is NOT STARTED, start it with apply_changes op `start_floor_clock` in the turn
+  the player character enters the Dungeon (elapsed_minutes for any time already spent inside), and announce it.
 - Tutorial Guilds are seeded throughout Floors 1-2 and must be found in the halls (Core p. 17; Atlas p. 14;
   Toolkit p. 11). Do not put one at the foot of the entrance stairs: the halls, the dark and the first Mobs come
   first ("neighborhood trouble", Toolkit p. 8).
