@@ -162,3 +162,20 @@ def test_a_floor_clock_can_wait_until_the_crawler_enters_the_dungeon(client, con
             apply_change(conn, cid, None, {"op": "start_floor_clock", "reason": "twice"})
     running = new(client, name="Running Clock", floor_hours=120)
     assert client.get(f"/api/campaigns/{running}").json()["floor_clock"]["remaining_minutes"] == 7200
+
+
+def test_an_npc_carries_gender_and_pronouns_and_the_gm_is_told_when_they_are_missing(client, conn):
+    from app.db import transaction
+    from app.memory.context import build_context
+    from app.rules.engine import apply_change
+    cid = new(client, location="Paintball course")
+    with transaction(conn):
+        apply_change(conn, cid, None, {"op": "npc", "name": "Jamie Cole", "location": "Paintball course", "description": "Pinned by the fence."})
+    ctx = build_context(conn, cid, "I help Jamie up"); text = ctx if isinstance(ctx, str) else getattr(ctx, "text", str(ctx))
+    assert "gender and pronouns NOT RECORDED" in text
+    with transaction(conn):
+        apply_change(conn, cid, None, {"op": "npc", "name": "Jamie Cole", "gender": "woman", "pronouns": "she/her", "apparent_age": "early 30s"})
+    ctx = build_context(conn, cid, "I help Jamie up"); text = ctx if isinstance(ctx, str) else getattr(ctx, "text", str(ctx))
+    assert "pronouns she/her" in text and "NOT RECORDED" not in text
+    jamie = [p for p in client.get(f"/api/campaigns/{cid}/npcs").json() if p["name"] == "Jamie Cole"][0]
+    assert jamie["identity"] == {"gender": "woman", "pronouns": "she/her", "apparent_age": "early 30s"}

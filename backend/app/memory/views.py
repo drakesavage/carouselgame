@@ -154,6 +154,7 @@ def npcs(conn: sqlite3.Connection, cid: int) -> list[dict]:
         sheet = p.pop("sheet", None) or {}
         narrative = sheet.get("narrative") if isinstance(sheet.get("narrative"), dict) else {}
         p["life"] = life_state(p)
+        p["identity"] = sheet.get("identity") if isinstance(sheet.get("identity"), dict) else None
         # allegiance from the record: clan membership first, then the stated relationship, else the roster role (shown by the client)
         clan = sheet.get("clan_member")
         p["allegiance"] = (f"Denton clan{' (' + str(sheet['clan_role']) + ')' if sheet.get('clan_role') else ''}" if clan is True

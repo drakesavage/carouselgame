@@ -85,6 +85,7 @@ function PersonCard({ p, here, pcName, openCharacter, openQuest }: { p: Person; 
           <div className="person-name">{p.name}<span className={`role ${tone}`}>{label}</span></div>
           <div className="chips">
             <LifeChip life={p.life} />
+            {p.identity?.pronouns && <Chip title={[p.identity.gender, p.identity.apparent_age].filter(Boolean).join(", ") || undefined}>{p.identity.pronouns}</Chip>}
             {p.allegiance && <Chip>{p.allegiance}</Chip>}
             {here && !gone && <Chip tone="cyan">with {pcName ?? "you"}</Chip>}
           </div>

@@ -33,9 +33,14 @@ Canon for the opening of a campaign:
 - Following a Game Guide's advice usually grants 1 AI Favor if the crawler has none (Toolkit p. 11)."""),
     ("D4", "People are records", """\
 Every named person who talks with the party or matters to the story gets apply_changes op `npc` in the turn they
-are met: name, role (e.g. "Game Guide"), what the party saw (description), where they are, personality and voice
-as observed. Update the same record when the party learns more; use `npc_attitude` for later shifts. If it is not
-recorded, the People page and later turns do not know the person exists."""),
+are met: name, role (e.g. "Game Guide"), gender, pronouns, apparent age, what the party saw (description), where they
+are, personality and voice as observed. Update the same record when the party learns more; use `npc_attitude` for
+later shifts. If it is not recorded, the People page and later turns do not know the person exists.
+
+Decide a person's look the moment they appear: everything someone standing in front of them would take in at once
+(gender, rough age, build, hair, clothing, one distinguishing detail). Never describe a visible person vaguely ("a
+dust-coated adult") or default to "they" to avoid choosing; use the recorded pronouns, which may of course be
+they/them when that is who the person is."""),
 ]
 
 

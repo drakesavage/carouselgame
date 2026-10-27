@@ -177,6 +177,9 @@ class NpcUpsert(BaseModel):
     role: str | None = Field(default=None, max_length=120)          # what they are to the party, e.g. "Game Guide"
     category: Literal["allied_npcs", "neutral_npcs", "hostile_npcs", "contacts", "dungeon_staff"] | None = None
     race: str | None = Field(default=None, max_length=60)
+    gender: str | None = Field(default=None, max_length=40)          # decided when they are introduced, as anyone looking at them would see
+    pronouns: str | None = Field(default=None, max_length=30)        # used in narration, e.g. "she/her"
+    apparent_age: str | None = Field(default=None, max_length=40)    # e.g. "mid-40s"
     description: str | None = Field(default=None, max_length=600)   # appearance and manner as the party saw them
     location: str | None = Field(default=None, max_length=160)
     personality: str | None = Field(default=None, max_length=300)
@@ -632,6 +635,9 @@ def _apply_npc(ctx: Ctx, op: NpcUpsert) -> dict:
         while one(ctx.conn, "SELECT id FROM characters WHERE campaign_id = ? AND slug = ?", (ctx.campaign_id, slug)):
             slug, n = f"{base}-{n}", n + 1
         sheet = {"narrative": {"current_role": op.role}} if op.role else {}
+        ident = {k: v for k, v in (("gender", op.gender), ("pronouns", op.pronouns), ("apparent_age", op.apparent_age)) if v}
+        if ident:
+            sheet["identity"] = ident
         cid = ctx.conn.execute(
             """INSERT INTO characters (campaign_id, slug, name, kind, roster_category, race, species, status, location, in_party, bio, sheet_json, provenance)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -643,9 +649,13 @@ def _apply_npc(ctx: Ctx, op: NpcUpsert) -> dict:
         ctx.event("npc_met", summary, {"character_id": cid, "role": op.role})
         return {"summary": summary, "character_id": cid}
     sets = {k: v for k, v in {"roster_category": op.category, "race": op.race, "location": op.location, "bio": op.description}.items() if v is not None}
-    if op.role:
+    ident = {k: v for k, v in (("gender", op.gender), ("pronouns", op.pronouns), ("apparent_age", op.apparent_age)) if v}
+    if op.role or ident:
         sheet = c.get("sheet") or {}
-        sheet.setdefault("narrative", {})["current_role"] = op.role
+        if op.role:
+            sheet.setdefault("narrative", {})["current_role"] = op.role
+        if ident:
+            sheet.setdefault("identity", {}).update(ident)
         sets["sheet_json"] = json.dumps(sheet)
     if sets:
         ctx.conn.execute(f"UPDATE characters SET {', '.join(f'{k} = ?' for k in sets)} WHERE id = ?", (*sets.values(), c["id"]))

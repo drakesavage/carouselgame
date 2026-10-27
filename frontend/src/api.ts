@@ -15,6 +15,7 @@ export type CharacterCard = {
 export type Life = { state: "active" | "deceased" | "missing" | "retired" | "contact"; label: string; note: string | null };
 export type Person = CharacterCard & {
   life: Life; allegiance: string | null; relationship_notes: string[]; where: string | null;
+  identity?: { gender?: string; pronouns?: string; apparent_age?: string } | null;
   group: { label: string; location: string | null; activity: string | null } | null;
   commitments: { id: number; kind: string; title: string }[];
   last_interaction: { text: string; game_time_minutes: number | null; source: "memory" | "event" | "profile" } | null;

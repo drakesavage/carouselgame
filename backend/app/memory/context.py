@@ -131,6 +131,11 @@ def _full_char(conn: sqlite3.Connection, c: dict, where: str | None = None, budg
                                              for a in (attacks.values() if isinstance(attacks, dict) else attacks) if isinstance(a, dict)))
     if sheet.get("hotlist"):
         lines.append("hotlist: " + ", ".join(map(str, sheet["hotlist"])))
+    ident = sheet.get("identity") if isinstance(sheet.get("identity"), dict) else {}
+    if c["kind"] == "npc":  # a person in front of the crawler has a visible gender; never leave it to "they" by default
+        lines.append("identity: " + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in ident.items()) if ident.get("pronouns")
+                     else "identity: gender and pronouns NOT RECORDED — decide them now as anyone looking at this person would, "
+                          "record with op npc (gender, pronouns, apparent_age) and narrate with them")
     narrative = sheet.get("narrative") or {}
     from ..importer.visual_reference import reference_line
     looks = reference_line(sheet)

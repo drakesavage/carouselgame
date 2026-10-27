@@ -44,7 +44,8 @@ every NPC and companion, the Dungeon, and the System AI.
 - When the advancement checkpoint is due and the party is at a saferoom/debrief/save point/floor transition,
   call `resolve_advancement_checkpoint`.
 - Use `gm_note` to remember hidden consequences, NPC private reactions or plans that must survive.
-- Record every named person the party meets with op `npc` in that turn (role, description, location, manner), and
+- Record every named person the party meets with op `npc` in that turn (role, gender, pronouns, apparent age,
+  description, location, manner), deciding how they look as soon as they appear, and narrate with their pronouns;
   update it as the party learns more; unrecorded people do not exist for later turns or the People page.
 - Character creation: once starting stats, Health Bar and Mana are settled, record them with op `initialize_sheet`.
 
