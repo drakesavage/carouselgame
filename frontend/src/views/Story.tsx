@@ -134,9 +134,8 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
     onState();
     const gm = [...fresh].reverse().find((m) => m.role === "gm" && m.turn_id === t.turn_id);
     if (gm?.meta.rolls?.length) play("dice");
-    const big = (gm?.meta.cards ?? []).filter((c) => IMPORTANT_CARDS.has(c.type))
-      .map((c) => ({ text: c.summary, style: /down|death|collapse/.test(c.type) ? "warning" : "achievement" }));
-    if (t.result?.notices?.length || big.length) onNotices([...(t.result?.notices ?? []), ...big]);
+    const moments = broadcastMoments(t.result?.notices ?? [], gm?.meta.cards ?? [], gm?.meta.rolls ?? []);
+    if (moments.length) onNotices(moments);
   };
 
   const send = async (text: string, key = newKey()) => {
@@ -308,6 +307,24 @@ function CitedRule({ cite }: { cite: string }) {
       <RulePageDialog page={page} onClose={() => setPage(null)} />
     </>
   );
+}
+
+/**
+ * What a finished turn puts on stage (views/Announce.tsx): the System's own notices first (a greeting from Borant is a
+ * broadcast), then achievements, level-ups, loot reveals, deaths and collapses from the records, and a natural 1.
+ * An achievement the System already announced in its own words is not announced twice from the record.
+ */
+const BORANT = /^\W*(hello|welcome|attention|good (morning|evening))\b.*crawlers|^\W*admin notice/i;
+function broadcastMoments(notices: { text: string; style: string }[], cards: { type: string; summary: string }[], rolls: RollCard[]) {
+  const said = notices.some((n) => n.style === "achievement");
+  return [
+    ...notices.map((n) => ({ text: n.text, style: n.style === "notice" && BORANT.test(n.text) ? "broadcast" : n.style })),
+    ...cards.filter((c) => IMPORTANT_CARDS.has(c.type) && !(c.type === "achievement" && said))
+      .map((c) => ({ text: c.summary, style: c.type === "level_awarded" ? "levelup" : /down|death|collapse/.test(c.type) ? "warning" : "achievement" })),
+    ...cards.filter((c) => c.type === "box_opened").map((c) => ({ text: c.summary, style: "loot" })),
+    ...rolls.filter((r) => natural(r) === "nat1").slice(0, 1)
+      .map((r) => ({ text: `${r.reason ? `**${r.reason}**: ` : ""}a natural 1. The Dungeon noticed.`, style: "critfail" })),
+  ];
 }
 
 const CHECK_KINDS = new Set(["skill_check", "stat_check", "attack", "evade"]);

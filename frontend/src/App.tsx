@@ -9,7 +9,7 @@ import { CharactersView } from "./views/Journals";
 import { ChronicleView, QuestsView } from "./views/Journal";
 import { SearchDialog } from "./views/Search";
 import { WorldView } from "./views/World";
-import { Announcement, AnnouncementStage } from "./views/Announce";
+import { Announcement, AnnouncementStage, THEATRICAL } from "./views/Announce";
 import { applyMotion, getPrefs, play } from "./prefs";
 import { InventoryView } from "./views/Inventory";
 import { PeopleView } from "./views/People";
@@ -89,7 +89,7 @@ export default function App() {
     // device preference: theatrical announcements for the big moments, toasts for the rest; or toasts only; or none
     const mode = getPrefs().announcements;
     if (mode === "off") return;
-    const big = mode === "theatrical" ? n.filter((x) => x.style === "achievement" || x.style === "warning") : [];
+    const big = mode === "theatrical" ? n.filter((x) => THEATRICAL.has(x.style)) : [];
     if (big.length) setAnnouncing((q) => [...q, ...big.map((x, i) => ({ ...x, id: Date.now() + 100 + i }))]);
     n = n.filter((x) => !big.includes(x));
     if (n.length) play("notice");
