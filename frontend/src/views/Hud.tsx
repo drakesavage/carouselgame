@@ -263,7 +263,7 @@ function Tile({ c, pc, openCharacter }: { c: CharacterCard; pc: boolean; openCha
   return (
     <div className={`tile ${pc ? "pc" : ""} ${open ? "open" : ""}`}>
       <button className="tile-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        <Portrait name={c.name} src={portraitSrc(c, m)} crop={c.portrait_crop} size={40} />
+        <Portrait name={c.name} src={portraitSrc(c, m)} crop={c.portrait_crop} size={pc ? 64 : 52} />
         <div className="tile-main">
           <div className="row" style={{ gap: 6 }}>
             <span className="pname grow" title={c.name}>{c.name.split(" ")[0]}</span>

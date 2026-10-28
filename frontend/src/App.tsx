@@ -107,14 +107,24 @@ export default function App() {
     setToasts((all) => all.filter((x) => x.id !== id));
   };
 
+  // atmosphere: the whole HUD reads the situation (theme-dcc.css): warm in a saferoom, cold while exploring, red in a
+  // fight, and more urgent as the floor runs out of time. Only CSS listens to these; nothing else changes.
+  const mood = !campaign ? "explore" : campaign.encounter ? "combat" : campaign.safe_room ? "safe" : "explore";
+  const left = campaign?.floor_clock.remaining_minutes;
+  const urgency = left == null ? "calm" : left < 6 * 60 ? "critical" : left < 24 * 60 ? "warn" : "calm";
+  useEffect(() => {
+    document.documentElement.dataset.mood = mood;
+    document.documentElement.dataset.urgency = urgency;
+  }, [mood, urgency]);
+
   if (error) return <div className="view"><div className="error-box">Could not reach the Crawler Console server: {error}</div></div>;
   return (
     <ManifestContext.Provider value={manifest}>
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <svg className="brand-mark" viewBox="0 0 32 32"><path d="M16 3 28 10v12L16 29 4 22V10z" fill="none" stroke="#3ef0c8" strokeWidth="1.8" /><path d="M16 9 22 12.5v7L16 23l-6-3.5v-7z" fill="rgba(62,240,200,.15)" stroke="#3ef0c8" strokeWidth="1" /><circle cx="16" cy="16" r="2.6" fill="#ff3d7f" /></svg>
-          <div>CRAWLER CONSOLE<small>DUNGEON HUD // v0.1</small></div>
+          <span className="brand-show">Dungeon Crawler World</span>
+          <span className="brand-word">Crawler Console</span>
         </div>
         <nav className="nav" aria-label="Views">
           {/* icon-only at narrower widths: the label stays the accessible name and shows as a tooltip on hover or focus */}
@@ -134,6 +144,7 @@ export default function App() {
             </>
           )}
           <Chip tone={provider === "codex" ? "cyan" : "amber"} title="Runtime GM provider (change in Saves & Settings)">GM: {provider || "…"}</Chip>
+          <span className="live-bug" title="The Syndicate is watching. Every second of it."><i aria-hidden /> Live</span>
           {campaigns && campaigns.length > 0 && (
             <select className="select" value={cid ?? ""} aria-label="Campaign" onChange={(e) => {
               if (e.target.value === "manage") { setTab("settings"); setTimeout(() => document.getElementById("campaigns")?.scrollIntoView({ block: "start" }), 50); return; }

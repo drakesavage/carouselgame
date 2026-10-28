@@ -5,18 +5,18 @@
 .world .tabs button.active { color: var(--cyan); box-shadow: inset 0 -2px 0 var(--cyan); }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--muted); margin-bottom: 12px; }
 .legend span { display: inline-flex; gap: 5px; align-items: center; }
-.dot.here { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 0 3px rgba(62, 240, 200, 0.25);
+.dot.here { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 0 3px rgba(var(--cyan-rgb), 0.25);
   margin-right: 6px; animation: here-pulse 2s ease-in-out infinite; }
-@keyframes here-pulse { 50% { box-shadow: 0 0 0 6px rgba(62, 240, 200, 0.08); } }
+@keyframes here-pulse { 50% { box-shadow: 0 0 0 6px rgba(var(--cyan-rgb), 0.08); } }
 
 .regions { display: grid; gap: 12px; }
 .place { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
-.place.region { padding: 10px; background: linear-gradient(135deg, rgba(62, 240, 200, 0.03), transparent 60%), var(--panel); }
+.place.region { padding: 10px; background: linear-gradient(135deg, rgba(var(--cyan-rgb), 0.03), transparent 60%), var(--panel); }
 .place.region.depth-1 { background: rgba(255, 255, 255, 0.015); }
 .place.spot { padding: 8px 10px; }
-.place.current { border-color: var(--cyan); box-shadow: 0 0 0 1px rgba(62, 240, 200, 0.25), 0 0 24px rgba(62, 240, 200, 0.08); }
+.place.current { border-color: var(--cyan); box-shadow: 0 0 0 1px rgba(var(--cyan-rgb), 0.25), 0 0 24px rgba(var(--cyan-rgb), 0.08); }
 .place.safe { border-left: 3px solid var(--hp); }
-.place.unvisited { border-style: dashed; border-color: rgba(255, 181, 71, 0.45); background: repeating-linear-gradient(135deg, rgba(255, 181, 71, 0.03) 0 8px, transparent 8px 16px), var(--panel); }
+.place.unvisited { border-style: dashed; border-color: rgba(var(--amber-rgb), 0.45); background: repeating-linear-gradient(135deg, rgba(var(--amber-rgb), 0.03) 0 8px, transparent 8px 16px), var(--panel); }
 .place-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; }
 .place-art { width: 72px; height: 48px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line-2); }
 .place.region > .place-head .place-art { width: 120px; height: 68px; }

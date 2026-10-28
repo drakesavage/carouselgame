@@ -3,12 +3,12 @@
 .people-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 14px 0 4px; }
 .people-search { display: flex; align-items: center; gap: 6px; flex: 1 1 240px; max-width: 420px; padding: 6px 10px; border: 1px solid var(--line-2);
   border-radius: var(--radius); background: var(--panel); color: var(--muted); }
-.people-search:focus-within { border-color: rgba(62, 240, 200, 0.5); }
+.people-search:focus-within { border-color: rgba(var(--cyan-rgb), 0.5); }
 .people-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 13.5px; }
 .seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line-2); border-radius: var(--radius); overflow: hidden; }
 .seg button { background: none; border: 0; border-right: 1px solid var(--line-2); padding: 5px 10px; font: inherit; font-size: 12.5px; color: var(--text-2); cursor: pointer; }
 .seg button:last-child { border-right: 0; }
-.seg button.active { background: rgba(62, 240, 200, 0.1); color: var(--cyan); }
+.seg button.active { background: rgba(var(--cyan-rgb), 0.1); color: var(--cyan); }
 .seg button:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
 
 .people-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); align-items: start; }

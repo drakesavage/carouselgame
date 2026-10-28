@@ -9,14 +9,14 @@
 .gold-history { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 12px; max-height: 180px; overflow: auto; }
 .gold-history li { display: flex; gap: 8px; align-items: baseline; }
 .gold-history .neg { color: var(--red); } .gold-history .pos { color: var(--hp); }
-.inv-res { display: grid; gap: 3px; text-align: left; background: rgba(255, 181, 71, 0.04); border: 1px solid rgba(255, 181, 71, 0.25); border-radius: 5px;
+.inv-res { display: grid; gap: 3px; text-align: left; background: rgba(var(--amber-rgb), 0.04); border: 1px solid rgba(var(--amber-rgb), 0.25); border-radius: 5px;
   padding: 6px 8px; color: inherit; font: inherit; cursor: pointer; }
 .inv-res:hover, .inv-res:focus-visible { border-color: var(--amber); }
 .inv-mats { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 13px; }
 .inv-mats li { display: flex; gap: 8px; align-items: baseline; }
 
 .qty { font-family: var(--mono); color: var(--gold); white-space: nowrap; font-size: 12.5px; }
-.qty.unknown { color: var(--amber); border: 1px dashed rgba(255, 181, 71, 0.5); border-radius: 3px; padding: 0 4px; font-size: 11px; }
+.qty.unknown { color: var(--amber); border: 1px dashed rgba(var(--amber-rgb), 0.5); border-radius: 3px; padding: 0 4px; font-size: 11px; }
 
 .inv-projects { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); }
 .inv-project { display: grid; gap: 6px; text-align: left; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 10px 12px;
@@ -28,7 +28,7 @@ button.inv-project:hover, button.inv-project:focus-visible { border-color: var(-
 .stagebar { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
 .stagebar li { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; text-align: center; padding: 3px 2px; border-radius: 3px;
   background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
-.stagebar li.done { color: var(--text-2); background: rgba(62, 240, 200, 0.06); }
+.stagebar li.done { color: var(--text-2); background: rgba(var(--cyan-rgb), 0.06); }
 .stagebar li.now { color: #04110d; background: var(--cyan); border-color: var(--cyan); font-weight: 700; }
 
 .inv-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 18px 0 8px; }
@@ -39,7 +39,7 @@ button.inv-project:hover, button.inv-project:focus-visible { border-color: var(-
 .inv-list { display: grid; gap: 2px; }
 .inv-item { border: 1px solid var(--line); border-radius: 5px; background: var(--panel); }
 .inv-item.equipped { border-color: var(--cyan-dim); }
-.inv-item.unknown { border-style: dashed; border-color: rgba(255, 181, 71, 0.4); }
+.inv-item.unknown { border-style: dashed; border-color: rgba(var(--amber-rgb), 0.4); }
 .inv-item.open { border-color: var(--line-2); }
 .inv-grid .inv-item.open { grid-column: 1 / -1; }  /* details read across the row instead of leaving a gap beside it */
 .inv-head { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; width: 100%; padding: 5px 8px;

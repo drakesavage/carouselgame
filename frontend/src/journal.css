@@ -6,7 +6,7 @@
 .jq.quest { border-left-color: var(--cyan-dim); } .jq.commitment { border-left-color: var(--violet); } .jq.reservation { border-left-color: var(--amber); }
 .jq.project, .jq.crafting { border-left-color: var(--gold-dim); }
 .jq.completed, .jq.failed { opacity: 0.75; }
-.jq.focused { border-color: var(--cyan); box-shadow: 0 0 0 1px rgba(62, 240, 200, 0.35), 0 0 22px rgba(62, 240, 200, 0.12); }
+.jq.focused { border-color: var(--cyan); box-shadow: 0 0 0 1px rgba(var(--cyan-rgb), 0.35), 0 0 22px rgba(var(--cyan-rgb), 0.12); }
 .jq-head { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; width: 100%; padding: 10px 12px 0; background: none; border: 0; color: inherit;
   font: inherit; text-align: left; cursor: pointer; align-items: start; }
 .jq-head:hover .jq-title { color: var(--cyan); }
@@ -55,7 +55,7 @@
 .search-hint { padding: 14px; }
 .search-hit { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 8px 10px; border-radius: 5px;
   background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.search-hit:hover, .search-hit:focus-visible { background: rgba(62, 240, 200, 0.07); outline: none; }
+.search-hit:hover, .search-hit:focus-visible { background: rgba(var(--cyan-rgb), 0.07); outline: none; }
 .sh-icon { color: var(--cyan); margin-top: 2px; }
 .sh-main { display: grid; gap: 2px; min-width: 0; }
 .sh-title { font-weight: 600; font-size: 13.5px; }

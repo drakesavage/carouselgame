@@ -14,6 +14,7 @@ import "./styles.css";
 import "./hud-v2.css";
 import "./story-v3.css";
 import App from "./App";
+import "./theme-dcc.css"; // last: the Dungeon Crawler World broadcast theme overrides the base styles
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
