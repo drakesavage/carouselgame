@@ -48,7 +48,7 @@ PROFILES: dict[str, dict] = {
 }
 CATEGORIES = {"CAMPAIGN": "state", "PARTY": "state", "PRESENT": "state", "OBJECTIVES": "state", "SHARED STASH": "state",
               "ACTIVE COMBAT": "state", "LEDGER RECORDS": "ledger", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
-              "RULEBOOK": "rulebook", "RECENT TRANSCRIPT": "narrative", "GM-ONLY SECRETS": "gm_private"}
+              "RULEBOOK": "rulebook", "RECENT TRANSCRIPT": "narrative", "RECENT ROLLS": "state", "GM-ONLY SECRETS": "gm_private"}
 STOP = set("the a an and or of to in on for with by is are be as at it this that from what how does do can when which who i we my our me us "
            "you your he she they them his her their then than into onto about there here just also will would should could".split())
 
@@ -396,6 +396,26 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     # ledger documents (large profile): the imported current-state files, verbatim
     if B["ledger_docs"]:
         sections["LEDGER RECORDS"] = _ledger_docs(conn, cid, [by_id[i] for i in full_ids], B["ledger_docs"], omissions)
+
+    # recent rolls: the transcript shows narration, not the dice; without this the GM cannot see what was rolled
+    from ..rules.checks import untrained_attempts
+    names = {c["id"]: c["name"] for c in chars}
+    rolled = rows(conn, """SELECT d.turn_id, d.character_id, d.total, d.outcome, d.degree, d.hidden, d.detail_json FROM dice_rolls d
+                           JOIN turns t ON t.id = d.turn_id WHERE d.campaign_id = ? AND d.rolled_back = 0 AND t.rolled_back = 0
+                           AND t.status = 'completed' AND d.turn_id IN (SELECT id FROM turns WHERE campaign_id = ? AND status = 'completed'
+                           AND rolled_back = 0 ORDER BY id DESC LIMIT 3) ORDER BY d.id DESC LIMIT 15""", (cid, cid))
+    rl = []
+    for r in reversed(rolled):
+        d = r.get("detail") or {}
+        what = d.get("skill") or d.get("stat") or d.get("kind") or "roll"
+        rl.append(f"turn {r['turn_id']}: {names.get(r['character_id'], d.get('character') or '?')} {what} {r['total']} → {r['degree'] or r['outcome'] or '-'}"
+                  + (" [UNTRAINED]" if d.get("untrained") else "") + (" [secret]" if r["hidden"] else ""))
+    ua = untrained_attempts(conn, cid)
+    if ua:
+        rl.append("Untrained Skills attempted since the last advancement checkpoint (Floors 1-2: each crawler gains Rank 1 in ONE at "
+                  "the checkpoint): " + "; ".join(f"{names.get(k, k)}: {', '.join(v)}" for k, v in ua.items()))
+    if rl:
+        sections["RECENT ROLLS"] = "\n".join(rl)
 
     # transcript
     if recent:

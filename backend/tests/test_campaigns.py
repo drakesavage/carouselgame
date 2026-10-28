@@ -226,3 +226,33 @@ def test_an_npc_can_become_a_crawler_in_the_party_and_shows_on_the_achievements_
     ben = one(conn, "SELECT kind, in_party, roster_category FROM characters WHERE campaign_id = ? AND name = 'Ben Ortiz'", (cid,))
     assert (ben["kind"], ben["in_party"], ben["roster_category"]) == ("crawler", 1, "core_party")
     assert [c["name"] for c in client.get(f"/api/campaigns/{cid}/achievements").json()["characters"]] == ["Donut Jr", "Ben Ortiz"]
+
+
+def test_untrained_attempts_reach_the_briefing_and_the_checkpoint(client, conn, roller):
+    import json as _json
+    from app.db import now_iso, transaction
+    from app.memory.context import build_context
+    from app.rules.checks import resolve_advancement_checkpoint, untrained_attempts
+    from app.rules.engine import apply_change
+    cid = new(client)
+    with transaction(conn):
+        eli = apply_change(conn, cid, None, {"op": "npc", "name": "Eli Park", "crawler": True, "in_party": True})["character_id"]
+        conn.execute("UPDATE characters SET level = 1 WHERE campaign_id = ? AND kind = 'crawler'", (cid,))
+    def roll(turn_status, skill, untrained, who):
+        tid = conn.execute("INSERT INTO turns (campaign_id, idempotency_key, player_input, status, created_at) VALUES (?,?,?,?,?)",
+                           (cid, f"k-{skill}-{turn_status}-{who}", "x", turn_status, now_iso())).lastrowid
+        conn.execute("""INSERT INTO dice_rolls (campaign_id, turn_id, character_id, expression, dice_json, total, outcome, degree, detail_json, rng, created_at)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?)""", (cid, tid, who, "1d20", "[]", 14, "success", "Success",
+                        _json.dumps({"kind": "skill_check", "skill": skill, "untrained": untrained, "character": "Eli Park"}), "test", now_iso()))
+    roll("completed", "Stealth", True, eli)
+    roll("completed", "Perception", False, eli)
+    roll("failed", "Climbing", True, eli)                                           # a failed turn's roll does not count
+    assert untrained_attempts(conn, cid) == {eli: ["Stealth"]}
+    text = build_context(conn, cid, "next")
+    text = text if isinstance(text, str) else getattr(text, "text", str(text))
+    assert "## RECENT ROLLS" in text and "Eli Park Stealth 14 → Success [UNTRAINED]" in text and "Eli Park: Stealth" in text
+    with transaction(conn):
+        conn.execute("UPDATE clocks SET current = 12 WHERE campaign_id = ? AND key = 'advancement_cycles'", (cid,))
+        out = resolve_advancement_checkpoint(conn, conn, roller, cid, None, "test checkpoint")
+    assert any("untrained this interval: Stealth" in l for l in out["lines"])
+    assert untrained_attempts(conn, cid) == {}                                       # the interval resets at the checkpoint

@@ -190,6 +190,31 @@ def compact(r: RollResult) -> str:
 ADVANCEMENT_CLOCK = "advancement_cycles"
 
 
+def untrained_attempts(conn: sqlite3.Connection, campaign_id: int) -> dict[int, list[str]]:
+    """Floors 1-2 (BOOK 7.5): the Skills each crawler attempted untrained since the last advancement checkpoint, from
+    the dice record (rolls of failed or undone turns don't count; Skills learned since are dropped). At the checkpoint
+    each crawler may gain Rank 1 in one of them; unused choices do not carry forward. Empty from Floor 3 on."""
+    camp = one(conn, "SELECT current_floor FROM campaigns WHERE id = ?", (campaign_id,))
+    if camp and (camp["current_floor"] or 0) >= 3:
+        return {}
+    since = one(conn, """SELECT MAX(created_at) AS m FROM events WHERE campaign_id = ? AND type = 'advancement_checkpoint'
+                         AND rolled_back = 0""", (campaign_id,))["m"] or ""
+    out: dict[int, list[str]] = {}
+    for r in rows(conn, """SELECT d.character_id, d.detail_json FROM dice_rolls d LEFT JOIN turns t ON t.id = d.turn_id
+                           WHERE d.campaign_id = ? AND d.rolled_back = 0 AND d.created_at > ? AND d.character_id IS NOT NULL
+                           AND (t.id IS NULL OR (t.status IN ('completed', 'processing') AND t.rolled_back = 0)) ORDER BY d.id""",
+                     (campaign_id, since)):
+        d = r.get("detail") or {}
+        if d.get("kind") == "skill_check" and d.get("untrained") and d.get("skill") and d["skill"] not in out.setdefault(r["character_id"], []):
+            out[r["character_id"]].append(d["skill"])
+    for char_id, skills in list(out.items()):
+        known = {s["name"].lower() for s in rows(conn, "SELECT name FROM skills WHERE character_id = ? AND COALESCE(rank, 0) > 0", (char_id,))}
+        out[char_id] = [s for s in skills if s.lower() not in known]
+        if not out[char_id]:
+            del out[char_id]
+    return out
+
+
 def resolve_advancement_checkpoint(state: sqlite3.Connection, audit: sqlite3.Connection, roller: DiceRoller,
                                    campaign_id: int, turn_id: int | None, occasion: str) -> dict[str, Any]:
     """On twelve cycles: every eligible HUD-party crawler gains 1 Level; each marked Rank 0-4 Skill rolls
@@ -205,6 +230,8 @@ def resolve_advancement_checkpoint(state: sqlite3.Connection, audit: sqlite3.Con
     party = rows(state, """SELECT * FROM characters WHERE campaign_id = ? AND in_party = 1 AND kind = 'crawler'
                            AND status = 'active' ORDER BY party_order""", (campaign_id,))
     lines: list[str] = []
+    untried = untrained_attempts(state, campaign_id)  # read before this checkpoint's own event resets the interval
+    choices: dict[str, list[str]] = {}
     for c in party:
         before = c["level"]
         if before is None:
@@ -226,6 +253,10 @@ def resolve_advancement_checkpoint(state: sqlite3.Connection, audit: sqlite3.Con
             new = r + 1 if res.outcome == "success" else r
             state.execute("UPDATE skills SET rank = ?, marked = 0 WHERE id = ?", (new, s["id"]))
             lines.append(f"  {s['name']}: d20 {res.total} vs Rank {r} → " + (f"{r} → {new}" if new != r else "no change"))
+        if untried.get(c["id"]):
+            choices[c["name"]] = untried[c["id"]]
+            lines.append(f"  untrained this interval: {', '.join(untried[c['id']])} — may gain Rank 1 in ONE of them (BOOK 7.5). "
+                         "The player chooses for their own crawler; companions choose for themselves. Record it with op skill.")
     state.execute("UPDATE clocks SET current = current - ? WHERE id = ?", (required, clock["id"]))
     summary = f"Advancement checkpoint resolved ({occasion})"
     state.execute(
@@ -239,7 +270,7 @@ def resolve_advancement_checkpoint(state: sqlite3.Connection, audit: sqlite3.Con
         "op": "quest", "kind": "project", "title": f"Level-up benefits: {occasion}"[:160], "priority": 1,
         "progress": "Open: allocate the new Stat points and apply each Race/Class per-Level benefit, one crawler at a time.",
         "details": {"crawlers": leveled, "stat_points": "3 per new Level (banked; allocate_stats)", "race_class_benefits": "per sheet, e.g. Human AI Favor",
-                    "done": []}})
+                    "untrained_choices": choices, "done": []}})
     lines.append("Level-up benefits are now an open task (a project quest): resolve them one crawler at a time, not inside unrelated turns.")
     return {"summary": summary, "lines": lines, "cycles_remaining": clock["current"] - required}
 
