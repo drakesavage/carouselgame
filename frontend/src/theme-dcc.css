@@ -302,3 +302,65 @@ a { color: var(--cyan); }
   .live-bug i, :root[data-urgency="critical"] .floor-panel .countdown { animation: none; }
 }
 :root[data-motion="reduce"] .live-bug i, :root[data-motion="reduce"] .floor-panel .countdown { animation: none; }
+
+/* =====================================================================================
+   The other pages: the same steel plates, gold for what is selected, red for identity.
+   ===================================================================================== */
+
+/* section tabs (Chronicle, World, Rules, Diagnostics) and the dossier's tabs */
+.tabs, .chronicle .tabs, .world .tabs { border-bottom: 1px solid var(--line-2); gap: 2px; }
+.tabs button, .dossier-tabs button { font-family: var(--display); font-weight: 700; letter-spacing: 0.08em; color: var(--text-2); }
+.tabs button:hover, .dossier-tabs button:hover { color: var(--text); box-shadow: inset 0 -2px 0 rgba(var(--red-rgb), 0.7); }
+.tabs button.active, .chronicle .tabs button.active, .world .tabs button.active, .dossier-tabs button.active {
+  color: var(--gold); box-shadow: inset 0 -3px 0 var(--gold); border-bottom-color: var(--gold); text-shadow: none;
+}
+
+/* cards: one steel plate everywhere */
+.card, .dpanel, .person, .jq, .lore-card, .place, .inv-panel, .inv-item, .inv-project, .lib-tile, .trophy, .camp-row, .search-hit {
+  border-radius: 2px; border-color: var(--line);
+  background: linear-gradient(180deg, rgba(32,35,44,0.92), rgba(22,24,30,0.92));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 6px 18px rgba(0,0,0,0.3);
+}
+.card.clickable:hover, .person:hover, .jq:hover, .inv-item:hover, .lib-tile:hover, .place:hover { border-color: rgba(var(--cyan-rgb), 0.45); }
+.person-name, .jq-title, .place-name, .inv-name, .lore-topic, .trophy-name { font-family: var(--display); font-weight: 700; }
+.person-name { font-size: 15.5px; }
+
+/* filters and segmented choices: gold marks what is selected */
+.seg { border-radius: 2px; border-color: var(--line-2); }
+.seg button.active { background: rgba(var(--gold-rgb), 0.16); color: var(--gold); box-shadow: inset 0 -2px 0 var(--gold); }
+.chip-btn.on { border-color: rgba(var(--gold-rgb), 0.6); color: var(--gold); background: rgba(var(--gold-rgb), 0.1); }
+.btn[aria-pressed="true"], .btn.on { border-color: rgba(var(--gold-rgb), 0.6); color: var(--gold); background: rgba(var(--gold-rgb), 0.1); }
+
+/* fields */
+.input, .people-search input, .search-bar input, .inv-tools input {
+  background: #0d0e12; border: 1px solid var(--line-2); border-radius: 2px; color: var(--text);
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+}
+.input:focus, .people-search input:focus, .search-bar input:focus, .inv-tools input:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(var(--cyan-rgb), 0.12); }
+
+/* dialogs: a steel plate with the broadcast stripe on top */
+.modal, .dossier, .search-dialog, .art-dialog {
+  border-radius: 3px; border-color: var(--line-2);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.7), 0 30px 80px rgba(0,0,0,0.6);
+}
+.modal::before, .search-dialog::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; border-radius: 3px 3px 0 0;
+  background: linear-gradient(90deg, var(--red), var(--gold) 40%, transparent);
+}
+.overlay { background: rgba(6, 6, 9, 0.78); }
+
+/* the character dossier: a broadcast nameplate */
+.hero-name { font-family: var(--broadcast); font-weight: 400; letter-spacing: 0.03em; color: #fff; text-shadow: 3px 3px 0 rgba(0,0,0,0.7); }
+.dossier-hero { background: linear-gradient(135deg, rgba(var(--mood-rgb), 0.12), transparent 55%), linear-gradient(180deg, #1c1e25, #15161b); }
+.dpanel h3, .dpanel h4 { color: var(--gold); font-family: var(--display); letter-spacing: 0.08em; }
+
+/* inventory: Gold is the headline */
+.gold-amount { font-family: var(--broadcast); font-weight: 400; color: var(--gold); letter-spacing: 0.02em; text-shadow: 2px 2px 0 rgba(0,0,0,0.7); }
+
+/* chronicle timeline: a dark rail with HUD-cyan markers */
+.tl li { border-radius: 2px; }
+.tl li:hover { background: rgba(var(--cyan-rgb), 0.05); }
+.tl-icon { color: var(--cyan); }
+
+/* world: the region heads read like signage */
+.place-title, .regions h3 { font-family: var(--display); letter-spacing: 0.1em; }

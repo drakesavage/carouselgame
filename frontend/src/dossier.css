@@ -229,8 +229,8 @@
 .timeline { list-style: none; margin: 0 0 16px; padding: 0 0 0 4px; position: relative; }
 .timeline::before { content: ""; position: absolute; left: 17px; top: 6px; bottom: 6px; width: 2px; background: linear-gradient(180deg, var(--cyan-dim), transparent); }
 .timeline li { position: relative; display: grid; grid-template-columns: 30px 1fr; gap: 12px; padding: 7px 0; }
-.tl-icon { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-2); border: 1px solid var(--line-2); color: var(--cyan); position: relative; z-index: 1; }
-.tl-level .tl-icon { color: var(--gold); border-color: var(--gold-dim); } .tl-injury .tl-icon { color: var(--red); } .tl-achievement .tl-icon { color: var(--magenta); }
+.timeline .tl-icon { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-2); border: 1px solid var(--line-2); color: var(--cyan); position: relative; z-index: 1; }
+.timeline .tl-level .tl-icon { color: var(--gold); border-color: var(--gold-dim); } .tl-injury .tl-icon { color: var(--red); } .tl-achievement .tl-icon { color: var(--magenta); }
 .tl-text { font-size: 13.5px; line-height: 1.5; }
 .tl-meta { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
 
