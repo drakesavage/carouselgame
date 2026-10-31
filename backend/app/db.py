@@ -321,6 +321,7 @@ CREATE TABLE IF NOT EXISTS turns (
   idempotency_key TEXT NOT NULL,
   status TEXT NOT NULL,                   -- processing | completed | failed
   player_input TEXT NOT NULL,
+  kind TEXT,                              -- NULL (player input) | arrival | arrival_omen
   character_id INTEGER,
   provider TEXT,
   response_json TEXT,
@@ -528,7 +529,8 @@ COLUMN_MIGRATIONS = [
     ("campaigns", "objective_quests_json", "TEXT NOT NULL DEFAULT '[]'"),
     ("campaigns", "node_id", "TEXT"),
     ("campaigns", "travel_seq", "INTEGER NOT NULL DEFAULT 0"),
-    ("party_groups", "node_id", "TEXT"),  # ordered quest ids that make up the immediate objective  # {cx, cy, k, ar}: square crop of the portrait image (null = default)  # comfy | codex (art/codex_image.py)  # staged tool calls and roll records while a turn is in flight
+    ("party_groups", "node_id", "TEXT"),
+    ("turns", "kind", "TEXT"),             # NULL = the player's own words; arrival | arrival_omen (map_api.py travel)  # ordered quest ids that make up the immediate objective  # {cx, cy, k, ar}: square crop of the portrait image (null = default)  # comfy | codex (art/codex_image.py)  # staged tool calls and roll records while a turn is in flight
 ]
 
 

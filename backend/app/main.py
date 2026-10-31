@@ -949,6 +949,8 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     # ------------------------------------------------------------------ Carousel reference data and map tiles
     from .reference_api import register as register_reference
     register_reference(app, settings, gm_auth)
+    from .map_api import register as register_map
+    register_map(app, settings, state)
 
     # ------------------------------------------------------------------ frontend
     if FRONTEND_DIST.exists():

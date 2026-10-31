@@ -81,12 +81,13 @@ class TurnService:
         return rulebooks.open_db(p) if p.exists() else None
 
     # ------------------------------------------------------------ public
-    def submit(self, campaign_id: int, text: str, idempotency_key: str) -> dict:
-        text = (text or "").strip()
-        if not text:
-            raise ValueError("empty input")
-        if len(text) > 8000:
-            raise ValueError("input too long (8000 characters max)")
+    def submit(self, campaign_id: int, text: str, idempotency_key: str, kind: str | None = None,
+               prepare: Callable[[object], tuple[str, str | None]] | None = None) -> dict:
+        """`prepare(conn) -> (text, kind)`, when given, runs under the write lock in the transaction that creates the turn
+        and supplies the turn's text and kind (map_api.py: apply the travel, then narrate the arrival). Its events are tied to the turn.
+        It never runs for a key that already has a turn, so a repeated request doesn't move the group twice."""
+        if prepare is None:
+            text = self._checked(text)
         conn = self._conn()
         try:
             if not one(conn, "SELECT id FROM campaigns WHERE id = ?", (campaign_id,)):
@@ -97,13 +98,23 @@ class TurnService:
             if not WRITE_LOCK.acquire(timeout=5 if not one(conn, "SELECT 1 AS x FROM turns WHERE status = 'processing'", ()) else 0.01):
                 raise BusyError("The GM is still resolving another turn")
             try:
-                if existing:  # failed earlier: retry the same turn row
+                if existing:  # failed earlier: retry the same turn row (a prepared turn keeps its text: it already happened)
+                    text = existing["player_input"] if prepare else text
                     conn.execute("UPDATE turns SET status = 'processing', error = NULL, player_input = ? WHERE id = ?", (text, existing["id"]))
                     turn_id = existing["id"]
+                elif prepare:
+                    with transaction(conn):
+                        mark = conn.execute("SELECT COALESCE(MAX(id), 0) FROM events WHERE campaign_id = ?", (campaign_id,)).fetchone()[0]
+                        text, kind = prepare(conn)
+                        text = self._checked(text)
+                        turn_id = conn.execute(
+                            "INSERT INTO turns (campaign_id, idempotency_key, status, player_input, kind, created_at) VALUES (?,?,?,?,?,?)",
+                            (campaign_id, idempotency_key, "processing", text, kind, now_iso())).lastrowid
+                        conn.execute("UPDATE events SET turn_id = ? WHERE campaign_id = ? AND id > ? AND turn_id IS NULL", (turn_id, campaign_id, mark))
                 else:
                     turn_id = conn.execute(
-                        "INSERT INTO turns (campaign_id, idempotency_key, status, player_input, created_at) VALUES (?,?,?,?,?)",
-                        (campaign_id, idempotency_key, "processing", text, now_iso())).lastrowid
+                        "INSERT INTO turns (campaign_id, idempotency_key, status, player_input, kind, created_at) VALUES (?,?,?,?,?,?)",
+                        (campaign_id, idempotency_key, "processing", text, kind, now_iso())).lastrowid
                 self.progress[turn_id] = Progress()
             except BaseException:
                 WRITE_LOCK.release()
@@ -115,6 +126,15 @@ class TurnService:
         else:
             self._process_and_release(turn_id)
         return self.get(turn_id)
+
+    @staticmethod
+    def _checked(text: str | None) -> str:
+        text = (text or "").strip()
+        if not text:
+            raise ValueError("empty input")
+        if len(text) > 8000:
+            raise ValueError("input too long (8000 characters max)")
+        return text
 
     def get(self, turn_id: int) -> dict:
         conn = self._conn()
@@ -153,7 +173,7 @@ class TurnService:
         if forced is not None:  # an escalated conversation turn, re-run by the mechanics GM
             provider, route = forced
         elif hasattr(provider, "route"):
-            provider, route = provider.route(turn["player_input"], story_active(conn, cid), absent_names(conn, cid))
+            provider, route = provider.route(turn["player_input"], story_active(conn, cid), absent_names(conn, cid), **_kind(turn))
         conversation = bool(getattr(provider, "conversation", False))
         tools = [t for t in TOOL_SPECS if t["name"] in SAFE_TOOLS] + [ESCALATE_SPEC] if conversation else TOOL_SPECS
         system = SYSTEM_PROMPT + "\n\n" + CONVERSATION_MODE if conversation else SYSTEM_PROMPT
@@ -249,7 +269,7 @@ class TurnService:
                     absent = absent_names(c2, cid)
                 finally:
                     c2.close()
-                nxt, again = root.route(turn["player_input"], active, absent)
+                nxt, again = root.route(turn["player_input"], active, absent, **_kind(turn))
                 info = {**again, "rerouted_from": (route or {}).get("model"), "reroute_reason": str(exc)[:300]}
             conn.close()
             if rule_conn is not None:
@@ -344,6 +364,11 @@ class TurnService:
         return {"player_message_id": pmsg, "gm_message_id": gmsg, "notice_message_ids": notice_ids, "narration": narration,
                 "changes": fx.changes, "notices": fx.notices, "rules_cited": meta["rules_cited"],
                 "state_changed": bool(fx.changes)}
+
+
+def _kind(turn: dict) -> dict:
+    """Only server-started turns pass a kind to the router (test doubles and older routers take three arguments)."""
+    return {"kind": turn["kind"]} if turn.get("kind") else {}
 
 
 def story_active(conn, cid: int) -> bool:
