@@ -28,3 +28,23 @@ def write_mini_source(root: Path, overrides: dict | None = None) -> Path:
 @pytest.fixture
 def mini_source(tmp_path) -> Path:
     return write_mini_source(tmp_path / "carousel_src")
+
+
+@pytest.fixture(scope="session")
+def real_files(real_source):
+    from app.carousel.sources import load_sources
+    return load_sources(real_source)
+
+
+@pytest.fixture(scope="session")
+def ref_real(real_files, tmp_path_factory):
+    """A reference DB built once from the real packages by every importer that exists so far."""
+    from app.carousel import refdb
+    from app.carousel.importer import IMPORTERS
+    conn = refdb.connect(tmp_path_factory.mktemp("ref") / "reference.db")
+    refdb.init(conn)
+    for fn in IMPORTERS:
+        fn(conn, real_files)
+    conn.commit()
+    yield conn
+    conn.close()
