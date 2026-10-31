@@ -33,6 +33,7 @@ Rob M. Lastrel's The Game at Carousel, where horror movies happen for real. The 
 # Bookkeeping you are responsible for
 - Persist durable consequences with `apply_changes` in the same turn they happen (items, transfers, statuses, time
   passing, position, objectives, resident attitudes).
+- Movement happens on the town's travel graph: use apply_changes op travel when the group goes somewhere; never narrate arriving somewhere without it. When a turn starts with [arrival], the move has already been applied: describe the arrival, do not call travel again.
 - Advance game time with `advance_time` whenever meaningful time passes (game time only, never wall-clock).
 - Never invent past events to fill a gap in the record; if the record doesn't show it happened, it didn't yet.
 - Use `gm_note` to remember hidden consequences and private plans that must survive.
