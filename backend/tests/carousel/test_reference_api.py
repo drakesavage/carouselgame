@@ -57,6 +57,13 @@ def test_gm_reference_one_record_includes_gm_material(client_ref, ref_settings):
     assert client_ref.get("/api/gm/reference/nonsense", headers=gm(ref_settings)).status_code == 404
 
 
+def test_concurrent_gm_reads_succeed(client_ref, ref_settings):
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(16) as pool:
+        codes = list(pool.map(lambda _: client_ref.get("/api/gm/reference/places", headers=gm(ref_settings)).status_code, range(64)))
+    assert codes == [200] * 64
+
+
 def test_tiles_served_read_only(client_ref):
     assert client_ref.get("/tiles/tile_manifest.json").json() == {"levels": []}
     # encoded so the client doesn't collapse the dot segments before the request reaches the tile mount

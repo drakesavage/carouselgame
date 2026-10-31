@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Backpack, BookOpen, Clock3, FileText, Flag, Map as MapIcon, MessageSquareText, Search, Settings2, UserRound, Users } from "lucide-react";
-import { api, Campaign, CampaignListItem, fmtMinutes, Manifest } from "./api";
+import { api, Campaign, CampaignListItem, Manifest } from "./api";
 import { ManifestContext } from "./views/Hud";
 import { Chip } from "./ui";
 import { StoryView, SystemNotice } from "./views/Story";
@@ -106,7 +106,7 @@ export default function App() {
   // atmosphere: the whole HUD reads the situation (theme-dcc.css): warm in a saferoom, cold while exploring, red in a
   // fight, and more urgent as the floor runs out of time. Only CSS listens to these; nothing else changes.
   const mood = !campaign ? "explore" : campaign.encounter ? "combat" : campaign.safe_room ? "safe" : "explore";
-  const left = campaign?.floor_clock.remaining_minutes;
+  const left = campaign?.floor_clock?.remaining_minutes;
   const urgency = left == null ? "calm" : left < 6 * 60 ? "critical" : left < 24 * 60 ? "warn" : "calm";
   useEffect(() => {
     document.documentElement.dataset.mood = mood;
@@ -135,8 +135,6 @@ export default function App() {
           {campaign && (
             <>
               {campaign.is_demo ? <span className="demo-ribbon">DEMO DATA</span> : null}
-              <Chip tone="amber" title={campaign.floor_clock.pending_minutes != null ? `Floor clock waits: ${campaign.floor_clock.pending_display} once you enter the Dungeon` : "Floor collapse (game time)"}>
-                F{campaign.current_floor ?? "?"} · {campaign.floor_clock.pending_minutes != null ? "clock waiting" : fmtMinutes(campaign.floor_clock.remaining_minutes)}</Chip>
             </>
           )}
           <Chip tone={provider === "codex" ? "cyan" : "amber"} title="Runtime GM provider (change in Saves & Settings)">GM: {provider || "…"}</Chip>

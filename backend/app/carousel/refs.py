@@ -2,16 +2,21 @@
 still resolves. Later phases add their columns here (party positions, Omen instances, owned tickets, ...)."""
 from __future__ import annotations
 
+import json
 import sqlite3
 
-REFERENCE_COLUMNS: dict[str, str] = {
-    "place": "SELECT DISTINCT ref_id FROM locations WHERE ref_id IS NOT NULL",
-    "npc": "SELECT DISTINCT ref_id FROM npc_profiles WHERE ref_id IS NOT NULL",
-}
+REFERENCE_COLUMNS: dict[str, tuple[str, str]] = {"place": ("locations", "ref_id"), "npc": ("npc_profiles", "ref_id")}
 
 
 def referenced_ids(campaign_conn: sqlite3.Connection) -> dict[str, set[str]]:
-    return {kind: {r[0] for r in campaign_conn.execute(sql)} for kind, sql in REFERENCE_COLUMNS.items()}
+    """IDs in live state and in every save point (restoring a save must not bring back an ID the import dropped)."""
+    out = {kind: {r[0] for r in campaign_conn.execute(f"SELECT DISTINCT {col} FROM {table} WHERE {col} IS NOT NULL")}
+           for kind, (table, col) in REFERENCE_COLUMNS.items()}
+    for (snap,) in campaign_conn.execute("SELECT snapshot_json FROM save_points"):
+        tables = json.loads(snap)
+        for kind, (table, col) in REFERENCE_COLUMNS.items():
+            out[kind].update(r[col] for r in tables.get(table, []) if r.get(col))
+    return out
 
 
 def unresolved(ref: sqlite3.Connection, ids: dict[str, set[str]]) -> dict[str, list[str]]:

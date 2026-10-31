@@ -120,7 +120,6 @@ export function SceneBanner({ campaign, onArt, openCharacter }: { campaign: Camp
               {others.length > 7 && <span className="muted">+{others.length - 7}</span>}
             </span>
           )}
-          <span><Sun size={12} /> Day {campaign.day.day} · reset in {fmtMinutes(campaign.day.minutes_to_reset)}</span>
           {s?.situation && <button className="banner-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>Situation {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</button>}
         </div>
         {now && <div className="banner-now narrow-only"><Flag size={11} /> {now}</div>}
@@ -412,28 +411,19 @@ export function urgentAlerts(campaign: Campaign): Alert[] {
     if (low || bad.length) out.push({ key: `c${c.id}`, tone: low ? "red" : "amber", character: c.id,
       text: `${c.name.split(" ")[0]}: ${[low ? `HP ${c.hp_current}/${c.hp_max}` : "", ...bad].filter(Boolean).join(", ")}` });
   }
-  const fc = campaign.floor_clock.remaining_minutes;
-  if (fc != null && fc < 12 * 60) out.unshift({ key: "floor", tone: "red", text: `Floor collapses in ${fmtMinutes(fc)}` });
   return out;
 }
 
 export function CampaignSidebar({ campaign, onArt, openQuest, openCharacter }: {
   campaign: Campaign; onArt?: () => void; openQuest?: (id?: number) => void; openCharacter?: (id: number) => void;
 }) {
-  const fc = campaign.floor_clock;
-  const hours = fc.remaining_minutes != null ? fc.remaining_minutes / 60 : null;
-  const tone = hours == null ? "" : hours < 12 ? "danger" : hours > 72 ? "calm" : "";
   const adv = campaign.clocks.find((c) => c.key === "advancement_cycles");
   const safe = campaign.safe_room && sameplace(campaign.scene?.location, campaign.current_location);
   const linked = campaign.quests.filter((q) => q.immediate);
   const alerts = urgentAlerts(campaign);
   return (
     <>
-      <Panel title={`Floor ${campaign.current_floor ?? "?"}`} accent={<span className={`safety ${safe ? "safe" : "exposed"}`}>{safe ? "saferoom" : "exposed"}</span>} className="floor-panel">
-        <div className="sub">Collapse in</div>
-        <div className={`countdown ${tone}`}>{fc.remaining_minutes != null ? fmtMinutes(fc.remaining_minutes) : fc.pending_minutes != null ? fc.pending_display : "unknown"}</div>
-        {fc.pending_minutes != null && <div className="sub">starts when you enter the Dungeon</div>}
-        <div className="sub"><Sun size={11} /> Day {campaign.day.day} · daily reset in {fmtMinutes(campaign.day.minutes_to_reset)}</div>
+      <Panel title={campaign.current_location ?? "Somewhere in Carousel"} accent={<span className={`safety ${safe ? "safe" : "exposed"}`}>{safe ? "safe place" : "exposed"}</span>} className="floor-panel">
         {!safe && campaign.safe_room ? <div className="sub" style={{ color: "var(--amber)" }} title={`Campaign record: ${campaign.current_location}`}>The record still says saferoom; the scene is elsewhere.</div> : null}
         {adv && (
           <div className="adv-line" title="Advancement cycles toward the next checkpoint">

@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS import_report (id INTEGER PRIMARY KEY, category TEXT 
 
 
 def connect(path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), check_same_thread=False)   # FastAPI opens a dependency and runs the endpoint on different threads
     conn.row_factory = sqlite3.Row
     return conn
 

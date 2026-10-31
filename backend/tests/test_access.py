@@ -1,4 +1,4 @@
-"""Passcode gate for other devices reaching Crawler Console through Barcode Battles (:8787/dcc)."""
+"""Passcode gate for other devices, direct or behind a reverse proxy that sets X-Forwarded-Prefix (here /dcc)."""
 from fastapi.testclient import TestClient
 
 from app.access import MAX_FAILURES
@@ -43,7 +43,7 @@ def test_other_devices_must_sign_in(settings, conn, demo_id):
 def test_passcode_is_only_shown_on_this_pc_and_regenerating_signs_devices_out(settings, conn, demo_id):
     c, gate = make(settings, conn, demo_id)
     info = c.get("/api/access").json()
-    assert info["passcode"] == gate.passcode() and info["path"] == "/dcc/"
+    assert info["passcode"] == gate.passcode() and info["path"] == "/" and info["port"] == settings.port   # Carousel's own address
     old_cookie = gate.cookie_value()
     c.cookies.set("crawler_console_access", old_cookie)
     assert c.get("/api/access", headers=PHONE).status_code == 403          # even signed in, a phone can't read it

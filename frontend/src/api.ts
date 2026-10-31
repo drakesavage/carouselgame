@@ -53,10 +53,10 @@ export type Clock = { key: string; label: string; kind: string; current: number;
 export type Campaign = {
   id: number; name: string; is_demo: number; data_source: string; current_floor: number | null; current_location: string | null; safe_room: number;
   game_time_minutes: number; floor_deadline_minutes: number | null; active_character_id: number | null; active_objective: string | null;
-  floor_clock: FloorClock; party: CharacterCard[]; quests: Quest[]; clocks: Clock[];
+  floor_clock?: FloorClock; party: CharacterCard[]; quests: Quest[]; clocks: Clock[];
   encounter: Encounter | null;
   last_save: { id: number; label: string; kind: string; created_at: string } | null;
-  scene: Scene | null; groups: Group[]; roster: CharacterCard[]; day: DayInfo;
+  scene: Scene | null; groups: Group[]; roster: CharacterCard[]; day?: DayInfo;
   recent_events: { id: number; type: string; summary: string; game_time_minutes: number | null }[];
   art?: ArtMap;
 };

@@ -251,7 +251,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
 
     @app.get("/api/access")
     def access_info(_=Depends(local_only)):
-        return {"passcode": gate.passcode(), "lan_addresses": lan_addresses(), "path": "/dcc/", "port": 8787,
+        return {"passcode": gate.passcode(), "lan_addresses": lan_addresses(), "path": "/", "port": settings.port,
                 "fixed_by_env": bool(os.environ.get("CAROUSEL_PASSCODE"))}
 
     @app.post("/api/access/regenerate")

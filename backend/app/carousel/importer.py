@@ -14,6 +14,7 @@ import json
 import os
 import sqlite3
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -24,7 +25,7 @@ from .import_omens import import_omens
 from .import_places import import_places
 from .import_roles import import_roles
 from .refs import referenced_ids, unresolved
-from .sources import SourceError, load_sources, verify_unchanged
+from .sources import load_sources, verify_unchanged
 
 IMPORTERS = [import_places, import_omens, import_roles, import_npcs]
 COUNTED = ("places", "place_aliases", "graph_nodes", "graph_edges", "omens", "omen_beats", "roles", "tickets", "start_profiles",
@@ -71,14 +72,29 @@ def run_import(settings: Settings) -> ImportResult:
             result.error = "saved campaigns use IDs this import no longer has: " + "; ".join(
                 f"{kind}: {', '.join(ids)}" for kind, ids in result.missing.items())
         else:
-            os.replace(new, settings.reference_db)
+            _swap(new, settings.reference_db)
             result.ok = True
-    except (SourceError, sqlite3.Error, KeyError, TypeError, ValueError) as exc:
+    except Exception as exc:  # noqa: BLE001 - any failure is reported and leaves the old reference.db in place
         result.error = f"{type(exc).__name__}: {exc}"
     finally:
         new.unlink(missing_ok=True)
     result.report_path = _write_report(settings, started, result, sources)
     return result
+
+
+SWAP_TRIES, SWAP_WAIT_S = 10, 0.3
+
+
+def _swap(new: Path, live: Path) -> None:
+    """Windows refuses to replace a file another process has open (the server reading reference.db): retry briefly."""
+    for attempt in range(SWAP_TRIES):
+        try:
+            os.replace(new, live)
+            return
+        except PermissionError:
+            if attempt == SWAP_TRIES - 1:
+                raise
+            time.sleep(SWAP_WAIT_S)
 
 
 def _write_report(settings: Settings, started: dt.datetime, result: ImportResult, sources: dict) -> Path:

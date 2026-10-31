@@ -2,20 +2,20 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "crawler-console-preview",
-      "runtimeExecutable": "E:/dccrpg/.venv/Scripts/python.exe",
+      "name": "carousel-preview",
+      "runtimeExecutable": "E:/CarouselGame/.venv/Scripts/python.exe",
       "runtimeArgs": [
         "-m",
         "uvicorn",
         "app.main:app",
         "--app-dir",
-        "E:/dccrpg/backend",
+        "E:/CarouselGame/backend",
         "--host",
         "127.0.0.1",
         "--port",
-        "8779"
+        "8799"
       ],
-      "port": 8779
+      "port": 8799
     }
   ]
 }
