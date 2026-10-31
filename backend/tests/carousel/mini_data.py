@@ -50,6 +50,9 @@ MINI = {
     "tropes": {"tropes": [{"id": "1", "name": "HIDDENTROPE-GOLF-7", "full_player": True, "has_enemy": True, "reference_only": False,
                            "variants": [{"name": "HIDDENTROPE-GOLF-7", "description": "The house always knows where you hid."},
                                         {"name": "HIDDENTROPE-GOLF-7", "description": "Doors open for it alone."}]}]},
+    "location_art": {"created_at": "2026-10-30", "purpose": "test", "references": [
+        {"location_id": "CAR-016", "name": "Diner", "relative_image_path": "assets/identity_images/CAR-016_identity_v001.png"},
+        {"location_id": "PROV-LOC-001", "name": "Unrecorded place", "relative_image_path": "assets/identity_images/PROV-LOC-001_identity_v001.png"}]},
     "npcs": {"residents": [{"id": "CAR-NPC-001", "name": "Adeline Winter", "provenance": "canon_expanded", "canon_appearance": True,
                             "at_start": {"status": "alive"}, "camp_role": "Camp leader", "usual_location": "Dyer's Lodge",
                             "gm_only": {"canonical_secret": "MINI-NPC-SECRET"}}]},

@@ -62,3 +62,11 @@ def ticket_definition(conn: sqlite3.Connection, ref: str) -> dict | None:
     defn = raw.get("original_ticket_definition") or raw.get("shared_pool_entry") or {}
     defn = {**defn, "rule": defn.get("rule") or r["text"]}
     return {"ref": ref, "name": r["name"], "text": r["text"], "uses_max": defn.get("uses"), "recharge": recharge_of(defn), "source": "homebrew"}
+
+
+def place_image(conn: sqlite3.Connection, place_id: str) -> str | None:
+    """The place's identity image, relative to Location_Art_Production/assets (served at /location-art/)."""
+    if not has_reference(conn):
+        return None
+    r = conn.execute("SELECT rel_path FROM ref.place_images WHERE place_id = ? AND kind = 'identity'", (place_id,)).fetchone()
+    return r[0] if r else None

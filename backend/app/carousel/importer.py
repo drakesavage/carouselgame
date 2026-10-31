@@ -20,6 +20,7 @@ from pathlib import Path
 
 from ..config import Settings
 from . import refdb
+from .import_art import import_art
 from .import_npcs import import_npcs
 from .import_omens import import_omens
 from .import_places import import_places
@@ -27,9 +28,9 @@ from .import_roles import import_roles
 from .refs import referenced_ids, unresolved
 from .sources import load_sources, verify_unchanged
 
-IMPORTERS = [import_places, import_omens, import_roles, import_npcs]
+IMPORTERS = [import_places, import_omens, import_roles, import_npcs, import_art]
 COUNTED = ("places", "place_aliases", "graph_nodes", "graph_edges", "omens", "omen_beats", "roles", "tickets", "start_profiles",
-           "tropes", "npc_templates", "import_report")
+           "tropes", "npc_templates", "place_images", "import_report")
 
 
 @dataclass

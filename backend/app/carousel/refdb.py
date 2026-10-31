@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS tropes (
 CREATE TABLE IF NOT EXISTS npc_templates (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, provenance TEXT, canon_appearance INTEGER, status TEXT, camp_role TEXT,
   usual_location TEXT, player_json TEXT NOT NULL, gm_json TEXT NOT NULL, raw_json TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS place_images (place_id TEXT NOT NULL, kind TEXT NOT NULL, rel_path TEXT NOT NULL, PRIMARY KEY (place_id, kind));
 CREATE TABLE IF NOT EXISTS import_report (id INTEGER PRIMARY KEY, category TEXT NOT NULL, item_id TEXT, message TEXT NOT NULL);
 """
 
