@@ -126,7 +126,8 @@ CREATE TABLE IF NOT EXISTS npc_profiles (
   voice TEXT,
   known_motivation TEXT,
   attitude INTEGER,                      -- -3 hostile .. +3 devoted; NULL = not recorded
-  last_seen TEXT
+  last_seen TEXT,
+  ref_id TEXT                            -- Carousel resident template ID (reference.db npc_templates), when imported
 );
 
 CREATE TABLE IF NOT EXISTS relationships (
@@ -146,7 +147,8 @@ CREATE TABLE IF NOT EXISTS locations (
   name TEXT NOT NULL,
   description TEXT,
   discovered INTEGER NOT NULL DEFAULT 1,
-  visibility TEXT NOT NULL DEFAULT 'player'
+  visibility TEXT NOT NULL DEFAULT 'player',
+  ref_id TEXT                            -- Carousel place ID (reference.db places / place_aliases), when known
 );
 
 CREATE TABLE IF NOT EXISTS quests (

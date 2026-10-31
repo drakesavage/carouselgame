@@ -15,6 +15,11 @@ if not exist "frontend\dist\index.html" (
   call "%~dp0build-frontend.cmd"
   if errorlevel 1 ( echo Frontend build failed. & pause & exit /b 1 )
 )
+if not exist "data\reference.db" (
+  echo [Carousel] Importing the Carousel source data...
+  call "%~dp0import-data.cmd"
+  if errorlevel 1 echo [Carousel] Import failed: the game starts without reference data. See data\import_reports.
+)
 
 echo [Carousel] http://127.0.0.1:%PORT%   (Ctrl+C to stop)
 start "" /b cmd /c "timeout /t 3 >nul & start "" http://127.0.0.1:%PORT%"
