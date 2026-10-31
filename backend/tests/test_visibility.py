@@ -3,10 +3,12 @@ import json
 import uuid
 from pathlib import Path
 
+from app.carousel.importer import run_import
 from app.db import now_iso, transaction
+from tests.carousel.conftest import write_mini_source
 
 SECRETS = ["GMSECRET-ALPHA-1", "GMSECRET-BRAVO-2", "GMSECRET-CHARLIE-3", "GMSECRET-DELTA-4", "GMSECRET-ECHO-5", "GMSECRET-FOXTROT-6",
-           "DEMO SECRET"]
+           "DEMO SECRET", "MINI-SEALED-TRUTH", "MINI-NPC-SECRET"]   # last two: Omen sealed truth and NPC gm_only (reference.db)
 
 
 def _plant(conn, cid):
@@ -32,7 +34,7 @@ def _player_urls(client, cid):
             f"/api/campaigns/{cid}/records?q=secret debt syndicate hidden plans", f"/api/rules/search?q=secret&cid={cid}",
             f"/api/campaigns/{cid}/journal", f"/api/campaigns/{cid}/lore-notebook", f"/api/campaigns/{cid}/chronology",
             f"/api/campaigns/{cid}/search?q=gmsecret alpha bravo charlie delta echo foxtrot secret plot",
-            f"/api/campaigns/{cid}/inventory", f"/api/campaigns/{cid}/places"]
+            f"/api/campaigns/{cid}/inventory", f"/api/campaigns/{cid}/places", "/api/reference/status"]
     for ch in client.get(f"/api/campaigns/{cid}/characters").json():
         urls.append(f"/api/campaigns/{cid}/characters/{ch['id']}")
         urls.append(f"/api/campaigns/{cid}/characters/{ch['id']}/dossier")
@@ -41,7 +43,9 @@ def _player_urls(client, cid):
     return urls
 
 
-def test_no_gm_material_in_any_player_response(client, conn, demo_id):
+def test_no_gm_material_in_any_player_response(client, conn, demo_id, settings, tmp_path):
+    settings.source_dir = write_mini_source(tmp_path / "src")   # reference data carrying sealed truth and NPC gm_only text
+    assert run_import(settings).ok
     cid = demo_id
     _plant(conn, cid)
     # a turn so that the GM context (which DOES contain secrets) is exercised

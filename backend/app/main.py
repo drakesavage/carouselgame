@@ -950,13 +950,17 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         return {"active": settings.prompt_capture_active(), "minutes": minutes}
 
 
+    # ------------------------------------------------------------------ Carousel reference data and map tiles
+    from .reference_api import register as register_reference
+    register_reference(app, settings, gm_auth)
+
     # ------------------------------------------------------------------ frontend
     if FRONTEND_DIST.exists():
         app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
 
         @app.get("/{path:path}", include_in_schema=False)
         def spa(path: str):
-            if path.startswith(("api/", "media/")):
+            if path.startswith(("api/", "media/", "tiles/")):
                 raise HTTPException(404)
             f = (FRONTEND_DIST / path).resolve()
             if path and f.is_file() and FRONTEND_DIST.resolve() in f.parents:
