@@ -84,3 +84,14 @@ def test_hidden_ticket_events_are_gm_only_until_revealed(conn, campaign_id, npc)
     apply(conn, campaign_id, {"op": "reveal_ticket", "character": "Adeline Winter", "ticket": "trope:1", "how": "Trope Master"})
     assert ticket(conn, npc, "trope:1")["hidden"] == 0
     assert rows(conn, "SELECT summary FROM events WHERE type = 'ticket_revealed' AND visibility = 'player'")
+
+
+def test_record_ruling_can_name_a_ticket(conn, campaign_id):
+    from app.gm.tools import ToolRunner
+    from app.memory.rulings import rulings
+    with transaction(conn):
+        ok = ToolRunner(conn, None, campaign_id, 1).run("record_ruling", {"topic": "certain death", "ruling": "Drowning counts.",
+                                                                          "label": "INTERPRETATION", "ticket": FG})
+        bad = ToolRunner(conn, None, campaign_id, 1).run("record_ruling", {"topic": "x", "ruling": "y", "ticket": "hb.ticket.nope"})
+    assert ok["ok"] and not bad["ok"] and "no such ticket" in bad["result"]["error"]
+    assert [r["ticket_ref"] for r in rulings(conn, campaign_id)] == [FG]

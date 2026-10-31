@@ -42,8 +42,10 @@ TOOL_SPECS: list[dict] = [
      "parameters": {"query": "str", "limit": "int? (default 6)"}},
     {"name": "read_record", "description": "Read one imported record section in full.", "parameters": {"section_id": "int"}},
     {"name": "record_ruling",
-     "description": "Record an adjudication so it stays consistent. label: BOOK | CAMPAIGN | INTERPRETATION | ONE-SCENE | OPEN.",
-     "parameters": {"topic": "str", "ruling": "str", "label": "str", "certainty": "canonical|provisional|uncertain?", "sources": "[str]?"}},
+     "description": "Record an adjudication so it stays consistent. label: BOOK | CAMPAIGN | INTERPRETATION | ONE-SCENE | OPEN. "
+                    "ticket: the ticket ref this ruling interprets, so it is shown with that ticket in later turns.",
+     "parameters": {"topic": "str", "ruling": "str", "label": "str", "certainty": "canonical|provisional|uncertain?", "sources": "[str]?",
+                    "ticket": "str?"}},
     {"name": "gm_note", "description": "Store GM-only continuity (hidden consequence, NPC private reaction/plan, secret clock). Never shown to the player.",
      "parameters": {"subject": "str", "content": "str", "kind": "plot|motivation|surprise|note?"}},
     {"name": "reveal_secret",
@@ -81,6 +83,7 @@ class _Ruling(BaseModel):
     label: str = "INTERPRETATION"
     certainty: str = "provisional"
     sources: list[str] = Field(default_factory=list)
+    ticket: str | None = None   # the ticket this ruling interprets (hb.ticket.* or trope:<id>)
 
 
 @dataclass
@@ -210,8 +213,12 @@ class ToolRunner:
             raise ValueError("label must be BOOK, CAMPAIGN, INTERPRETATION, ONE-SCENE or OPEN")
         if r.certainty not in {"canonical", "provisional", "uncertain"}:
             raise ValueError("certainty must be canonical, provisional or uncertain")
-        self.conn.execute("INSERT INTO rulings (campaign_id, turn_id, topic, ruling, certainty, label, sources_json, created_at) VALUES (?,?,?,?,?,?,?,?)",
-                          (self.cid, self.turn_id, r.topic, r.ruling, r.certainty, label, json.dumps(r.sources), now_iso()))
+        if r.ticket:
+            from ..carousel.refdata import ticket_definition
+            if not ticket_definition(self.conn, r.ticket):
+                raise ValueError(f"no such ticket {r.ticket!r} in the reference data")
+        self.conn.execute("INSERT INTO rulings (campaign_id, turn_id, topic, ruling, certainty, label, sources_json, ticket_ref, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                          (self.cid, self.turn_id, r.topic, r.ruling, r.certainty, label, json.dumps(r.sources), r.ticket, now_iso()))
         self.effects.changes.append(f"Ruling recorded ({label}): {r.topic}")
         return {"recorded": True}
 

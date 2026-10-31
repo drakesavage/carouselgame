@@ -20,7 +20,7 @@ def ruling_status(r: dict) -> str:
 
 
 def rulings(conn: sqlite3.Connection, cid: int) -> list[dict]:
-    out = rows(conn, """SELECT id, turn_id, topic, ruling, certainty, label, sources_json, review, review_note, reviewed_at, created_at
+    out = rows(conn, """SELECT id, turn_id, topic, ruling, certainty, label, sources_json, ticket_ref, review, review_note, reviewed_at, created_at
                         FROM rulings WHERE campaign_id = ? ORDER BY id DESC""", (cid,))
     for r in out:
         r["status"] = ruling_status(r)
