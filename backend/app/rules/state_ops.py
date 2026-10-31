@@ -219,7 +219,9 @@ def _close(ctx: Ctx, cur: dict, summary: str, now: int) -> None:
     ctx.conn.execute("UPDATE scenes SET status = 'closed', summary = ?, ended_game_minutes = ? WHERE id = ?", (summary, now, cur["id"]))
     ctx.conn.execute("INSERT INTO memories (campaign_id, layer, subject, content, visibility, importance, turn_id, game_time_minutes, created_at) "
                      "VALUES (?,?,?,?,?,?,?,?,?)", (ctx.campaign_id, "episodic", cur["title"], summary, "player", 2, ctx.turn_id, now, now_iso()))
-    ctx.event("scene_closed", f"Scene ended: {cur['title']}", {"scene_id": cur["id"]})
+    from .carousel_ops import end_scene_modifiers, recharge
+    refilled, ended = recharge(ctx, "scene"), end_scene_modifiers(ctx)
+    ctx.event("scene_closed", f"Scene ended: {cur['title']}", {"scene_id": cur["id"], "tickets_recharged": refilled, "modifiers_ended": ended})
 
 
 class Remember(BaseModel):

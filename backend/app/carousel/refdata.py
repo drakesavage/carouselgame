@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Literal
 
 from ..db import connect
-from ..rules.engine import ChangeError
 
 ONCE_PER = re.compile(r"^\s*once per (scene|story(?:line)?)\b", re.I)
 
@@ -35,6 +34,7 @@ def has_reference(conn: sqlite3.Connection) -> bool:
 
 def require_reference(conn: sqlite3.Connection) -> None:
     if not has_reference(conn):
+        from ..rules.engine import ChangeError  # lazy: the rules package imports this module (carousel_ops)
         raise ChangeError("reference data not imported; run import-data.cmd")
 
 
