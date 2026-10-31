@@ -87,7 +87,6 @@ def restore_preview(conn: sqlite3.Connection, cid: int, save_id: int) -> dict:
 
     diff("Game time", then_c.get("game_time_minutes"), now_c.get("game_time_minutes"), fmt_minutes)
     diff("Location", then_c.get("current_location"), now_c.get("current_location"))
-    diff("Floor", then_c.get("current_floor"), now_c.get("current_floor"))
     gold = lambda items: next((i["quantity"] for i in items if i.get("owner_character_id") is None and str(i["name"]).lower() == "gold"), None)
     now_items = rows(conn, "SELECT name, quantity, owner_character_id FROM items WHERE campaign_id = ?", (cid,))
     diff("Gold", gold(snap.get("items", [])), gold(now_items))
@@ -102,10 +101,9 @@ def restore_preview(conn: sqlite3.Connection, cid: int, save_id: int) -> dict:
     pq = {q["title"]: q["status"] for q in snap.get("quests", []) if q.get("visibility", "player") == "player"}
     nq = {q["title"]: q["status"] for q in rows(conn, "SELECT title, status FROM quests WHERE campaign_id = ? AND visibility = 'player'", (cid,))}
     quest_changes = [f"{t}: {nq.get(t, 'not yet recorded')} → {pq.get(t, 'not yet recorded')}" for t in sorted(set(pq) | set(nq)) if pq.get(t) != nq.get(t)]
-    hp_then = {c["name"]: (c.get("hp_current"), c.get("status")) for c in snap.get("characters", [])}
-    hp_now = {c["name"]: (c["hp_current"], c["status"]) for c in rows(conn, "SELECT name, hp_current, status FROM characters WHERE campaign_id = ?", (cid,))}
-    char_changes = [f"{n}: HP {hp_now.get(n, (None,))[0]} → {v[0]}" + (f", {hp_now.get(n, (None, None))[1]} → {v[1]}" if v[1] != hp_now.get(n, (None, None))[1] else "")
-                    for n, v in sorted(hp_then.items()) if hp_now.get(n) != v]
+    st_then = {c["name"]: c.get("status") for c in snap.get("characters", [])}
+    st_now = {c["name"]: c["status"] for c in rows(conn, "SELECT name, status FROM characters WHERE campaign_id = ?", (cid,))}
+    char_changes = [f"{n}: {st_now.get(n)} → {v}" for n, v in sorted(st_then.items()) if st_now.get(n) != v]
     later = one(conn, """SELECT COUNT(*) AS n FROM messages WHERE campaign_id = ? AND id > ? AND rolled_back = 0 AND visibility = 'player'""",
                 (cid, sp["max_message_id"]))["n"]
     return {"save_point": {"id": sp["id"], "label": sp["label"], "created_at": sp["created_at"]}, "changes": changes,
@@ -145,7 +143,7 @@ def redact(text: str, sensitive: list[str]) -> str:
 
 
 def problem_report(conn: sqlite3.Connection, settings: Settings, cid: int, turn_id: int | None, note: str) -> dict:
-    camp = one(conn, "SELECT id, name, current_location, current_floor, game_time_minutes FROM campaigns WHERE id = ?", (cid,))
+    camp = one(conn, "SELECT id, name, current_location, game_time_minutes FROM campaigns WHERE id = ?", (cid,))
     if not camp:
         raise KeyError("campaign not found")
     turn = one(conn, "SELECT * FROM turns WHERE campaign_id = ? AND id = ?", (cid, turn_id)) if turn_id else \
@@ -197,7 +195,7 @@ def problem_report(conn: sqlite3.Connection, settings: Settings, cid: int, turn_
     groups = rows(conn, "SELECT label, location FROM party_groups WHERE campaign_id = ? AND status = 'active'", (cid,))
     gold = one(conn, "SELECT quantity FROM items WHERE campaign_id = ? AND owner_character_id IS NULL AND lower(name) = 'gold'", (cid,))
     lines += ["## State now", "",
-              f"- Floor {camp['current_floor']} · {camp['current_location']} · game time {fmt_minutes(camp['game_time_minutes'])} · Gold {gold and gold['quantity']}",
+              f"- {camp['current_location']} · game time {fmt_minutes(camp['game_time_minutes'])} · Gold {gold and gold['quantity']}",
               "- Groups: " + ("; ".join(g["label"] + " @ " + (g["location"] or "not recorded") for g in groups) or "none"),
               f"- Record consistency: {consistency.summary(conn, cid)}", ""]
     text = redact("\n".join(lines), _sensitive(conn, cid, settings))

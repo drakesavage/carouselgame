@@ -195,7 +195,6 @@ def _apply_scene(ctx: Ctx, op: SceneChange) -> dict:
                                                 status, started_game_minutes, source, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                          (ctx.campaign_id, op.title, op.location, op.group, op.situation, op.conditions, op.threats, json.dumps(op.participants or []),
                           "active", now, "play", now_iso()))
-        ctx.conn.execute("UPDATE ability_uses SET uses = 0 WHERE campaign_id = ? AND per = 'scene'", (ctx.campaign_id,))
         summary = f"Scene: {op.title}" + (f" @ {op.location}" if op.location else "")
         ctx.event("scene_started", summary, {"title": op.title})
         return {"summary": summary}
@@ -220,7 +219,6 @@ def _close(ctx: Ctx, cur: dict, summary: str, now: int) -> None:
     ctx.conn.execute("UPDATE scenes SET status = 'closed', summary = ?, ended_game_minutes = ? WHERE id = ?", (summary, now, cur["id"]))
     ctx.conn.execute("INSERT INTO memories (campaign_id, layer, subject, content, visibility, importance, turn_id, game_time_minutes, created_at) "
                      "VALUES (?,?,?,?,?,?,?,?,?)", (ctx.campaign_id, "episodic", cur["title"], summary, "player", 2, ctx.turn_id, now, now_iso()))
-    ctx.conn.execute("UPDATE ability_uses SET uses = 0 WHERE campaign_id = ? AND per = 'scene'", (ctx.campaign_id,))
     ctx.event("scene_closed", f"Scene ended: {cur['title']}", {"scene_id": cur["id"]})
 
 

@@ -122,13 +122,8 @@ class IndexIn(BaseModel):
 
 class CampaignIn(BaseModel):
     name: str = Field(max_length=80)
-    crawler: str = Field(max_length=60)
-    race: str | None = Field(default=None, max_length=60)
-    class_name: str | None = Field(default=None, max_length=60)
-    floor: int = Field(default=1, ge=1, le=18)
+    character: str = Field(max_length=60)
     location: str | None = Field(default=None, max_length=120)
-    floor_hours: int | None = Field(default=None, ge=1, le=2000)
-    clock_on_entry: bool = False  # the floor clock waits until the crawler enters the Dungeon
     premise: str | None = Field(default=None, max_length=2000)
 
 
@@ -511,7 +506,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         if not ch:
             raise HTTPException(404, "unknown character")
         brief = art.character_brief(c, cid, ch)
-        record = json.dumps({"name": ch["name"], "race": ch.get("race"), "visual": (ch.get("sheet") or {}).get("visual"),
+        record = json.dumps({"name": ch["name"], "species": ch.get("species"), "visual": (ch.get("sheet") or {}).get("visual"),
                              "public_persona": ((ch.get("sheet") or {}).get("narrative") or {}).get("personality_summary")}, ensure_ascii=False)
         system = ("You help a tabletop player keep character portraits consistent. Propose a short physical description (under 45 "
                   "words, comma-separated) covering only the traits the record leaves open: " + (", ".join(brief["unestablished"]) or

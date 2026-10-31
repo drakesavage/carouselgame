@@ -17,15 +17,12 @@ from ..db import now_iso, one, rows, transaction
 SNAPSHOT_TABLES: dict[str, str] = {
     "campaigns": "SELECT * FROM campaigns WHERE id = ?",
     "characters": "SELECT * FROM characters WHERE campaign_id = ?",
-    "skills": "SELECT s.* FROM skills s JOIN characters c ON c.id = s.character_id WHERE c.campaign_id = ?",
     "items": "SELECT * FROM items WHERE campaign_id = ?",
     "status_effects": "SELECT s.* FROM status_effects s JOIN characters c ON c.id = s.character_id WHERE c.campaign_id = ?",
-    "achievements": "SELECT * FROM achievements WHERE campaign_id = ?",
     "npc_profiles": "SELECT n.* FROM npc_profiles n JOIN characters c ON c.id = n.character_id WHERE c.campaign_id = ?",
     "relationships": "SELECT * FROM relationships WHERE campaign_id = ?",
     "locations": "SELECT * FROM locations WHERE campaign_id = ?",
     "quests": "SELECT * FROM quests WHERE campaign_id = ?",
-    "encounters": "SELECT * FROM encounters WHERE campaign_id = ?",
     "clocks": "SELECT * FROM clocks WHERE campaign_id = ?",
     "house_rules": "SELECT * FROM house_rules WHERE campaign_id = ?",
     "rulings": "SELECT * FROM rulings WHERE campaign_id = ?",
@@ -35,14 +32,13 @@ SNAPSHOT_TABLES: dict[str, str] = {
     "party_groups": "SELECT * FROM party_groups WHERE campaign_id = ?",
     "scenes": "SELECT * FROM scenes WHERE campaign_id = ?",
     "memories": "SELECT * FROM memories WHERE campaign_id = ?",
-    "ability_uses": "SELECT * FROM ability_uses WHERE campaign_id = ?",
     "character_tickets": "SELECT * FROM character_tickets WHERE campaign_id = ?",
     "stat_modifiers": "SELECT * FROM stat_modifiers WHERE campaign_id = ?",
 }
 # Delete children before parents.
-_DELETE_ORDER = ["character_tickets", "stat_modifiers", "skills", "status_effects", "npc_profiles", "relationships", "achievements", "items", "locations",
-                 "quests", "encounters", "clocks", "house_rules", "rulings", "lore_facts", "gm_secrets",
-                 "memory_summaries", "party_groups", "scenes", "memories", "ability_uses", "characters"]
+_DELETE_ORDER = ["character_tickets", "stat_modifiers", "status_effects", "npc_profiles", "relationships", "items", "locations",
+                 "quests", "clocks", "house_rules", "rulings", "lore_facts", "gm_secrets",
+                 "memory_summaries", "party_groups", "scenes", "memories", "characters"]
 _LOGS = {"messages": "max_message_id", "events": "max_event_id", "turns": "max_turn_id"}
 
 
@@ -105,7 +101,7 @@ def restore_save_point(conn: sqlite3.Connection, cid: int, save_point_id: int) -
         marks = ",".join("?" * len(char_ids)) or "NULL"
         # Tables a save point predates (added in a later schema) are left as they are.
         for table in [t for t in _DELETE_ORDER if t in snapshot]:
-            if table in ("skills", "status_effects"):
+            if table == "status_effects":
                 conn.execute(f"DELETE FROM {table} WHERE character_id IN ({marks})", char_ids)
             elif table == "npc_profiles":
                 conn.execute(f"DELETE FROM npc_profiles WHERE character_id IN ({marks})", char_ids)

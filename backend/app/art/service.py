@@ -113,7 +113,7 @@ def character_brief(conn: sqlite3.Connection, cid: int, c: dict) -> dict:
     sheet = c.get("sheet") or {}
     vis = sheet.get("visual") or {}
     narrative = sheet.get("narrative") or {}
-    race = c.get("race") or c.get("species") or ""
+    race = c.get("species") or ""
     others = [o["name"].split()[0] for o in rows(conn, "SELECT name FROM characters WHERE campaign_id = ? AND id != ?", (cid, c["id"]))]
 
     def drawable(line: str) -> bool:
@@ -364,10 +364,10 @@ def subject_layout(conn: sqlite3.Connection, cid: int, kind: str, subject_id: in
     """Framing and size: a tall waist-up portrait suits people; animals get a full-body pose (a tall frame makes SDXL
     stand a quadruped upright like a person), and big low animals a wide frame."""
     if kind == "character" and subject_id:
-        c = one(conn, "SELECT race, sheet_json FROM characters WHERE campaign_id = ? AND id = ?", (cid, subject_id))
+        c = one(conn, "SELECT species, sheet_json FROM characters WHERE campaign_id = ? AND id = ?", (cid, subject_id))
         if c:
             ref = ((c.get("sheet") or {}).get("visual") or {}).get("reference") or {}
-            what = f"{ref.get('demographic') or ''} {c.get('race') or ''}"
+            what = f"{ref.get('demographic') or ''} {c.get('species') or ''}"
             if BIG_ANIMAL.search(what):
                 return BIG_ANIMAL_STYLE, (1216, 832)
             if ANIMALS.search(what):

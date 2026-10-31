@@ -22,7 +22,7 @@ TOOL_SPECS: list[dict] = [
     {"name": "apply_changes",
      "description": "Validate and apply durable state changes. Each change is an object with an `op`. Characters may be referenced by "
                     "name, slug, numeric id or 'player'; items by name or item_id. character null/'shared' = shared stash. "
-                    "Use skill/level/ai_favor for training and awards, group/move_group/move_character for party splits (never teleport "
+                    "Use group/move_group/move_character for party splits (never teleport "
                     "people: only move who actually goes), scene to keep the current scene current, remember for NPC memories and private "
                     "beats, quest kind commitment/reservation for promises and held items (a reservation is never an owned item: when it is "
                     "claimed, complete the reservation quest earlier in the same batch, then add_item), "

@@ -98,7 +98,6 @@ class AdvanceTime(BaseModel):
 class SetLocation(BaseModel):
     op: Literal["set_location"]
     location: str = Field(min_length=1)
-    floor: int | None = Field(default=None, ge=0)
     safe_room: bool | None = None
     description: str | None = None
 
@@ -143,7 +142,6 @@ class NpcUpsert(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     role: str | None = Field(default=None, max_length=120)          # what they are to the party, e.g. "Game Guide"
     category: Literal["allied_npcs", "neutral_npcs", "hostile_npcs", "contacts", "dungeon_staff"] | None = None
-    race: str | None = Field(default=None, max_length=60)
     gender: str | None = Field(default=None, max_length=40)          # decided when they are introduced, as anyone looking at them would see
     pronouns: str | None = Field(default=None, max_length=30)        # used in narration, e.g. "she/her"
     apparent_age: str | None = Field(default=None, max_length=40)    # e.g. "mid-40s"
@@ -153,7 +151,6 @@ class NpcUpsert(BaseModel):
     voice: str | None = Field(default=None, max_length=200)
     known_motivation: str | None = Field(default=None, max_length=300)
     attitude: int | None = Field(default=None, ge=-3, le=3)        # only when first recorded; later shifts use npc_attitude
-    crawler: bool | None = None     # true once they have entered the Dungeon as a crawler (they get crawler rules, achievements, boxes)
     in_party: bool | None = None    # true when they travel and fight with the player character's party
 
 
@@ -367,18 +364,16 @@ def _apply_advance_time(ctx: Ctx, op: AdvanceTime) -> dict:
     return {"summary": summary, "game_time_minutes": after}
 
 def _apply_set_location(ctx: Ctx, op: SetLocation) -> dict:
-    camp = one(ctx.conn, "SELECT current_floor FROM campaigns WHERE id = ?", (ctx.campaign_id,))
-    floor = op.floor if op.floor is not None else camp["current_floor"]
-    sets, params = ["current_location = ?", "current_floor = ?", "updated_at = ?"], [op.location, floor, now_iso()]
+    sets, params = ["current_location = ?", "updated_at = ?"], [op.location, now_iso()]
     if op.safe_room is not None:
         sets.append("safe_room = ?")
         params.append(int(op.safe_room))
     ctx.conn.execute(f"UPDATE campaigns SET {', '.join(sets)} WHERE id = ?", (*params, ctx.campaign_id))
     if not one(ctx.conn, "SELECT id FROM locations WHERE campaign_id = ? AND lower(name) = lower(?)", (ctx.campaign_id, op.location)):
-        ctx.conn.execute("INSERT INTO locations (campaign_id, floor, name, description) VALUES (?,?,?,?)",
-                         (ctx.campaign_id, floor, op.location, op.description))
-    summary = f"Party moves to {op.location}" + (f" (Floor {floor})" if floor is not None else "")
-    ctx.event("location_changed", summary, {"location": op.location, "floor": floor, "safe_room": op.safe_room})
+        ctx.conn.execute("INSERT INTO locations (campaign_id, name, description) VALUES (?,?,?)",
+                         (ctx.campaign_id, op.location, op.description))
+    summary = f"Party moves to {op.location}"
+    ctx.event("location_changed", summary, {"location": op.location, "safe_room": op.safe_room})
     # the player character's group (and so its members) is where the campaign is (playtest 1, H4)
     from .state_ops import pc_group, remember_saferoom
     if op.safe_room:
@@ -486,18 +481,16 @@ def _apply_npc(ctx: Ctx, op: NpcUpsert) -> dict:
         if ident:
             sheet["identity"] = ident
         cid = ctx.conn.execute(
-            """INSERT INTO characters (campaign_id, slug, name, kind, roster_category, race, species, status, location, in_party, bio, sheet_json, provenance)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (ctx.campaign_id, slug, name, "crawler" if op.crawler else "npc", op.category or ("core_party" if op.in_party else "neutral_npcs"),
-             op.race, op.race, "active", op.location, int(bool(op.in_party)), op.description, json.dumps(sheet), f"turn {ctx.turn_id}")).lastrowid
+            """INSERT INTO characters (campaign_id, slug, name, kind, roster_category, status, location, in_party, bio, sheet_json, provenance)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (ctx.campaign_id, slug, name, "npc", op.category or ("core_party" if op.in_party else "neutral_npcs"),
+             "active", op.location, int(bool(op.in_party)), op.description, json.dumps(sheet), f"turn {ctx.turn_id}")).lastrowid
         ctx.conn.execute("INSERT INTO npc_profiles (character_id, personality, voice, known_motivation, attitude, last_seen) VALUES (?,?,?,?,?,?)",
                          (cid, op.personality, op.voice, op.known_motivation, op.attitude, op.location))
         summary = f"Met {name}" + (f", {op.role}" if op.role else "") + (f" ({op.location})" if op.location else "")
         ctx.event("npc_met", summary, {"character_id": cid, "role": op.role})
         return {"summary": summary, "character_id": cid}
-    sets = {k: v for k, v in {"roster_category": op.category, "race": op.race, "location": op.location, "bio": op.description}.items() if v is not None}
-    if op.crawler is not None:
-        sets["kind"] = "crawler" if op.crawler else "npc"
+    sets = {k: v for k, v in {"roster_category": op.category, "location": op.location, "bio": op.description}.items() if v is not None}
     if op.in_party is not None:
         sets["in_party"] = int(op.in_party)
         if op.in_party and not op.category and c.get("roster_category") in (None, "neutral_npcs", "allied_npcs", "contacts"):

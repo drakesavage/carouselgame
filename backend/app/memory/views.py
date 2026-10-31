@@ -11,9 +11,8 @@ import sqlite3
 
 from ..db import one, rows
 
-PUBLIC_CHAR_COLUMNS = """id, campaign_id, slug, name, kind, roster_category, crawler_number, species, race, class_name, level,
-    status, location, in_party, party_order, hp_current, hp_max, mana_current, mana_max, ai_favor, stats_json,
-    derived_json, portrait_path, portrait_crop_json, provenance, assignment"""
+PUBLIC_CHAR_COLUMNS = """id, campaign_id, slug, name, kind, roster_category, species, status, location, in_party, party_order,
+    role_id, aspect_id, advanced_role_id, role_reason, portrait_path, portrait_crop_json, provenance, assignment"""
 
 
 def _statuses(conn: sqlite3.Connection, char_id: int) -> list[dict]:
@@ -29,31 +28,32 @@ LIFE_STATES = (  # (pattern on status / roster category, state); first match win
 
 
 def life_state(c: dict) -> dict:
-    """Whether someone is around at all, kept apart from combat HP: a deceased character's HP is the last record, not a reading."""
+    """Whether someone is around at all."""
     hay = f"{c.get('status') or ''} {c.get('roster_category') or ''} {c.get('kind') or ''}".lower()
     state = next((s for pat, s in LIFE_STATES if re.search(pat, hay)), "active")
     status = (c.get("status") or "").strip()
     label = "Deceased" if state == "deceased" else status.replace("_", " ").replace("-", " ").capitalize() if status and status != "active" else state.capitalize()
-    note = "HP shown is the last record before death." if state == "deceased" and c.get("hp_max") is not None else None
-    return {"state": state, "label": label, "note": note}
+    return {"state": state, "label": label, "note": None}
 
 
 def character_card(conn: sqlite3.Connection, c: dict) -> dict:
     c = dict(c)
     c["life"] = life_state(c)
     c["statuses"] = _statuses(conn, c["id"])
+    from ..carousel.sheet import sheet
+    c["stats"] = sheet(conn, c["id"])   # Carousel stats and Plot Armor; c["sheet"] is the decoded sheet_json
     c["equipped"] = rows(conn, "SELECT id, name, slot FROM items WHERE owner_character_id = ? AND equipped = 1 ORDER BY id", (c["id"],))
     return c
 
 
 # ------------------------------------------------------------------ player
 def list_campaigns(conn: sqlite3.Connection) -> list[dict]:
-    return rows(conn, "SELECT id, name, is_demo, data_source, current_floor, current_location, archived, updated_at FROM campaigns ORDER BY id")
+    return rows(conn, "SELECT id, name, is_demo, data_source, current_location, archived, updated_at FROM campaigns ORDER BY id")
 
 
 def campaign_summary(conn: sqlite3.Connection, cid: int) -> dict | None:
-    camp = one(conn, """SELECT id, name, is_demo, data_source, current_floor, current_location, safe_room, game_time_minutes,
-                               floor_deadline_minutes, floor_clock_pending_minutes, active_character_id, active_objective, objective_quests_json, updated_at
+    camp = one(conn, """SELECT id, name, is_demo, data_source, current_location, safe_room, game_time_minutes,
+                               active_character_id, active_objective, objective_quests_json, updated_at
                         FROM campaigns WHERE id = ?""", (cid,))
     if not camp:
         return None
@@ -95,11 +95,8 @@ def character_sheet(conn: sqlite3.Connection, cid: int, char_id: int) -> dict | 
     if not c:
         return None
     c = character_card(conn, c)
-    c["skills"] = rows(conn, "SELECT id, kind, name, rank, mana_cost, passive, marked, description, properties_json FROM skills WHERE character_id = ? ORDER BY kind, rank DESC, name", (char_id,))
     c["items"] = rows(conn, "SELECT id, name, quantity, equipped, slot, rarity, description, properties_json FROM items WHERE owner_character_id = ? ORDER BY equipped DESC, name", (char_id,))
-    c["achievements"] = rows(conn, "SELECT title, description, game_time_minutes FROM achievements WHERE character_id = ? ORDER BY id DESC", (char_id,))
     c["npc_profile"] = one(conn, "SELECT personality, voice, known_motivation, attitude, last_seen FROM npc_profiles WHERE character_id = ?", (char_id,))
-    c["limited_uses"] = rows(conn, "SELECT ability, per, uses, uses_allowed, cooldown_minutes FROM ability_uses WHERE character_id = ? ORDER BY ability", (char_id,))
     c["relationships"] = rows(conn, """SELECT r.kind, r.description, a.name AS a_name, b.name AS b_name FROM relationships r
                                        JOIN characters a ON a.id = r.a_character_id JOIN characters b ON b.id = r.b_character_id
                                        WHERE r.visibility = 'player' AND (r.a_character_id = ? OR r.b_character_id = ?)""", (char_id, char_id))
@@ -117,8 +114,8 @@ def quests(conn: sqlite3.Connection, cid: int) -> list[dict]:
 
 
 # record-keeping, not something that happened between the party and a person
-BOOKKEEPING_EVENTS = ("time_advanced", "correction", "trap_recorded", "item_added", "item_removed", "item_transferred", "hp_changed",
-                      "mana_changed", "item_count_set", "quest_updated", "clock_changed", "visual_reference", "ledger_synced")
+BOOKKEEPING_EVENTS = ("time_advanced", "correction", "trap_recorded", "item_added", "item_removed", "item_transferred",
+                      "item_count_set", "quest_updated", "clock_changed", "visual_reference", "ledger_synced")
 
 
 def npcs(conn: sqlite3.Connection, cid: int) -> list[dict]:

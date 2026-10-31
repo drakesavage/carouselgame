@@ -1,6 +1,6 @@
 """Campaign management: start a new campaign, rename, archive, and delete.
 
-* New: a blank campaign with one player character and an opening save point. Stats, skills and gear are
+* New: a blank campaign with one player character and an opening save point. Stats, role, tickets and gear are
   left empty for character creation in play; nothing is invented.
 * Archive: hidden from the campaign picker, nothing removed. Unarchive brings it back.
 * Delete: game PC only, the exact name must be typed, and never while a turn is running. A database backup is taken
@@ -19,7 +19,7 @@ from .db import next_campaign_id, now_iso, one, remember_campaign_id, rows, tran
 from .memory.snapshots import create_save_point
 
 # tables that hang off characters instead of carrying campaign_id
-CHARACTER_CHILDREN = ("skills", "status_effects", "npc_profiles")
+CHARACTER_CHILDREN = ("status_effects", "npc_profiles")
 
 
 def slug(name: str) -> str:
@@ -28,37 +28,27 @@ def slug(name: str) -> str:
 
 def summary(conn: sqlite3.Connection) -> list[dict]:
     """Every campaign with what the manager shows: size, last play, archived."""
-    return rows(conn, """SELECT c.id, c.name, c.is_demo, c.data_source, c.current_floor, c.current_location, c.archived, c.created_at, c.updated_at,
+    return rows(conn, """SELECT c.id, c.name, c.is_demo, c.data_source, c.current_location, c.archived, c.created_at, c.updated_at,
                                 (SELECT COUNT(*) FROM turns t WHERE t.campaign_id = c.id AND t.status = 'completed') AS turns,
                                 (SELECT MAX(t.created_at) FROM turns t WHERE t.campaign_id = c.id) AS last_played,
                                 (SELECT COUNT(*) FROM characters h WHERE h.campaign_id = c.id) AS characters,
-                                (SELECT name FROM characters h WHERE h.id = c.active_character_id) AS crawler
+                                (SELECT name FROM characters h WHERE h.id = c.active_character_id) AS character
                          FROM campaigns c ORDER BY c.archived, c.id""")
 
 
-def create(conn: sqlite3.Connection, *, name: str, crawler: str, race: str | None = None, class_name: str | None = None,
-           floor: int = 1, location: str | None = None, floor_hours: int | None = None, premise: str | None = None,
-           clock_on_entry: bool = False) -> int:
-    """clock_on_entry: the floor clock waits (floor_clock_pending_minutes) until the GM starts it as the crawler enters the Dungeon."""
-    name, crawler = name.strip(), crawler.strip()
-    if not name or not crawler:
-        raise ValueError("a campaign name and a crawler name are required")
+def create(conn: sqlite3.Connection, *, name: str, character: str, location: str | None = None, premise: str | None = None) -> int:
+    name, character = name.strip(), character.strip()
+    if not name or not character:
+        raise ValueError("a campaign name and a character name are required")
     if one(conn, "SELECT id FROM campaigns WHERE name = ?", (name,)):
         raise ValueError(f"a campaign named '{name}' already exists")
     t = now_iso()
     with transaction(conn):
         cid = next_campaign_id(conn)
-        conn.execute(
-            """INSERT INTO campaigns (id, name, is_demo, data_source, current_floor, current_location, safe_room, game_time_minutes,
-                                      floor_deadline_minutes, floor_clock_pending_minutes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (cid, name, 0, "manual", floor, (location or "").strip() or None, 0, 0,
-             floor_hours * 60 if floor_hours and not clock_on_entry else None, floor_hours * 60 if floor_hours and clock_on_entry else None, t, t))
-        pc = conn.execute(
-            """INSERT INTO characters (campaign_id, slug, name, kind, roster_category, species, race, class_name, level, status, in_party,
-                                       party_order, ai_favor, stats_json, derived_json, sheet_json, bio, provenance)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (cid, slug(crawler), crawler, "crawler", "player_character", (race or "").strip() or None, (race or "").strip() or None,
-             (class_name or "").strip() or None, None, "active", 1, 0, None, "{}", "{}", "{}", None, "manual")).lastrowid
+        conn.execute("""INSERT INTO campaigns (id, name, is_demo, data_source, current_location, safe_room, game_time_minutes, created_at, updated_at)
+                        VALUES (?,?,?,?,?,?,?,?,?)""", (cid, name, 0, "manual", (location or "").strip() or None, 0, 0, t, t))
+        pc = conn.execute("""INSERT INTO characters (campaign_id, slug, name, kind, roster_category, status, in_party, party_order, sheet_json, provenance)
+                             VALUES (?,?,?,?,?,?,?,?,?,?)""", (cid, slug(character), character, "pc", "player_character", "active", 1, 0, "{}", "manual")).lastrowid
         conn.execute("UPDATE campaigns SET active_character_id = ? WHERE id = ?", (pc, cid))
         if (premise or "").strip():
             conn.execute("""INSERT INTO lore_facts (campaign_id, subject, fact, certainty, visibility, source, created_at)

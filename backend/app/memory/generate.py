@@ -77,20 +77,20 @@ Rules:
 
 
 def _record(conn: sqlite3.Connection, cid: int, c: dict) -> str:
-    camp = one(conn, "SELECT name, current_floor, current_location, game_time_minutes, active_character_id FROM campaigns WHERE id = ?", (cid,))
-    pc = one(conn, "SELECT name, race, class_name, bio, sheet_json FROM characters WHERE id = ?", (camp["active_character_id"],)) if camp["active_character_id"] else None
+    camp = one(conn, "SELECT name, current_location, game_time_minutes, active_character_id FROM campaigns WHERE id = ?", (cid,))
+    pc = one(conn, "SELECT name, role_id, bio, sheet_json FROM characters WHERE id = ?", (camp["active_character_id"],)) if camp["active_character_id"] else None
     sheet = c.get("sheet") or {}
     prof = one(conn, "SELECT personality, voice, known_motivation, attitude FROM npc_profiles WHERE character_id = ?", (c["id"],)) or {}
-    out = [f"CAMPAIGN: {camp['name']} | Floor {camp['current_floor']} | now at {camp['current_location'] or 'unknown'}"]
+    out = [f"CAMPAIGN: {camp['name']} | now at {camp['current_location'] or 'unknown'}"]
     premise = one(conn, "SELECT fact FROM lore_facts WHERE campaign_id = ? AND subject = 'Campaign premise' ORDER BY id LIMIT 1", (cid,))
     if premise:
         out.append(f"Premise: {premise['fact']}")
     if pc:
-        out.append(f"PLAYER CHARACTER: {pc['name']} ({', '.join(x for x in (pc['race'], pc['class_name']) if x) or 'crawler'})"
+        out.append(f"PLAYER CHARACTER: {pc['name']} ({pc['role_id'] or 'role not assigned'})"
                    + (f" — {pc['bio']}" if pc.get("bio") else ""))
     out.append("\nESTABLISHED about the character to create (canon):")
     out.append(f"- name: {c['name']} | kind: {c['kind']} | roster: {c.get('roster_category') or '-'} | status: {c['status']}")
-    for k, v in (("race", c.get("race")), ("level", c.get("level")), ("location", c.get("location")), ("description", c.get("bio"))):
+    for k, v in (("role", c.get("role_id")), ("location", c.get("location")), ("description", c.get("bio"))):
         if v:
             out.append(f"- {k}: {v}")
     for k, v in sheet.items():
@@ -160,7 +160,7 @@ def generate(conn: sqlite3.Connection, cid: int, char_id: int, settings, *, prov
     sheet["identity"] = {**{k: g[k] for k in ("gender", "pronouns", "apparent_age") if g.get(k)}, **(sheet.get("identity") or {})}
     ap = g["appearance"]
     vis = sheet.setdefault("visual", {})
-    vis["reference"] = {**{"demographic": ", ".join(x for x in (g["gender"], c.get("race") or "Human") if x), "age": g["apparent_age"],
+    vis["reference"] = {**{"demographic": ", ".join(x for x in (g["gender"], c.get("species") or "Human") if x), "age": g["apparent_age"],
                            "physique": ap["physique"], "outfit": ap["outfit"], "signature": ap["signature"], "expression": ap["expression"]},
                         **(vis.get("reference") or {})}
     vis.setdefault("summary", ap["summary"])

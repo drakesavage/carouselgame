@@ -61,29 +61,28 @@ def _words(text: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9']+", (text or "").lower()) if len(w) > 2 and w not in STOP}
 
 
-def _fmt_mods(c: dict) -> str:
-    st = (c.get("stats") or {})
-    stats, mods = st.get("stats") or {}, st.get("modifiers") or {}
-    if not stats and not mods:
-        return "stats: not established"
-    return "stats: " + ", ".join(f"{k[:3].upper()} {stats.get(k, '?')} ({mods.get(k, 0):+d})" for k in
-                                 ["strength", "intelligence", "constitution", "dexterity", "charisma"] if k in stats or k in mods)
+def _sheet_lines(conn: sqlite3.Connection, c: dict) -> list[str]:
+    """Role, five stats (base -> current when they differ), Plot Armor base/current/effective, and active modifiers."""
+    from ..carousel.sheet import STATS, sheet
+    sh = sheet(conn, c["id"])
+    role = c.get("role_id") or "no Archetype assigned"
+    lines = [f"role: {role}" + (f" ({c['role_reason']})" if c.get("role_reason") else "")]
+    if sh["stats"]["Mettle"] is None:
+        lines.append("stats: not assigned yet")
+        return lines
+    pa = sh["plot_armor"]
+    lines.append("stats: " + ", ".join(f"{s} {sh['stats'][s]}" + (f"->{sh['current'][s]}" if sh["current"][s] != sh["stats"][s] else "") for s in STATS)
+                 + f" | Plot Armor {pa['base']}/{pa['current']}/{pa['effective']} (base/current/effective)")
+    if sh["modifiers"]:
+        lines.append("modifiers: " + "; ".join(f"#{m['id']} {m['target']} {'x' if m['op'] == 'multiply' else '+'}{m['value']:g} "
+                                              f"from {m['source']} ({m['scope']})" for m in sh["modifiers"]))
+    return lines
 
 
-def _res(c: dict, key: str, label: str) -> str:
-    cur, mx = c.get(f"{key}_current"), c.get(f"{key}_max")
-    return f"{label} {cur if cur is not None else '?'}/{mx if mx is not None else '?'}"
-
-
-def _skills(conn: sqlite3.Connection, char_id: int, limit: int | None = None) -> str:
-    sk = rows(conn, "SELECT kind, name, rank, passive, marked, mana_cost FROM skills WHERE character_id = ? ORDER BY kind, rank DESC, name", (char_id,))
-    if limit:
-        sk = sk[:limit]
-    parts = []
-    for s in sk:
-        tag = "" if s["kind"] == "skill" else f" [{s['kind']}{', ' + str(s['mana_cost']) + ' mana' if s['mana_cost'] else ''}]"
-        parts.append(f"{s['name']} {s['rank'] if s['rank'] is not None else '?'}{tag}{' (P)' if s['passive'] else ''}{' *marked' if s['marked'] else ''}")
-    return ", ".join(parts) or "none recorded"
+def _pa(conn: sqlite3.Connection, c: dict) -> str:
+    from ..carousel.sheet import sheet
+    pa = sheet(conn, c["id"])["plot_armor"]
+    return "PA ?" if pa["effective"] is None else f"PA {pa['effective']}"
 
 
 def _statuses(conn: sqlite3.Connection, char_id: int) -> str:
@@ -104,32 +103,12 @@ def _items(conn: sqlite3.Connection, char_id: int, detail: bool = False) -> str:
                      + (_item_note(i) if detail else "") for i in it) or "none"
 
 
-def _uses(conn: sqlite3.Connection, char_id: int) -> str:
-    us = rows(conn, "SELECT ability, per, uses, uses_allowed FROM ability_uses WHERE character_id = ?", (char_id,))
-    return ", ".join(f"{u['ability']} {u['uses']}/{u['uses_allowed']} per {u['per'].replace('_', ' ')}" for u in us)
-
-
 def _full_char(conn: sqlite3.Connection, c: dict, where: str | None = None, budget: int = DEFAULT_BUDGET["present_each"]) -> str:
-    d = c.get("derived") or {}
     sheet = c.get("sheet") or {}
     lines = [f"### {c['name']} (id {c['id']}, {c['slug']}) — {c['kind']}, {c.get('roster_category') or ''}, status {c['status']}" + (f" — {where}" if where else ""),
-             f"Level {c['level'] if c['level'] is not None else '?'} | {c.get('race') or c.get('species') or '?'} {c.get('class_name') or ''} | "
-             f"{_res(c, 'hp', 'HP')} | {_res(c, 'mana', 'Mana')} | AI Favor {c.get('ai_favor') if c.get('ai_favor') is not None else '?'}",
-             _fmt_mods(c),
-             "derived: " + ", ".join(f"{k} {json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v}" for k, v in d.items() if k in
-                                     ("evade", "damage_resistance", "move", "step", "size", "health_bar", "unallocated_stat_points", "level_progress")),
-             "skills: " + _skills(conn, c["id"]),
+             *_sheet_lines(conn, c),
              "statuses: " + _statuses(conn, c["id"]),
              "carrying: " + _items(conn, c["id"], detail=True)]
-    uses = _uses(conn, c["id"])
-    if uses:
-        lines.append("limited uses: " + uses)
-    attacks = sheet.get("attacks")
-    if attacks:
-        lines.append("attacks: " + "; ".join(f"{a.get('name')} +{a.get('attack_bonus', a.get('attack_bonus_before_disadvantage', '?'))} {a.get('damage', '')}"
-                                             for a in (attacks.values() if isinstance(attacks, dict) else attacks) if isinstance(a, dict)))
-    if sheet.get("hotlist"):
-        lines.append("hotlist: " + ", ".join(map(str, sheet["hotlist"])))
     ident = sheet.get("identity") if isinstance(sheet.get("identity"), dict) else {}
     if c["kind"] == "npc":  # a person in front of the crawler has a visible gender; never leave it to "they" by default
         lines.append("identity: " + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in ident.items()) if ident.get("pronouns")
@@ -252,7 +231,7 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
         members = [c for c in chars if c.get("assignment") == g["key"]]
         tag = " ← PLAYER CHARACTER IS HERE" if g["key"] == pc_group else ""
         po.append(f"- [{g['key']}] {g['label']} @ {g['location'] or 'location not recorded'}{tag}" + (f" — {g['activity']}" if g["activity"] else ""))
-        po.append("  members: " + ", ".join(f"{c['name']} (id {c['id']}, {_res(c, 'hp', 'HP')}, {c['status']})" for c in members))
+        po.append("  members: " + ", ".join(f"{c['name']} (id {c['id']}, {_pa(conn, c)}, {c['status']})" for c in members))
     loose = [c for c in chars if not c.get("assignment") and c["id"] != (pc or {}).get("id") and c["status"] not in ("deceased", "dead")]
     if loose and groups:
         po.append("- Not in a group: " + ", ".join(f"{c['name']} (id {c['id']}, {c['location'] or 'location unknown'})" for c in loose))
@@ -290,7 +269,7 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     absent_named = [by_id[i]["name"] for i in named if i not in full_ids]
     if len(present) > B["max_present_full"]:
         omissions.append(f"PRESENT: {len(present) - B['max_present_full']} present characters shown compact (max_present_full {B['max_present_full']})")
-        blocks.append("Also present (compact): " + ", ".join(f"{by_id[i]['name']} (id {i}): L{by_id[i]['level']}, {_res(by_id[i], 'hp', 'HP')}; top skills {_skills(conn, i, 5)}"
+        blocks.append("Also present (compact): " + ", ".join(f"{by_id[i]['name']} (id {i}): {by_id[i].get('role_id') or 'no role'}, {_pa(conn, by_id[i])}"
                                                           for i in present[B["max_present_full"]:]))
     if absent_named:
         blocks.append("Also mentioned: " + ", ".join(absent_named))

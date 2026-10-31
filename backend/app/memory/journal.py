@@ -150,8 +150,8 @@ def lore_notebook(conn: sqlite3.Connection, cid: int) -> list[dict]:
 
 # ------------------------------------------------------------------ chronology
 def chronology(conn: sqlite3.Connection, cid: int) -> dict:
-    """Dated console events by Dungeon Day (game time), and the imported history whose dates the records don't give."""
-    length = (one(conn, "SELECT day_length_minutes FROM campaigns WHERE id = ?", (cid,)) or {}).get("day_length_minutes") or 1800
+    """Dated events by day of game time (24-hour days), and the imported history whose dates the records don't give."""
+    length = 1440
     events = rows(conn, """SELECT id, type, summary, game_time_minutes, created_at FROM events WHERE campaign_id = ? AND visibility = 'player'
                            AND rolled_back = 0 ORDER BY COALESCE(game_time_minutes, -1) DESC, id DESC LIMIT 500""", (cid,))
     days: dict[int | None, list] = {}

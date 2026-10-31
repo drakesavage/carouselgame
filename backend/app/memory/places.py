@@ -30,8 +30,8 @@ def key(name: str) -> str:
 
 
 def known_world(conn: sqlite3.Connection, cid: int) -> dict:
-    camp = one(conn, "SELECT current_location, current_floor, safe_room FROM campaigns WHERE id = ?", (cid,))
-    floor = camp["current_floor"]
+    camp = one(conn, "SELECT current_location, safe_room FROM campaigns WHERE id = ?", (cid,))
+    floor = None  # shortcut: no floors in Carousel; the maps (Phase 3) replace this view
     nodes: dict[str, dict] = {}
     roots: list[str] = []
 
@@ -66,8 +66,8 @@ def known_world(conn: sqlite3.Connection, cid: int) -> dict:
             parent = k
         return key(c[-1]) if c else None
 
-    for loc in rows(conn, "SELECT name, floor, description, visited FROM locations WHERE campaign_id = ? AND discovered = 1 AND visibility = 'player'", (cid,)):
-        add(loc["name"], visited=bool(loc.get("visited", 1)), floor_=loc["floor"], description=loc["description"], source="recorded place")
+    for loc in rows(conn, "SELECT name, description, visited FROM locations WHERE campaign_id = ? AND discovered = 1 AND visibility = 'player'", (cid,)):
+        add(loc["name"], visited=bool(loc.get("visited", 1)), description=loc["description"], source="recorded place")
     for s in rows(conn, "SELECT location FROM scenes WHERE campaign_id = ? AND location IS NOT NULL", (cid,)):
         add(s["location"], visited=True, source="scene")
     moves = []

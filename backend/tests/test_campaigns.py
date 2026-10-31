@@ -9,23 +9,23 @@ PHONE = {"X-Forwarded-For": "192.168.1.50", "X-Forwarded-Prefix": "/dcc", "X-For
 
 
 def new(client, **kw):
-    body = {"name": "Second Crawl", "crawler": "Donut Jr", "race": "Cat", "premise": "A new party enters the dungeon.", **kw}
+    body = {"name": "Second Crawl", "character": "Donut Jr", "location": "the abandoned lot", "premise": "A new group drives into town.", **kw}
     r = client.post("/api/campaigns", json=body)
     assert r.status_code == 200, r.text
     return r.json()["campaign_id"]
 
 
-def test_a_new_campaign_has_its_crawler_and_a_start_save_and_nothing_invented(client, conn):
+def test_a_new_campaign_has_its_character_and_a_start_save_and_nothing_invented(client, conn):
     cid = new(client)
     camp = client.get(f"/api/campaigns/{cid}").json()
     assert camp["name"] == "Second Crawl" and "floor_clock" not in camp
     pc = one(conn, "SELECT * FROM characters WHERE id = ?", (camp["active_character_id"],))
-    assert pc["name"] == "Donut Jr" and pc["race"] == "Cat" and pc["in_party"] == 1
-    assert pc["level"] is None and pc["hp_max"] is None and pc["ai_favor"] is None      # unknown stays unknown
+    assert pc["name"] == "Donut Jr" and pc["kind"] == "pc" and pc["in_party"] == 1
+    assert pc["mettle"] is None and pc["role_id"] is None      # unknown stays unknown: Silas assigns the role in play
     assert one(conn, "SELECT COUNT(*) n FROM items WHERE campaign_id = ?", (cid,))["n"] == 0
     assert [s["label"] for s in client.get(f"/api/campaigns/{cid}/saves").json()] == ["Campaign started"]
-    assert client.post("/api/campaigns", json={"name": "Second Crawl", "crawler": "X"}).status_code == 422   # names are unique
-    assert client.post("/api/campaigns", json={"name": " ", "crawler": "X"}).status_code == 422
+    assert client.post("/api/campaigns", json={"name": "Second Crawl", "character": "X"}).status_code == 422   # names are unique
+    assert client.post("/api/campaigns", json={"name": " ", "character": "X"}).status_code == 422
 
 
 def test_rename_and_archive(client):
@@ -34,7 +34,7 @@ def test_rename_and_archive(client):
     row = next(c for c in client.get("/api/campaigns").json() if c["id"] == cid)
     assert row["name"] == "Renamed Crawl" and row["archived"] == 1
     managed = next(c for c in client.get("/api/campaigns-manage").json() if c["id"] == cid)
-    assert managed["crawler"] == "Donut Jr" and managed["turns"] == 0
+    assert managed["character"] == "Donut Jr" and managed["turns"] == 0
     assert client.patch(f"/api/campaigns/{cid}", json={"archived": False}).status_code == 200
     assert client.patch("/api/campaigns/9999", json={"name": "x"}).status_code == 404
 
@@ -59,7 +59,8 @@ def test_delete_needs_the_exact_name_backs_up_first_and_removes_only_that_campai
     for t in [x["name"] for x in rows(conn, "SELECT name FROM sqlite_master WHERE type = 'table' AND sql NOT LIKE 'CREATE VIRTUAL%'")]:
         if any(c["name"] == "campaign_id" for c in rows(conn, f"PRAGMA table_info({t})")):
             assert one(conn, f"SELECT COUNT(*) n FROM {t} WHERE campaign_id = ?", (cid,))["n"] == 0, t
-    assert one(conn, "SELECT COUNT(*) n FROM skills WHERE character_id NOT IN (SELECT id FROM characters)")["n"] == 0
+    for t in ("character_tickets", "stat_modifiers", "status_effects"):
+        assert one(conn, f"SELECT COUNT(*) n FROM {t} WHERE character_id NOT IN (SELECT id FROM characters)")["n"] == 0
     assert {t: one(conn, f"SELECT COUNT(*) n FROM {t} WHERE campaign_id = ?", (campaign_id,))["n"] for t in before_demo} == before_demo
 
     kept = settings.data_dir / "backups" / out["backup"]

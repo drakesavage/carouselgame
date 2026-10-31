@@ -53,17 +53,16 @@ def test_invalid_state_change_is_reported_not_applied(client, settings, campaign
     class Greedy(MockProvider):
         def complete(self, system, steps, tools, *, job_label):
             if not any(s["kind"] == "tool_results" for s in steps):
-                return ProviderResponse([ToolCall("apply_changes", {"changes": [{"op": "hp", "character": "player", "delta": 5},
+                return ProviderResponse([ToolCall("apply_changes", {"changes": [{"op": "add_status", "character": "player", "name": "Steadied"},
                                                                                  {"op": "remove_item", "character": "player",
                                                                                   "name": "Healing Potion", "quantity": 9}]})],
                                         "You drink nine potions.")
             return ProviderResponse([], "You realise you only have two potions.")
 
     client.app_state.turns = TurnService(settings, Greedy, run_async=False)
-    hp0 = next(p for p in client.get(f"/api/campaigns/{campaign_id}").json()["party"] if p["slug"] == "mara")["hp_current"]
     body = _turn(client, campaign_id, "drink nine potions").json()
-    hp1 = next(p for p in client.get(f"/api/campaigns/{campaign_id}").json()["party"] if p["slug"] == "mara")["hp_current"]
-    assert hp1 == hp0  # the valid heal in the same batch was not applied either
+    mara = next(p for p in client.get(f"/api/campaigns/{campaign_id}").json()["party"] if p["slug"] == "mara")
+    assert not mara["statuses"]  # the valid change in the same batch was not applied either
     assert body["status"] == "completed" and body["result"]["narration"] == "You realise you only have two potions."
     inv = client.get(f"/api/campaigns/{campaign_id}/inventory").json()
     assert next(i for i in inv["by_character"] if i["name"] == "Healing Potion")["quantity"] == 2

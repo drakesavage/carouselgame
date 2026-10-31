@@ -124,7 +124,7 @@ def test_comfy_unavailable_fails_the_job_and_stops(client, settings, campaign_id
 
 def test_portrait_subject_comes_first_with_gender_from_the_records_own_pronouns(conn, settings, campaign_id):
     c = one(conn, "SELECT id FROM characters WHERE campaign_id = ? AND slug = 'mara'", (campaign_id,))
-    conn.execute("UPDATE characters SET race = 'Human', sheet_json = json_set(sheet_json, '$.visual', json(?)) WHERE id = ?",
+    conn.execute("UPDATE characters SET species = 'Human', sheet_json = json_set(sheet_json, '$.visual', json(?)) WHERE id = ?",
                  ('{"summary": "Former courier; she keeps her raincoat on", "established_features": ["Human."], '
                   '"unestablished": ["Exact age", "Hair"]}', c["id"]))
     job = art.create_job(conn, settings, campaign_id, "character", subject_id=c["id"])
@@ -137,7 +137,7 @@ def test_portrait_subject_comes_first_with_gender_from_the_records_own_pronouns(
 
 def test_animal_companions_get_their_species_not_a_person(conn, campaign_id):
     c = one(conn, "SELECT * FROM characters WHERE campaign_id = ? AND slug = 'jonah'", (campaign_id,))
-    c["race"] = "Earth-born Golden Retriever"
+    c["species"] = "Earth-born Golden Retriever"
     brief = art.character_brief(conn, campaign_id, c)
     assert brief["subject"].startswith("(portrait of a Golden Retriever") and "human" in brief["negative"]
 
@@ -315,10 +315,10 @@ def test_places_get_drafted_looks_without_people(conn, settings, campaign_id, mo
     import json as _json
     from app.gm import providers, router
     with transaction(conn):
-        conn.execute("INSERT INTO locations (campaign_id, floor, name, description, visited) VALUES (?,?,?,?,?)",
-                     (campaign_id, 3, "The Molting Pigeon, Heavensworth, Over City", "Saferoom; Jonai and Margit are stationed there.", 1))
-        conn.execute("INSERT INTO locations (campaign_id, floor, name, description, visited) VALUES (?,?,?,?,?)",
-                     (campaign_id, 3, "Fallen Watch, Heavensworth, Over City", "The old prison, under reconnaissance.", 0))
+        conn.execute("INSERT INTO locations (campaign_id, name, description, visited) VALUES (?,?,?,?)",
+                     (campaign_id, "The Molting Pigeon, Heavensworth, Over City", "Saferoom; Jonai and Margit are stationed there.", 1))
+        conn.execute("INSERT INTO locations (campaign_id, name, description, visited) VALUES (?,?,?,?)",
+                     (campaign_id, "Fallen Watch, Heavensworth, Over City", "The old prison, under reconnaissance.", 0))
     sent = {}
 
     def fake_generate(self, system, prompt, schema, label):

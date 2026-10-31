@@ -29,12 +29,10 @@ CREATE TABLE IF NOT EXISTS campaigns (
   name TEXT NOT NULL,
   is_demo INTEGER NOT NULL DEFAULT 0,
   data_source TEXT NOT NULL DEFAULT 'manual',      -- demo | ledger_import | manual
-  current_floor INTEGER,
   current_location TEXT,
   safe_room INTEGER NOT NULL DEFAULT 0,
-  game_time_minutes INTEGER NOT NULL DEFAULT 0,    -- elapsed game time on the current floor
-  floor_deadline_minutes INTEGER,                  -- game minute at which the floor collapses
-  active_character_id INTEGER,                     -- the player's crawler
+  game_time_minutes INTEGER NOT NULL DEFAULT 0,    -- game time elapsed in the campaign
+  active_character_id INTEGER,                     -- the player character
   active_objective TEXT,
   objective_quests_json TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL,
@@ -46,23 +44,13 @@ CREATE TABLE IF NOT EXISTS characters (
   campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
   slug TEXT NOT NULL,
   name TEXT NOT NULL,
-  kind TEXT NOT NULL,                     -- crawler | npc | contact
+  kind TEXT NOT NULL,                     -- pc | npc | contact
   roster_category TEXT,                   -- player_character | core_party | pets_companions | allied_npcs | ...
-  crawler_number TEXT,
   species TEXT,
-  race TEXT,
-  class_name TEXT,
-  level INTEGER,
-  xp INTEGER,
   status TEXT NOT NULL DEFAULT 'active',  -- active | dead | missing | dormant
   location TEXT,
   in_party INTEGER NOT NULL DEFAULT 0,
   party_order INTEGER NOT NULL DEFAULT 0,
-  hp_current INTEGER, hp_max INTEGER,
-  mana_current INTEGER, mana_max INTEGER,
-  ai_favor INTEGER,
-  stats_json TEXT NOT NULL DEFAULT '{}',    -- {"stats":{...}, "modifiers":{...}, "unenhanced":{...}}
-  derived_json TEXT NOT NULL DEFAULT '{}',  -- evade, damage_resistance, move, step, size, health_bar, level_progress...
   sheet_json TEXT NOT NULL DEFAULT '{}',    -- remaining player-visible sheet sections (attacks, narrative, visual...)
   bio TEXT,
   portrait_path TEXT,
@@ -105,20 +93,6 @@ CREATE TABLE IF NOT EXISTS stat_modifiers (
   turn_id INTEGER
 );
 
-CREATE TABLE IF NOT EXISTS skills (
-  id INTEGER PRIMARY KEY,
-  character_id INTEGER NOT NULL REFERENCES characters(id),
-  kind TEXT NOT NULL DEFAULT 'skill',     -- skill | spell | equipment_skill | ability
-  key TEXT,
-  name TEXT NOT NULL,
-  rank INTEGER,
-  mana_cost INTEGER,
-  passive INTEGER NOT NULL DEFAULT 0,
-  marked INTEGER NOT NULL DEFAULT 0,      -- skill-use advancement mark (CORE_MECHANICS 14.5)
-  description TEXT,
-  properties_json TEXT NOT NULL DEFAULT '{}'
-);
-
 CREATE TABLE IF NOT EXISTS items (
   id INTEGER PRIMARY KEY,
   campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
@@ -142,16 +116,6 @@ CREATE TABLE IF NOT EXISTS status_effects (
   polarity TEXT NOT NULL DEFAULT 'neutral',  -- buff | debuff | neutral
   expires_at_minutes INTEGER,                -- campaign game_time_minutes; NULL = until removed
   source TEXT
-);
-
-CREATE TABLE IF NOT EXISTS achievements (
-  id INTEGER PRIMARY KEY,
-  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
-  character_id INTEGER REFERENCES characters(id),
-  title TEXT NOT NULL,
-  description TEXT,
-  game_time_minutes INTEGER,
-  created_at TEXT NOT NULL
 );
 
 -- Player-visible NPC profile. Private motivations/plans go to gm_secrets.
@@ -178,7 +142,6 @@ CREATE TABLE IF NOT EXISTS relationships (
 CREATE TABLE IF NOT EXISTS locations (
   id INTEGER PRIMARY KEY,
   campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
-  floor INTEGER,
   name TEXT NOT NULL,
   description TEXT,
   discovered INTEGER NOT NULL DEFAULT 1,
@@ -198,17 +161,6 @@ CREATE TABLE IF NOT EXISTS quests (
   giver TEXT,
   visibility TEXT NOT NULL DEFAULT 'player',
   updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS encounters (
-  id INTEGER PRIMARY KEY,
-  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
-  name TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'active',  -- active | resolved
-  round INTEGER NOT NULL DEFAULT 1,
-  summary TEXT,
-  combatants_json TEXT NOT NULL DEFAULT '[]',
-  visibility TEXT NOT NULL DEFAULT 'player'
 );
 
 -- Generic clocks: advancement checkpoints, faction timers, crafting timers...
@@ -491,20 +443,6 @@ CREATE TABLE IF NOT EXISTS memories (
   created_at TEXT NOT NULL
 );
 
--- Limited-use abilities and cooldowns (once per scene/day/floor/rest, or N minutes).
-CREATE TABLE IF NOT EXISTS ability_uses (
-  id INTEGER PRIMARY KEY,
-  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
-  character_id INTEGER NOT NULL REFERENCES characters(id),
-  ability TEXT NOT NULL,
-  per TEXT NOT NULL,                         -- scene | day | floor | short_rest | long_rest | minutes
-  uses_allowed INTEGER NOT NULL DEFAULT 1,
-  uses INTEGER NOT NULL DEFAULT 0,
-  cooldown_minutes INTEGER,
-  last_used_minutes INTEGER,
-  UNIQUE (character_id, ability)
-);
-
 -- GM-only per-turn diagnostics: the context packet, tool rounds, usage and the integrity report.
 CREATE TABLE IF NOT EXISTS turn_diagnostics (
   turn_id INTEGER PRIMARY KEY,
@@ -544,7 +482,6 @@ COLUMN_MIGRATIONS = [
     *[("characters", c, "INTEGER") for c in ("mettle", "moxie", "hustle", "savvy", "grit")],
     *[("characters", c, "TEXT") for c in ("role_id", "aspect_id", "advanced_role_id", "ruleset_version", "role_reason")],
     ("characters", "assignment", "TEXT"),
-    ("campaigns", "day_length_minutes", "INTEGER"),
     ("quests", "details_json", "TEXT NOT NULL DEFAULT '{}'"),
     ("quests", "due_at_minutes", "INTEGER"),
     ("quests", "owner_character_id", "INTEGER"),
@@ -559,9 +496,6 @@ COLUMN_MIGRATIONS = [
     ("rulings", "review_note", "TEXT"),
     ("rulings", "reviewed_at", "TEXT"),
     ("campaigns", "archived", "INTEGER NOT NULL DEFAULT 0"),
-    ("campaigns", "floor_clock_pending_minutes", "INTEGER"),
-    ("achievements", "reward", "TEXT"),   # the Reward line as announced ("You've received a Silver Adventurer Box!", or the joke)
-    ("achievements", "box_item_id", "INTEGER"),  # the loot box it granted (items.properties loot_box)  # a floor clock waiting to start (op start_floor_clock); deadline is NULL meanwhile  # 1 = hidden from the campaign picker (campaigns.py)
     ("campaigns", "objective_quests_json", "TEXT NOT NULL DEFAULT '[]'"),  # ordered quest ids that make up the immediate objective  # {cx, cy, k, ar}: square crop of the portrait image (null = default)  # comfy | codex (art/codex_image.py)  # staged tool calls and roll records while a turn is in flight
 ]
 
