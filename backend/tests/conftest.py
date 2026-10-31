@@ -15,7 +15,7 @@ from app.db import init_db  # noqa: E402
 from app.gm.orchestrator import TurnService  # noqa: E402
 from app.gm.providers import MockProvider  # noqa: E402
 from app.main import create_app  # noqa: E402
-from tests.fixtures.demo_seed import seed_demo  # noqa: E402
+from tests.fixtures.carousel_seed import seed_carousel  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -49,12 +49,39 @@ def conn(settings):
 
 
 @pytest.fixture
-def demo_id(conn) -> int:
-    return seed_demo(conn)
+def campaign_id(conn) -> int:
+    return seed_carousel(conn)
+
+
+def _char(conn, cid, slug):
+    return conn.execute("SELECT id FROM characters WHERE campaign_id = ? AND slug = ?", (cid, slug)).fetchone()[0]
 
 
 @pytest.fixture
-def client(settings, conn, demo_id):
+def pc(conn, campaign_id) -> int:
+    return _char(conn, campaign_id, "mara")
+
+
+@pytest.fixture
+def companion(conn, campaign_id) -> int:
+    return _char(conn, campaign_id, "jonah")
+
+
+@pytest.fixture
+def npc(conn, campaign_id) -> int:
+    return _char(conn, campaign_id, "adeline")
+
+
+def apply(conn, cid, change):
+    """One validated op in its own transaction (test helper)."""
+    from app.db import transaction
+    from app.rules.engine import apply_change
+    with transaction(conn):
+        return apply_change(conn, cid, None, change)
+
+
+@pytest.fixture
+def client(settings, conn, campaign_id):
     app = create_app(settings, bootstrap=False, local_hosts={"testclient"})
     state = app.state.crawler
     p = state.prefs()

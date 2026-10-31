@@ -48,12 +48,12 @@ def test_ingest_search_page_references_and_dedupe(books, tmp_path):
     assert all(r["status"] == "already indexed" for r in again["indexed"])
 
 
-def test_search_api_returns_campaign_rules_first(client, settings, books, demo_id):
+def test_search_api_returns_campaign_rules_first(client, settings, books, campaign_id):
     conn = rulebooks.open_db(settings.rulebook_db)
     rulebooks.ingest_directory(conn, books)
     conn.close()
-    body = client.get(f"/api/rules/search?q=socks improvised ammunition&cid={demo_id}").json()
-    assert body["campaign"] and body["campaign"][0]["title"] == "Demo house rule"
+    body = client.get(f"/api/rules/search?q=diner neutral ground&cid={campaign_id}").json()
+    assert body["campaign"] and body["campaign"][0]["title"] == "Test house rule"
     body = client.get("/api/rules/search?q=grapple").json()
     assert body["official"][0]["page"] == 4
     page = client.get(f"/api/rules/page?document_id={body['official'][0]['document_id']}&page=4").json()

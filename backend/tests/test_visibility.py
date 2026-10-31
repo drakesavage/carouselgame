@@ -21,7 +21,7 @@ def _plant(conn, cid):
                      (cid, "gm", SECRETS[3], "gm", now_iso()))
         conn.execute("INSERT INTO clocks (campaign_id, key, label, kind, visibility) VALUES (?,?,?,?,?)", (cid, "secret", SECRETS[4], "faction", "gm"))
         conn.execute("INSERT INTO memories (campaign_id, layer, subject, content, visibility, created_at) VALUES (?,?,?,?,?,?)",
-                     (cid, "npc", "glimmet", SECRETS[5], "gm", now_iso()))
+                     (cid, "npc", "adeline", SECRETS[5], "gm", now_iso()))
 
 
 def _player_urls(client, cid):
@@ -41,8 +41,8 @@ def _player_urls(client, cid):
     return urls
 
 
-def test_no_gm_material_in_any_player_response(client, conn, demo_id):
-    cid = demo_id
+def test_no_gm_material_in_any_player_response(client, conn, campaign_id):
+    cid = campaign_id
     _plant(conn, cid)
     # a turn so that the GM context (which DOES contain secrets) is exercised
     client.post(f"/api/campaigns/{cid}/turns", json={"text": "I look around carefully", "idempotency_key": uuid.uuid4().hex})
@@ -54,11 +54,11 @@ def test_no_gm_material_in_any_player_response(client, conn, demo_id):
             assert s not in text, f"{s} leaked via {url}"
 
 
-def test_gm_endpoints_require_token(client, settings, demo_id):
+def test_gm_endpoints_require_token(client, settings, campaign_id):
     _plant_conn = None
-    assert client.get(f"/api/gm/campaigns/{demo_id}/secrets").status_code == 403
-    assert client.get(f"/api/gm/campaigns/{demo_id}/secrets", headers={"X-GM-Token": "wrong"}).status_code == 403
-    ok = client.get(f"/api/gm/campaigns/{demo_id}/secrets", headers={"X-GM-Token": settings.gm_token()})
+    assert client.get(f"/api/gm/campaigns/{campaign_id}/secrets").status_code == 403
+    assert client.get(f"/api/gm/campaigns/{campaign_id}/secrets", headers={"X-GM-Token": "wrong"}).status_code == 403
+    ok = client.get(f"/api/gm/campaigns/{campaign_id}/secrets", headers={"X-GM-Token": settings.gm_token()})
     assert ok.status_code == 200 and "DEMO SECRET" in ok.text
 
 

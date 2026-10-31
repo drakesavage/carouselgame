@@ -39,14 +39,14 @@ def test_rename_and_archive(client):
     assert client.patch("/api/campaigns/9999", json={"name": "x"}).status_code == 404
 
 
-def test_delete_needs_the_exact_name_backs_up_first_and_removes_only_that_campaign(client, conn, settings, demo_id):
+def test_delete_needs_the_exact_name_backs_up_first_and_removes_only_that_campaign(client, conn, settings, campaign_id):
     cid = new(client)
     client.post(f"/api/campaigns/{cid}/turns", json={"text": "I look around", "idempotency_key": "delete-test-0001"})
     art = settings.data_dir / "art" / f"c{cid}"
     art.mkdir(parents=True)
     (art / "item-1.png").write_bytes(b"png")
     (settings.portraits_dir / f"c{cid}-donut-jr-abc123.png").write_bytes(b"png")
-    before_demo = {t: one(conn, f"SELECT COUNT(*) n FROM {t} WHERE campaign_id = ?", (demo_id,))["n"] for t in ("characters", "items", "messages")}
+    before_demo = {t: one(conn, f"SELECT COUNT(*) n FROM {t} WHERE campaign_id = ?", (campaign_id,))["n"] for t in ("characters", "items", "messages")}
 
     assert client.post(f"/api/campaigns/{cid}/delete", json={"confirm_name": "second crawl"}).status_code == 422
     assert one(conn, "SELECT id FROM campaigns WHERE id = ?", (cid,))
@@ -60,7 +60,7 @@ def test_delete_needs_the_exact_name_backs_up_first_and_removes_only_that_campai
         if any(c["name"] == "campaign_id" for c in rows(conn, f"PRAGMA table_info({t})")):
             assert one(conn, f"SELECT COUNT(*) n FROM {t} WHERE campaign_id = ?", (cid,))["n"] == 0, t
     assert one(conn, "SELECT COUNT(*) n FROM skills WHERE character_id NOT IN (SELECT id FROM characters)")["n"] == 0
-    assert {t: one(conn, f"SELECT COUNT(*) n FROM {t} WHERE campaign_id = ?", (demo_id,))["n"] for t in before_demo} == before_demo
+    assert {t: one(conn, f"SELECT COUNT(*) n FROM {t} WHERE campaign_id = ?", (campaign_id,))["n"] for t in before_demo} == before_demo
 
     kept = settings.data_dir / "backups" / out["backup"]
     assert backup.verify(kept)["ok"] and (kept / "art" / f"c{cid}" / "item-1.png").exists() and not art.exists()

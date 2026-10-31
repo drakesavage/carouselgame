@@ -76,7 +76,7 @@ class FakeAuto:
         return self.c
 
 
-def test_conversation_turn_escalates_to_codex_without_applying_anything(client, settings, demo_id):
+def test_conversation_turn_escalates_to_codex_without_applying_anything(client, settings, campaign_id):
     seen = {}
 
     class Gem(MockProvider):
@@ -96,7 +96,7 @@ def test_conversation_turn_escalates_to_codex_without_applying_anything(client, 
             return ProviderResponse([], "Codex resolves it properly.")
 
     client.app_state.turns = TurnService(settings, lambda: FakeAuto(Gem(), Cdx()), run_async=False)
-    body = client.post(f"/api/campaigns/{demo_id}/turns", json={"text": '"Hi," Juniper says.', "idempotency_key": uuid.uuid4().hex}).json()
+    body = client.post(f"/api/campaigns/{campaign_id}/turns", json={"text": '"Hi," Mara says.', "idempotency_key": uuid.uuid4().hex}).json()
     assert body["status"] == "completed" and body["result"]["narration"] == "Codex resolves it properly."
     assert "save_game" not in seen["tools"] and "escalate" in seen["tools"] and "CONVERSATION MODE" in seen["system"]
     assert "save_game" in seen["codex_tools"]
@@ -107,19 +107,19 @@ def test_conversation_turn_escalates_to_codex_without_applying_anything(client, 
     assert usage["route"]["escalated_from"] == "gemini-3.8-flash" and "add_item" in usage["route"]["escalation_reason"]
 
 
-def test_conversation_turn_that_stays_conversation_commits_on_gemini(client, settings, demo_id):
+def test_conversation_turn_that_stays_conversation_commits_on_gemini(client, settings, campaign_id):
     class Gem(MockProvider):
         name = "gemini"
         conversation = True
 
         def complete(self, system, steps, tools, *, job_label):
-            return ProviderResponse([ToolCall("apply_changes", {"changes": [{"op": "remember", "subject": "Bix (demo)",
-                                                                             "content": "Juniper said hi", "visibility": "player"}]})],
-                                    "Bix squeaks back.")
+            return ProviderResponse([ToolCall("apply_changes", {"changes": [{"op": "remember", "subject": "Jonah Reyes",
+                                                                             "content": "Mara said hi", "visibility": "player"}]})],
+                                    "Jonah squeaks back.")
 
     client.app_state.turns = TurnService(settings, lambda: FakeAuto(Gem(), MockProvider()), run_async=False)
-    body = client.post(f"/api/campaigns/{demo_id}/turns", json={"text": '"Hi, Bix," Juniper says.', "idempotency_key": uuid.uuid4().hex}).json()
-    assert body["status"] == "completed" and body["result"]["narration"] == "Bix squeaks back."
+    body = client.post(f"/api/campaigns/{campaign_id}/turns", json={"text": '"Hi, Jonah," Mara says.', "idempotency_key": uuid.uuid4().hex}).json()
+    assert body["status"] == "completed" and body["result"]["narration"] == "Jonah squeaks back."
     usage = one(connect(settings.campaign_db), "SELECT usage_json FROM turn_diagnostics WHERE turn_id = ?", (body["turn_id"],))["usage"]
     assert usage["route"]["provider"] == "gemini" and "escalated_from" not in usage["route"]
 
@@ -131,7 +131,7 @@ def test_settings_accept_auto_and_quota_endpoint(client):
     assert q["models"]["gemini-3.5-flash-lite"]["limit"] == 500
 
 
-def test_quota_exhausted_mid_turn_reroutes(client, settings, demo_id):
+def test_quota_exhausted_mid_turn_reroutes(client, settings, campaign_id):
     from app.gm.providers import ProviderError
 
     class Spent(MockProvider):
@@ -157,7 +157,7 @@ def test_quota_exhausted_mid_turn_reroutes(client, settings, demo_id):
             return (Spent(), {"kind": "talk", "model": "gemini-3.8-flash"}) if Auto.calls == 1 else (Next(), {"kind": "talk", "model": "gemini-3.6-flash"})
 
     client.app_state.turns = TurnService(settings, lambda: Auto(None, MockProvider()), run_async=False)
-    body = client.post(f"/api/campaigns/{demo_id}/turns", json={"text": '"Hi," Juniper says.', "idempotency_key": uuid.uuid4().hex}).json()
+    body = client.post(f"/api/campaigns/{campaign_id}/turns", json={"text": '"Hi," Mara says.', "idempotency_key": uuid.uuid4().hex}).json()
     assert body["status"] == "completed" and body["result"]["narration"] == "3.6 answers."
     usage = one(connect(settings.campaign_db), "SELECT usage_json FROM turn_diagnostics WHERE turn_id = ?", (body["turn_id"],))["usage"]
     assert usage["route"]["model"] == "gemini-3.6-flash" and usage["route"]["rerouted_from"] == "gemini-3.8-flash"
