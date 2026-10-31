@@ -6,7 +6,7 @@ import {
   MapPin, Skull, Sparkles, Sun, Swords, TrendingUp, Trophy, Wrench, Zap,
 } from "lucide-react";
 import { Campaign, CharacterCard, Encounter, fmtMinutes, Group, Manifest, Quest } from "../api";
-import { Bar, Chip, humanize, Panel, placeKey, Portrait, sized } from "../ui";
+import { Chip, humanize, Panel, placeKey, Portrait, sized } from "../ui";
 import { ArtButton, ArtQueue } from "./Art";
 
 // ------------------------------------------------------------------ local artwork
@@ -266,18 +266,17 @@ function Tile({ c, pc, openCharacter }: { c: CharacterCard; pc: boolean; openCha
         <div className="tile-main">
           <div className="row" style={{ gap: 6 }}>
             <span className="pname grow" title={c.name}>{c.name.split(" ")[0]}</span>
-            {c.level != null && <span className="mono muted" style={{ fontSize: 11 }}>L{c.level}</span>}
+            {c.stats.plot_armor.effective != null && <span className="mono muted" style={{ fontSize: 11 }} title="Plot Armor (effective)">PA {c.stats.plot_armor.effective}</span>}
             <span className={`role ${tone}`}>{label}</span>
           </div>
-          {c.hp_max != null ? <><Bar kind="hp" cur={c.hp_current} max={c.hp_max} /><Bar kind="mana" cur={c.mana_current} max={c.mana_max} /></> :
-            <div className="pclass">{[c.race ?? c.species, c.class_name].filter(Boolean).join(" · ") || c.status}</div>}
+          <div className="pclass">{roleLabel(c) ?? c.status}</div>
         </div>
       </button>
       {c.statuses.length > 0 && !open && <div className="tile-status">{c.statuses.slice(0, 3).map((s) => <i key={s.id} className={`sdot ${s.polarity}`} title={s.name} />)}</div>}
       {open && (
         <div className="tile-detail">
           <div><b>{c.name}</b></div>
-          <div className="pclass">{[c.race ?? c.species, c.class_name].filter(Boolean).join(" · ")}{c.ai_favor != null ? ` · AI Favor ${c.ai_favor}` : ""}</div>
+          <div className="pclass">{[roleLabel(c), paLabel(c)].filter(Boolean).join(" · ")}</div>
           {c.statuses.length > 0 && <div className="chips">{c.statuses.map((s) => <Chip key={s.id} tone={s.polarity === "buff" ? "green" : s.polarity === "debuff" ? "red" : ""}>{s.name}</Chip>)}</div>}
           {c.equipped.length > 0 && <div className="sub">Equipped: {c.equipped.map((e) => e.name).join(", ")}</div>}
           <button className="btn small" onClick={() => openCharacter(c.id)}>Open dossier</button>
@@ -337,10 +336,21 @@ function Collapsible({ label, extra, children, summary }: { label: string; extra
   );
 }
 
+/** "Final Girl" from base.final-girl; null before Carousel assigns an Archetype. */
+export function roleLabel(c: CharacterCard): string | null {
+  const id = c.advanced_role_id ?? c.aspect_id ?? c.role_id;
+  return id ? id.replace(/^(base|aspect|advanced)\./, "").split(/[.-]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ") : null;
+}
+
+export function paLabel(c: CharacterCard): string | null {
+  const pa = c.stats.plot_armor;
+  return pa.effective == null ? null : pa.effective === pa.base ? `Plot Armor ${pa.base}` : `Plot Armor ${pa.effective} (base ${pa.base})`;
+}
+
 /** An offscreen group: collapsed to faces, place and orders; expands to full tiles. */
 function OffscreenGroup({ g, openCharacter }: { g: Group; openCharacter: (id: number) => void }) {
   const m = useManifest();
-  const hurt = g.members.filter((c) => c.hp_max && c.hp_current != null && c.hp_current / c.hp_max <= 0.3 || c.statuses.some((s) => s.polarity === "debuff"));
+  const hurt = g.members.filter((c) => c.statuses.some((s) => s.polarity === "debuff"));
   const activity = g.activity?.replace(/\s*\(checkpoints\/latest\.md\)$/, "");
   return (
     <Collapsible
@@ -406,10 +416,8 @@ export function urgentAlerts(campaign: Campaign): Alert[] {
     else if (due < 180) out.push({ key: `q${q.id}`, tone: "amber", text: `${q.title} in ${fmtMinutes(due)}`, quest: q.id });
   }
   for (const c of pcGroup(campaign)?.members ?? []) {
-    const low = c.hp_max && c.hp_current != null && c.hp_current / c.hp_max <= 0.3;
     const bad = c.statuses.filter((s) => s.polarity === "debuff").map((s) => s.name);
-    if (low || bad.length) out.push({ key: `c${c.id}`, tone: low ? "red" : "amber", character: c.id,
-      text: `${c.name.split(" ")[0]}: ${[low ? `HP ${c.hp_current}/${c.hp_max}` : "", ...bad].filter(Boolean).join(", ")}` });
+    if (bad.length) out.push({ key: `c${c.id}`, tone: "amber", character: c.id, text: `${c.name.split(" ")[0]}: ${bad.join(", ")}` });
   }
   return out;
 }

@@ -72,6 +72,15 @@ def test_ids_kept_only_in_a_save_point_are_protected(settings_mini, campaign_con
     assert not r.ok and r.missing == {"place": ["CAR-999"]}
 
 
+def test_reimport_protects_owned_tickets(settings_mini, campaign_conn):
+    cid = campaign_conn.execute("INSERT INTO characters (campaign_id, slug, name, kind) VALUES (1, 'm', 'M', 'pc')").lastrowid
+    for ref in ("hb.ticket.base.gone", "hb.ticket.base.final-girl", "trope:1", "trope:404"):
+        campaign_conn.execute("INSERT INTO character_tickets (campaign_id, character_id, ticket_ref) VALUES (1, ?, ?)", (cid, ref))
+    campaign_conn.commit()
+    r = run_import(settings_mini)
+    assert not r.ok and r.missing == {"ticket": ["hb.ticket.base.gone", "trope:404"]}
+
+
 def test_missing_npc_template_is_refused(settings_mini, campaign_conn):
     cid = campaign_conn.execute("INSERT INTO characters (campaign_id, slug, name, kind) VALUES (1, 'x', 'X', 'npc')").lastrowid
     campaign_conn.execute("INSERT INTO npc_profiles (character_id, ref_id) VALUES (?, 'CAR-NPC-404')", (cid,))

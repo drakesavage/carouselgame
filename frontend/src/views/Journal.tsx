@@ -123,7 +123,7 @@ export function ChronicleView({ cid, version, openCharacter }: { cid: number; ve
             if (!evs.length) return null;
             return (
               <section key={String(d.day)} className="tl-day">
-                <div className="h2">{d.day != null ? `Dungeon Day ${d.day}` : "Corrections and records (no game time)"} <span className="muted">{evs.length}</span></div>
+                <div className="h2">{d.day != null ? `Day ${d.day}` : "Corrections and records (no game time)"} <span className="muted">{evs.length}</span></div>
                 <ol className="tl">{evs.map((e) => { const Icon = EVENT_ICON[e.type] ?? Scroll; return (
                   <li key={e.id} className={e.bookkeeping ? "bk" : ""}>
                     <span className="mono muted tl-time">{e.game_time_minutes != null ? `T+${fmtMinutes(e.game_time_minutes)}` : "—"}</span>

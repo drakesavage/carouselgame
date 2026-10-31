@@ -1,62 +1,41 @@
 import { KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
-  Activity, Award, BookOpen, Brain, ChevronDown, ChevronRight, Crosshair, Dumbbell, Footprints, Gauge, Gem, HardHat, Hand, Heart,
-  HeartPulse, History, LayoutGrid, Loader2, MapPin, MessageCircle, Package, Search, Shield, ShieldCheck, Sparkles, Sword, Swords, Upload, UserRoundPen, Users,
-  Wind, Wrench, X, Zap,
+  Award, BookOpen, ChevronDown, ChevronRight, Crosshair, Footprints, Gauge, Gem, HardHat, Hand,
+  HeartPulse, History, LayoutGrid, Loader2, MapPin, Package, Search, Shield, ShieldCheck, Swords, Upload, UserRoundPen, Users,
+  Wrench, X, Zap,
 } from "lucide-react";
-import { api, Life } from "../api";
+import { api, CarouselStats, Life, Ticket } from "../api";
 import { LifeChip } from "./People";
 import { Chip, cropStyle, humanize, Portrait, PortraitCrop, sized, Tree } from "../ui";
 import { ArtButton, CropButton } from "./Art";
 import "../dossier.css";
 
 // ------------------------------------------------------------------ data (GET /api/campaigns/{cid}/characters/{id}/dossier)
-type Attr = { key: string; abbr: string; name: string; value: number | null; modifier: number | null; unenhanced: number | null; standout: boolean };
-type Skill = { id: number; name: string; rank: number | null; kind: string; category: string; stat: string | null; learned: boolean; gear_granted: boolean;
-  passive: boolean; marked: boolean; mana_cost: number | null; description: string | null; specialty: string | null; perk: string | null; upgrades: string[];
-  source: string | null; condition: string | null; provenance: string | null; details: Record<string, unknown>; attack: Record<string, any> | null; signature: boolean;
-  explain?: Explain; upgrade_explain?: Explain[] };
 type Item = { id: number; name: string; quantity: number | null; equipped: boolean; deployed: boolean; rarity: string | null; description: string | null;
   slot: string; effects: string[]; notes: string[]; status: string | null; provenance: string | null; special: boolean; properties: Record<string, unknown>; shared?: boolean };
-/** What an ability does (memory/abilities.py): from the rulebook, the campaign record, a build template, or a labelled homebrew reading. */
-type Explain = { summary: string; explanation: string; basis: "rulebook" | "record" | "homebrew" | "template"; citation: string | null } | null;
-type Effect = { type: string; name: string; detail: string | null; polarity?: string; explain?: Explain };
 type HistoryEntry = { kind: string; text: string; when: number | null; source: string; at?: string };
 type Dossier = {
-  id: number; slug: string; name: string; kind: string; is_player: boolean; crawler_number: string | null; level: number | null; race: string | null;
-  class_name: string | null; status: string; life: Life; in_party: boolean; roster_category: string | null; portrait_path: string | null; portrait_crop: PortraitCrop | null;
-  role: string | null; group: { key: string; label: string; location: string | null; activity: string | null } | null; location: string | null;
-  attributes: Attr[];
-  combat: { health: { current: number | null; max: number | null; slots: number | null; per_slot: number | null }; mana: { current: number | null; max: number | null };
-    evade: unknown; damage_resistance: unknown; move: unknown; step: unknown; size: { category?: string; value?: unknown } | null; resistances: unknown[];
-    statuses: { id: number; name: string; polarity: string | null; description: string | null }[]; ai_favor: number | null; attacks: Record<string, any>[];
-    level_progress: { current?: number; target?: number; toward_level?: number; note?: string } | null; unallocated_stat_points: unknown };
-  build: { class_name: string | null; class_types: string[]; class_benefits: string[]; class_detriments: string[]; race: string | null; race_benefits: string[];
-    role: string | null; tactics: string[]; highlights: { title: string; detail: string | null; source: string; explain?: Explain }[] };
-  skills: Skill[]; signature_skill_ids: number[]; category_labels: Record<string, string>; effects: Effect[];
+  id: number; slug: string; name: string; kind: string; is_player: boolean; status: string; life: Life; in_party: boolean; roster_category: string | null;
+  portrait_path: string | null; portrait_crop: PortraitCrop | null;
+  role: { id: string | null; reason: string | null; aspect_id: string | null; advanced_role_id: string | null };
+  stats: CarouselStats; statuses: { id: number; name: string; polarity: string | null; description: string | null }[]; tickets?: Ticket[];
+  group: { key: string; label: string; location: string | null; activity: string | null } | null; location: string | null;
   equipment: { equipped: Item[]; carried: Item[]; linked_shared: Item[]; commitments: Record<string, any>[]; slot_labels: Record<string, string> };
-  story: Record<string, any>; history: HistoryEntry[]; hotlist: unknown[]; explanations_missing?: number;
+  story: Record<string, any>; history: HistoryEntry[];
   private_sheet: "generated" | "authored" | null;
 };
 
 const TABS = [
   { id: "overview", label: "Overview", icon: LayoutGrid },
-  { id: "skills", label: "Skills", icon: Zap },
   { id: "equipment", label: "Equipment", icon: Package },
   { id: "story", label: "Story", icon: BookOpen },
   { id: "history", label: "History", icon: History },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
-const STAT_ICON: Record<string, typeof Brain> = { strength: Dumbbell, intelligence: Brain, constitution: HeartPulse, dexterity: Wind, charisma: MessageCircle };
-const SLOT_ICON: Record<string, typeof Sword> = { weapon: Crosshair, armor: Shield, head: HardHat, hands: Hand, feet: Footprints, accessory: Gem, other: Package };
-const EFFECT_META: Record<string, { label: string; tone: string }> = {
-  class: { label: "Class feature", tone: "gold" }, race: { label: "Race", tone: "violet" }, specialty: { label: "Specialty", tone: "cyan" },
-  learned: { label: "Learned", tone: "green" }, equipment: { label: "Equipment", tone: "steel" }, status: { label: "Status", tone: "magenta" },
-  limited: { label: "Limited use", tone: "amber" },
-};
-const signed = (n: number | null | undefined) => (n == null ? "?" : `${n >= 0 ? "+" : ""}${n}`);
+const SLOT_ICON: Record<string, typeof Package> = { weapon: Crosshair, armor: Shield, head: HardHat, hands: Hand, feet: Footprints, accessory: Gem, other: Package };
+const roleName = (id: string | null) => (id ? humanize(id.replace(/^(base|aspect|advanced)\./, "").replace(/\./g, " ")) : null);
 
 // ------------------------------------------------------------------ dialog
 export function CharacterDossierDialog({ cid, charId, onClose, onChanged }: { cid: number; charId: number | null; onClose: () => void; onChanged: () => void }) {
@@ -64,7 +43,6 @@ export function CharacterDossierDialog({ cid, charId, onClose, onChanged }: { ci
   const [raw, setRaw] = useState<Record<string, unknown> | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>("overview");
-  const [focusSkill, setFocusSkill] = useState<number | null>(null);
   const load = async () => {
     if (charId == null) return;
     try { setD(await api.dossier(cid, charId) as Dossier); } catch (e) { setErr(String(e)); }
@@ -72,9 +50,8 @@ export function CharacterDossierDialog({ cid, charId, onClose, onChanged }: { ci
   useEffect(() => { setD(null); setRaw(null); setErr(null); load(); }, [cid, charId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (tab === "history" && charId != null && !raw) api.character(cid, charId).then((c) => setRaw(c.sheet as Record<string, unknown>)).catch(() => {}); }, [tab, cid, charId, raw]);
   const changed = async () => { await load(); onChanged(); };
-  const openSkill = (id: number) => { setFocusSkill(id); setTab("skills"); };
   const body = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (body.current) body.current.scrollTop = 0; }, [tab]); // each tab opens at its top (a focused skill scrolls itself)
+  useEffect(() => { if (body.current) body.current.scrollTop = 0; }, [tab]); // each tab opens at its top
 
   return (
     <Dialog.Root open={charId != null} onOpenChange={(o) => !o && onClose()}>
@@ -96,8 +73,7 @@ export function CharacterDossierDialog({ cid, charId, onClose, onChanged }: { ci
                 ))}
               </nav>
               <div className="dossier-body" role="tabpanel" ref={body}>
-                {tab === "overview" && <Overview d={d} cid={cid} openSkill={openSkill} openTab={setTab} reload={load} />}
-                {tab === "skills" && <SkillsTab d={d} focus={focusSkill} />}
+                {tab === "overview" && <Overview d={d} openTab={setTab} />}
                 {tab === "equipment" && <EquipmentTab d={d} />}
                 {tab === "story" && <StoryTab d={d} />}
                 {tab === "history" && <HistoryTab d={d} raw={raw} />}
@@ -116,8 +92,6 @@ function Hero({ cid, d, onChanged }: { cid: number; d: Dossier; onChanged: () =>
   const [err, setErr] = useState<string | null>(null);
   const url = d.portrait_path ? `media/portraits/${encodeURIComponent(d.portrait_path)}` : null;
   const upload = async (f: File) => { try { await api.uploadPortrait(cid, d.id, f); onChanged(); } catch (e) { setErr(String(e)); } };
-  const lp = d.combat.level_progress;
-  const h = d.combat.health;
   return (
     <header className="dossier-hero">
       <div className="hero-portrait">
@@ -135,32 +109,21 @@ function Hero({ cid, d, onChanged }: { cid: number; d: Dossier; onChanged: () =>
       <div className="hero-identity">
         <div className="hero-title-row">
           <Dialog.Title className="hero-name">{d.name}</Dialog.Title>
-          {d.crawler_number && <span className="hero-number">#{d.crawler_number}</span>}
         </div>
-        <div className="hero-line">{[d.level != null ? `Level ${d.level}` : null, d.race, d.class_name].filter(Boolean).join(" · ")}</div>
+        <div className="hero-line">{[roleName(d.role.id), roleName(d.role.aspect_id), roleName(d.role.advanced_role_id)].filter(Boolean).join(" · ") || "No Archetype yet"}</div>
         <div className="chips hero-chips">
           {d.is_player ? <Chip tone="cyan">Player character</Chip> : <Chip tone="cyan">{humanize(d.roster_category ?? d.kind)}</Chip>}
           {d.life.state === "active" && /^active\b/i.test(d.life.label) ? <Chip tone="green">{d.life.label}</Chip> : <LifeChip life={d.life} />}
           {d.story.identity?.pronouns && <Chip title={[d.story.identity.gender, d.story.identity.apparent_age].filter(Boolean).join(", ")}>{d.story.identity.pronouns}</Chip>}
           {d.group && <Chip title={d.group.activity ?? ""}><Users size={11} /> {d.group.label}</Chip>}
-          {d.combat.statuses.map((s) => <StatusChip key={s.id} s={s} />)}
+          {d.statuses.map((s) => <StatusChip key={s.id} s={s} />)}
         </div>
-        {d.role && <p className="hero-role">{d.role}</p>}
+        {d.role.reason && <p className="hero-role">{d.role.reason}</p>}
         {d.location && <div className="hero-location"><MapPin size={12} /> {d.location}</div>}
         {!d.is_player && <GenerateButton cid={cid} d={d} onDone={onChanged} />}
       </div>
       <div className={`hero-vitals ${d.life.state === "deceased" ? "gone" : ""}`}>
-        {d.life.note && <div className="vitals-note">{d.life.note}</div>}
-        <Vital icon={<Heart size={16} />} label="Health" cur={h.current} max={h.max} tone="hp"
-          hint={h.slots ? `Health Bar: ${h.slots} slots × ${h.per_slot ?? "?"} HP. Damage and healing move whole slots.` : undefined} slots={h.slots} />
-        <Vital icon={<Zap size={16} />} label="Mana" cur={d.combat.mana.current} max={d.combat.mana.max} tone="mana" />
-        {lp && lp.target != null && <Vital icon={<Gauge size={16} />} label="Advancement" cur={lp.current ?? 0} max={lp.target} tone="adv"
-          hint={lp.note ?? (lp.toward_level ? `Toward Level ${lp.toward_level}` : undefined)} />}
-        {d.combat.ai_favor != null && (
-          <div className="vital favor" title="AI Favor: the System's goodwill, spent on rerolls and other favors.">
-            <div className="vital-head"><Sparkles size={16} /> AI Favor</div><div className="vital-num big">{d.combat.ai_favor}</div>
-          </div>
-        )}
+        <PlotArmor pa={d.stats.plot_armor} />
       </div>
       <Dialog.Close className="btn ghost small dossier-close" aria-label="Close dossier"><X size={16} /></Dialog.Close>
     </header>
@@ -203,16 +166,13 @@ function GenerateButton({ cid, d, onDone }: { cid: number; d: Dossier; onDone: (
   );
 }
 
-function Vital({ icon, label, cur, max, tone, hint, slots }: { icon: ReactNode; label: string; cur: number | null; max: number | null; tone: string; hint?: string; slots?: number | null }) {
-  const pct = cur != null && max ? Math.max(0, Math.min(100, (cur / max) * 100)) : 0;
+/** Plot Armor is the sum of the five stats: base, after buffs (current), and after drawbacks such as Trope Master (effective). */
+function PlotArmor({ pa }: { pa: CarouselStats["plot_armor"] }) {
   return (
-    <div className={`vital ${tone}`} title={hint}>
-      <div className="vital-head">{icon} {label}</div>
-      <div className="vital-num">{cur ?? "?"} <span>/ {max ?? "?"}</span></div>
-      <div className="vital-bar" aria-hidden>
-        <i style={{ width: `${pct}%` }} />
-        {slots && slots > 1 && slots <= 30 ? Array.from({ length: slots - 1 }, (_, i) => <b key={i} style={{ left: `${((i + 1) / slots) * 100}%` }} />) : null}
-      </div>
+    <div className="vital favor" title="Plot Armor: base / current (after buffs) / effective (after drawbacks)">
+      <div className="vital-head"><ShieldCheck size={16} /> Plot Armor</div>
+      <div className="vital-num big">{pa.effective ?? "?"}</div>
+      <div className="sub">base {pa.base ?? "?"} · current {pa.current ?? "?"}</div>
     </div>
   );
 }
@@ -222,134 +182,54 @@ function StatusChip({ s }: { s: { name: string; polarity: string | null; descrip
 }
 
 // ------------------------------------------------------------------ overview
-function Overview({ d, cid, openSkill, openTab, reload }: { d: Dossier; cid: number; openSkill: (id: number) => void; openTab: (t: TabId) => void; reload: () => void }) {
-  const sig = d.signature_skill_ids.map((id) => d.skills.find((s) => s.id === id)!).filter(Boolean);
-  const b = d.build;
+const STATS = ["Mettle", "Moxie", "Hustle", "Savvy", "Grit"] as const;
+
+function Overview({ d, openTab }: { d: Dossier; openTab: (t: TabId) => void }) {
+  const st = d.stats;
   return (
     <div className="ov-grid">
       <div className="ov-col">
-      <section className="dpanel ov-attrs">
-        <h3>Core attributes</h3>
-        {d.attributes.length === 0 ? <Empty>Stats not established in the record.</Empty> : (
-          <div className="attr-row">{d.attributes.map((a) => <AttributeCard key={a.key} a={a} />)}</div>
-        )}
-      </section>
-      <section className="dpanel ov-skills">
-        <h3>Signature skills <button className="link-btn" onClick={() => openTab("skills")}>All {d.skills.length} skills <ChevronRight size={12} /></button></h3>
-        {sig.length === 0 ? <Empty>No ranked skills recorded.</Empty> : (
-          <div className="sig-skills">{sig.map((s) => <SkillMini key={s.id} s={s} labels={d.category_labels} onOpen={() => openSkill(s.id)} />)}</div>
-        )}
-      </section>
-      <section className="dpanel ov-effects">
-        <h3>Active abilities &amp; effects</h3>
-        <EffectsList effects={d.effects} />
-      </section>
+        <section className="dpanel ov-attrs">
+          <h3>Stats</h3>
+          {st.stats.Mettle == null ? <Empty>Carousel hasn't assigned an Archetype yet.</Empty> : (
+            <div className="attr-row">{STATS.map((k) => (
+              <div key={k} className="attr" title={st.current[k] !== st.stats[k] ? `base ${st.stats[k]}` : k}>
+                <div className="attr-abbr">{k.slice(0, 3).toUpperCase()}</div>
+                <div className="attr-val">{st.current[k] ?? "?"}</div>
+                <div className="attr-name">{k}</div>
+                {st.current[k] !== st.stats[k] && <div className="attr-base">base {st.stats[k]}</div>}
+              </div>))}
+            </div>
+          )}
+          {st.modifiers.length > 0 && (
+            <div className="chips">{st.modifiers.map((m) => <Chip key={m.id} tone={m.op === "multiply" && m.value < 1 ? "red" : "green"} title={`${m.scope}`}>
+              {m.target} {m.op === "multiply" ? `×${m.value}` : `${m.value >= 0 ? "+" : ""}${m.value}`} · {m.source}</Chip>)}</div>
+          )}
+        </section>
+        <section className="dpanel ov-effects">
+          <h3>Tickets</h3>
+          {!d.tickets?.length ? <Empty>No trope tickets.</Empty> : (
+            <ul className="ticket-list">{d.tickets.map((t) => (
+              <li key={t.ref}><b>{t.name}</b> {t.equipped ? <Chip tone="gold">equipped</Chip> : <Chip>owned</Chip>}
+                {t.uses_max != null && <Chip tone="amber">{t.uses_left ?? 0}/{t.uses_max}{t.recharge ? ` per ${t.recharge}` : ""}</Chip>}
+                <div className="sub">{t.text}</div></li>))}
+            </ul>
+          )}
+        </section>
       </div>
       <div className="ov-col">
-      <section className="dpanel ov-combat"><h3>Combat readiness</h3><CombatReadiness d={d} /></section>
-      <section className="dpanel ov-build">
-        <h3>Signature build</h3>
-        {(b.class_name || b.race) && (
-          <div className="build-head">
-            <div className="build-class">{b.class_name ?? "Class not recorded"}</div>
-            <div className="chips">{b.class_types.map((t) => <Chip key={t} tone="gold">{t}</Chip>)}{b.race && <Chip tone="violet">{b.race}</Chip>}</div>
-          </div>
-        )}
-        {b.highlights.length === 0 ? <Empty>No class features or specialties recorded.</Empty> : (
-          <div className="highlights">{b.highlights.map((h, i) => <Highlight key={i} h={h} />)}</div>
-        )}
-        {b.tactics.length > 0 && <div className="build-tactics"><Swords size={13} /> {b.tactics.join(" ")}</div>}
-      </section>
-      <section className="dpanel ov-gear">
-        <h3>Current equipment <button className="link-btn" onClick={() => openTab("equipment")}>Full gear <ChevronRight size={12} /></button></h3>
-        {d.equipment.equipped.length === 0 ? <Empty>Nothing equipped is recorded.</Empty> : (
-          <div className="gear-strip">{d.equipment.equipped.map((i) => <GearTile key={i.id} i={i} labels={d.equipment.slot_labels} />)}</div>
-        )}
-        {d.combat.attacks.length > 0 && (
-          <div className="attack-lines">{d.combat.attacks.map((a, i) => (
-            <div key={i} className="attack-line"><Crosshair size={12} /> <b>{a.name}</b>
-              <span className="mono">{a.attack_bonus != null ? signed(a.attack_bonus) : a.attack_bonus_before_disadvantage != null ? signed(a.attack_bonus_before_disadvantage) : ""}</span>
-              <span className="mono">{a.damage ?? ""}</span><span className="sub">{[a.range, a.reach, a.usage_note].filter(Boolean).join(" · ")}</span></div>))}
-          </div>
-        )}
-      </section>
+        <section className="dpanel ov-gear">
+          <h3>Current equipment <button className="link-btn" onClick={() => openTab("equipment")}>Full gear <ChevronRight size={12} /></button></h3>
+          {d.equipment.equipped.length === 0 ? <Empty>Nothing equipped is recorded.</Empty> : (
+            <div className="gear-strip">{d.equipment.equipped.map((i) => <GearTile key={i.id} i={i} labels={d.equipment.slot_labels} />)}</div>
+          )}
+        </section>
+        <section className="dpanel ov-combat">
+          <h3>Conditions</h3>
+          <div className="chips">{d.statuses.length ? d.statuses.map((s) => <StatusChip key={s.id} s={s} />) : <span className="sub">no buffs, debuffs or injuries</span>}</div>
+        </section>
       </div>
     </div>
-  );
-}
-
-function AttributeCard({ a }: { a: Attr }) {
-  const Icon = STAT_ICON[a.key] ?? Activity;
-  return (
-    <div className={`attr ${a.standout ? "standout" : ""}`} title={`${a.name}${a.unenhanced != null ? ` (unenhanced ${a.unenhanced})` : ""}`}>
-      <Icon size={15} className="attr-icon" aria-hidden />
-      <div className="attr-abbr">{a.abbr}</div>
-      <div className="attr-val">{a.value ?? "?"}</div>
-      <div className="attr-mod">{signed(a.modifier)}</div>
-      <div className="attr-name">{a.name}</div>
-      {a.unenhanced != null && <div className="attr-base">base {a.unenhanced}</div>}
-    </div>
-  );
-}
-
-function CombatReadiness({ d }: { d: Dossier }) {
-  const c = d.combat;
-  const size = c.size ? [c.size.category, c.size.value].filter((x) => x != null && x !== "").join(" ") : null;
-  const cells: [string, unknown, typeof Shield, string][] = [
-    ["Evade", c.evade, Wind, "Target number Mobs must beat to hit with most Attacks."],
-    ["Damage resistance", c.damage_resistance, ShieldCheck, "Subtracted from incoming damage before resistances and slot loss."],
-    ["Move", c.move, Footprints, "Movement per Action."],
-    ["Step", c.step, Footprints, "Free repositioning distance."],
-    ["Size", size, Users, "Size category and value."],
-  ];
-  return (
-    <div className="combat-grid">
-      {cells.filter(([, v]) => v != null && v !== "").map(([label, v, Icon, hint]) => (
-        <div key={label} className="cstat" title={hint}><Icon size={14} /><div><div className="cstat-k">{label}</div><div className="cstat-v">{String(v)}</div></div></div>
-      ))}
-      {c.health.slots != null && (
-        <div className="cstat" title="Health is tracked in whole slots: damage smaller than one slot is lost, healing restores slots.">
-          <Heart size={14} /><div><div className="cstat-k">Health bar</div><div className="cstat-v">{c.health.slots} × {c.health.per_slot ?? "?"}</div></div>
-        </div>
-      )}
-      <div className="combat-wide">
-        <div className="cstat-k">Resistances</div>
-        <div className="chips">{c.resistances.length ? c.resistances.map((r, i) => <Chip key={i}>{String(typeof r === "object" ? JSON.stringify(r) : r)}</Chip>) : <span className="sub">none recorded</span>}</div>
-      </div>
-      <div className="combat-wide">
-        <div className="cstat-k">Conditions</div>
-        <div className="chips">{c.statuses.length ? c.statuses.map((s) => <StatusChip key={s.id} s={s} />) : <span className="sub">no buffs, debuffs or injuries</span>}</div>
-      </div>
-    </div>
-  );
-}
-
-function SkillMini({ s, labels, onOpen }: { s: Skill; labels: Record<string, string>; onOpen: () => void }) {
-  return (
-    <button className={`skill-mini cat-${s.category}`} onClick={onOpen} title={s.explain ? `${s.explain.summary} (open in Skills)` : "Open in Skills"}>
-      <div className="sm-rank">{s.rank ?? "?"}</div>
-      <div className="sm-body">
-        <div className="sm-name">{s.name}{s.marked && <span className="marked-dot" title="Marked for advancement" />}</div>
-        <div className="sm-cat">{labels[s.category] ?? s.category}{s.stat ? ` · ${s.stat}` : ""}{s.gear_granted ? " · gear" : ""}</div>
-        {(s.specialty || s.perk || s.upgrades[0]) && <div className="sm-note">{[s.specialty && `Specialty: ${s.specialty}`, s.perk && `Perk: ${s.perk}`, !s.specialty && !s.perk && s.upgrades[0]].filter(Boolean).join(" · ")}</div>}
-      </div>
-    </button>
-  );
-}
-
-function EffectsList({ effects }: { effects: Effect[] }) {
-  const [filter, setFilter] = useState<string | null>(null);
-  const types = Array.from(new Set(effects.map((e) => e.type)));
-  const shown = filter ? effects.filter((e) => e.type === filter) : effects;
-  if (!effects.length) return <Empty>No active features, effects or conditions recorded.</Empty>;
-  return (
-    <>
-      <div className="chips effect-filters">
-        <button className={`chip ${filter == null ? "cyan" : ""}`} onClick={() => setFilter(null)}>All {effects.length}</button>
-        {types.map((t) => <button key={t} className={`chip ${filter === t ? "cyan" : ""}`} onClick={() => setFilter(filter === t ? null : t)}>{EFFECT_META[t]?.label ?? humanize(t)}</button>)}
-      </div>
-      <ul className="effects">{shown.map((e, i) => <EffectRow key={i} e={e} />)}</ul>
-    </>
   );
 }
 
@@ -361,151 +241,6 @@ function GearTile({ i, labels }: { i: Item; labels: Record<string, string> }) {
       <div className="gt-name">{i.name}</div>
       <div className="gt-slot">{labels[i.slot] ?? i.slot}{i.effects[0] ? ` · ${i.effects[0]}` : ""}</div>
     </div>
-  );
-}
-
-// ------------------------------------------------------------------ skills tab
-function SkillsTab({ d, focus }: { d: Dossier; focus: number | null }) {
-  const [q, setQ] = useState("");
-  const [cat, setCat] = useState<string>("all");
-  const [sort, setSort] = useState<"rank" | "name">("rank");
-  const [open, setOpen] = useState<Set<number>>(() => new Set(focus != null ? [focus] : []));
-  const focusRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { focusRef.current?.scrollIntoView({ block: "center" }); }, []);
-  const order = ["signature", "combat", "engineering", "social", "exploration", "magic", "gear", "other"];
-  const counts = useMemo(() => {
-    const m: Record<string, number> = { all: d.skills.length, signature: d.skills.filter((s) => s.signature).length };
-    d.skills.forEach((s) => { m[s.category] = (m[s.category] ?? 0) + 1; });
-    return m;
-  }, [d.skills]);
-  const match = (s: Skill) => !q || `${s.name} ${s.specialty ?? ""} ${s.perk ?? ""} ${s.upgrades.join(" ")}`.toLowerCase().includes(q.toLowerCase());
-  const sorted = (list: Skill[]) => [...list].sort((a, b) => sort === "name" ? a.name.localeCompare(b.name) : (b.rank ?? 0) - (a.rank ?? 0) || a.name.localeCompare(b.name));
-  // one canonical card per skill: grouped by its category; "Signature" is a filter view, not a second copy
-  const groups = cat === "all" ? order.filter((c) => c !== "signature").map((c) => [c, sorted(d.skills.filter((s) => s.category === c && match(s)))] as const)
-    : [[cat, sorted(d.skills.filter((s) => (cat === "signature" ? s.signature : s.category === cat) && match(s)))] as const];
-  const toggle = (id: number) => setOpen((o) => { const n = new Set(o); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  return (
-    <div>
-      <div className="toolbar">
-        <div className="search"><Search size={14} /><input className="input" placeholder="Search skills, specialties, upgrades…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search skills" /></div>
-        <select className="select input" value={sort} onChange={(e) => setSort(e.target.value as "rank" | "name")} aria-label="Sort skills"><option value="rank">Sort by rank</option><option value="name">Sort by name</option></select>
-      </div>
-      <div className="chips cat-filters">
-        {["all", ...order].filter((c) => c === "all" || counts[c]).map((c) => (
-          <button key={c} className={`chip ${cat === c ? "cyan" : ""}`} onClick={() => setCat(c)}>{c === "all" ? "All" : d.category_labels[c]} <span className="mono">{counts[c]}</span></button>
-        ))}
-      </div>
-      {groups.filter(([, list]) => list.length).length === 0 && <Empty>No skills match.</Empty>}
-      {groups.filter(([, list]) => list.length).map(([c, list]) => (
-        <section key={c} className="skill-group">
-          {cat === "all" && <h4>{d.category_labels[c]}</h4>}
-          <div className="skill-cards">{list.map((s) => (
-            <div key={s.id} ref={s.id === focus ? focusRef : undefined}>
-              <SkillCard s={s} open={open.has(s.id)} onToggle={() => toggle(s.id)} labels={d.category_labels} />
-            </div>))}
-          </div>
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function SkillCard({ s, open, onToggle, labels }: { s: Skill; open: boolean; onToggle: () => void; labels: Record<string, string> }) {
-  const extra = Object.entries(s.details).filter(([k]) => !["provenance", "source", "condition"].includes(k));
-  return (
-    <div className={`skill-card cat-${s.category} ${open ? "open" : ""}`}>
-      <button className="sc-head" onClick={onToggle} aria-expanded={open}>
-        <div className="sc-rank" aria-label={`Rank ${s.rank ?? "unknown"}`}>{s.rank ?? "?"}</div>
-        <div className="sc-main">
-          <div className="sc-name">{s.name}</div>
-          <div className="sc-tags">
-            <span>{labels[s.category] ?? s.category}</span>
-            {s.stat && <span>{s.stat}</span>}
-            {s.gear_granted ? <span className="tag gear">gear-granted</span> : s.kind === "spell" ? <span className="tag spell">spell{s.mana_cost != null ? ` · ${s.mana_cost} mana` : ""}</span> : <span className="tag learned">learned</span>}
-            {s.passive && <span className="tag">passive</span>}
-            {s.marked && <span className="tag marked" title="Marked for an advancement check">marked</span>}
-            {s.upgrades.length > 0 && <span className="tag upgrade">upgrade</span>}
-          </div>
-          {(s.explain || s.specialty || s.perk || s.upgrades[0] || s.description) && (
-            <div className="sc-summary">{s.explain ? s.explain.summary : <>{s.specialty && <>Specialty: <b>{s.specialty}</b>. </>}{s.perk && <>Perk: <b>{s.perk}</b>. </>}{!s.specialty && !s.perk && (s.upgrades[0] ?? s.description)}</>}</div>
-          )}
-        </div>
-        {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-      </button>
-      {open && (
-        <div className="sc-details">
-          {s.explain && <WhatItDoes x={s.explain} />}
-          {s.description && <p>{s.description}</p>}
-          {s.specialty && <p><b>Specialty:</b> {s.specialty}</p>}
-          {s.perk && <p><b>Perk:</b> {s.perk}</p>}
-          {s.upgrades.map((u, i) => <p key={i}><b>Rank upgrade:</b> {u}{s.upgrade_explain?.[i] && s.upgrade_explain[i]!.explanation !== u ? <span className="sub"> {s.upgrade_explain[i]!.explanation}</span> : null}</p>)}
-          {s.source && <p><b>Granted by:</b> {s.source}</p>}
-          {s.condition && <p><b>Condition:</b> {s.condition}</p>}
-          {s.attack && <p><b>Attack:</b> {s.attack.name} {s.attack.attack_bonus != null ? signed(s.attack.attack_bonus) : ""} · {s.attack.damage ?? ""}{s.attack.range ? ` · ${s.attack.range}` : ""}{s.attack.reach ? ` · reach ${s.attack.reach}` : ""}</p>}
-          {extra.length > 0 && <Tree value={Object.fromEntries(extra)} />}
-          {s.provenance && <p className="sub"><b>Provenance:</b> {s.provenance}</p>}
-          {!s.explain && !s.description && !s.specialty && !s.perk && !s.upgrades.length && !s.source && !s.attack && !extra.length && !s.provenance && <p className="sub">No explanation has been written for this skill yet.</p>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------ ability explanations
-const BASIS: Record<string, { label: string; tone: string; hint: string }> = {
-  rulebook: { label: "Rulebook", tone: "green", hint: "Paraphrased from the rulebook entry cited." },
-  record: { label: "Campaign record", tone: "cyan", hint: "As the campaign ledger defines it." },
-  template: { label: "Build bonus", tone: "", hint: "A plain bonus from the class or race build." },
-  homebrew: { label: "Homebrew reading", tone: "amber", hint: "Nothing in the rulebooks or the record defines this; written to fill the gap. Tell the GM if it plays differently." },
-};
-
-function WhatItDoes({ x }: { x: NonNullable<Explain> }) {
-  const b = BASIS[x.basis] ?? BASIS.homebrew;
-  return (
-    <div className={`what-it-does basis-${x.basis}`}>
-      <p>{x.explanation}</p>
-      <div className="wid-source"><Chip tone={b.tone} title={b.hint}>{b.label}</Chip>{x.citation && x.basis !== "template" && <span className="sub">{x.citation}</span>}</div>
-    </div>
-  );
-}
-
-/** A class feature, benefit, specialty or perk: its one-line summary, and what it does on demand. */
-function Highlight({ h }: { h: Dossier["build"]["highlights"][number] }) {
-  const [open, setOpen] = useState(false);
-  const x = h.explain;
-  return (
-    <div className={`highlight src-${h.source.replace(/\s/g, "-")} ${open ? "open" : ""}`}>
-      <button className="hl-head" onClick={() => setOpen((o) => !o)} aria-expanded={open} disabled={!x && !h.detail}>
-        <Sparkles size={14} />
-        <div className="hl-text">
-          <div className="hl-title">{h.title}</div>
-          {(x?.summary || h.detail) && !open && <div className="hl-detail">{x?.summary ?? h.detail}</div>}
-          <div className="hl-src">{h.source}</div>
-        </div>
-        {(x || h.detail) && (open ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}
-      </button>
-      {open && (
-        <div className="hl-body">
-          {h.detail && x?.basis !== "record" && h.detail !== x?.explanation && <p className="hl-record">{h.detail}</p>}
-          {x ? <WhatItDoes x={x} /> : <p className="sub">No explanation written yet.</p>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function EffectRow({ e }: { e: Effect }) {
-  const [open, setOpen] = useState(false);
-  const x = e.explain;
-  return (
-    <li className={`effect tone-${EFFECT_META[e.type]?.tone ?? "steel"} ${open ? "open" : ""}`}>
-      <button className="effect-head" onClick={() => setOpen((o) => !o)} aria-expanded={open} disabled={!x}>
-        <span className="effect-type">{EFFECT_META[e.type]?.label ?? humanize(e.type)}</span>
-        <span className="effect-name">{e.name}</span>
-        <span className="effect-detail">{x && !open ? x.summary : open && x?.basis === "record" ? null : e.detail}</span>
-      </button>
-      {open && x && <WhatItDoes x={x} />}
-    </li>
   );
 }
 

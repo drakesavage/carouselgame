@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, CharacterCard } from "../api";
-import { Bar, Chip, humanize, Portrait } from "../ui";
-import { portraitSrc, role, useManifest } from "./Hud";
+import { Chip, humanize, Portrait } from "../ui";
+import { paLabel, portraitSrc, role, roleLabel, useManifest } from "./Hud";
 import { LifeChip } from "./People";
 
 function useLoad<T>(fn: () => Promise<T>, deps: unknown[]) {
@@ -41,10 +41,8 @@ export function CharactersView({ cid, version, openCharacter }: { cid: number; v
                   <Portrait name={c.name} src={portraitSrc(c, m)} crop={c.portrait_crop} size={64} />
                   <div className="grow">
                     <div className="pname">{c.name} <span className={`role ${role(c)[1]}`}>{role(c)[0]}</span></div>
-                    <div className="pclass">{[c.level != null ? `L${c.level}` : null, c.race ?? c.species, c.class_name].filter(Boolean).join(" · ") || "class not recorded"}</div>
-                    {c.life?.state === "deceased" ? <div className="sub">{c.life.note ?? "Deceased."}</div> : c.hp_max != null || c.mana_max != null ? (
-                      <><Bar kind="hp" cur={c.hp_current} max={c.hp_max} /><Bar kind="mana" cur={c.mana_current} max={c.mana_max} /></>
-                    ) : <div className="sub">No combat sheet recorded.</div>}
+                    <div className="pclass">{roleLabel(c) ?? "no Archetype yet"}</div>
+                    {c.life?.state === "deceased" ? <div className="sub">{c.life.note ?? "Deceased."}</div> : <div className="sub">{paLabel(c) ?? "Stats not assigned yet."}</div>}
                   </div>
                 </div>
                 <div className="chips" style={{ marginTop: 8 }}>

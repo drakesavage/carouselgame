@@ -44,7 +44,7 @@ export function CampaignsPanel({ cid, onCampaign }: { cid: number; onCampaign: (
                   <div className="camp-name">{c.name}</div>
                 )}
                 <div className="sub">
-                  {c.crawler ?? "no crawler"}{c.current_floor ? ` · Floor ${c.current_floor}` : ""}{c.current_location ? ` · ${c.current_location}` : ""}
+                  {c.character ?? "no character"}{c.current_location ? ` · ${c.current_location}` : ""}
                 </div>
                 <div className="chips" style={{ marginTop: 4 }}>
                   {c.id === cid && <Chip tone="cyan">open now</Chip>}
@@ -86,18 +86,17 @@ export function CampaignsPanel({ cid, onCampaign }: { cid: number; onCampaign: (
 }
 
 function NewCampaign({ open, onClose, onMade }: { open: boolean; onClose: () => void; onMade: (id: number) => void }) {
-  const blank = { name: "", crawler: "", race: "", class_name: "", floor: "1", location: "", floor_hours: "120", premise: "", clock_on_entry: true };  // Floor 1: 5 days (Toolkit p. 19)
+  const blank = { name: "", character: "", location: "", premise: "" };
   const [f, setF] = useState(blank);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => { if (open) { setF(blank); setErr(null); } }, [open]);  // eslint-disable-line react-hooks/exhaustive-deps
-  const set = (k: Exclude<keyof typeof blank, "clock_on_entry">) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
+  const set = (k: keyof typeof blank) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const submit = async () => {
     setBusy(true); setErr(null);
     try {
       const r = await api.createCampaign({
-        name: f.name.trim(), crawler: f.crawler.trim(), race: f.race.trim() || null, class_name: f.class_name.trim() || null,
-        floor: Number(f.floor) || 1, location: f.location.trim() || null, floor_hours: f.floor_hours ? Number(f.floor_hours) : null, premise: f.premise.trim() || null, clock_on_entry: f.clock_on_entry,
+        name: f.name.trim(), character: f.character.trim(), location: f.location.trim() || null, premise: f.premise.trim() || null,
       });
       onMade(r.campaign_id);
     } catch (e) { setErr(String(e instanceof Error ? e.message : e)); } finally { setBusy(false); }
@@ -109,28 +108,16 @@ function NewCampaign({ open, onClose, onMade }: { open: boolean; onClose: () => 
         <Dialog.Content className="modal" aria-describedby={undefined}>
           <Dialog.Title className="h1" style={{ fontSize: 17 }}>New campaign</Dialog.Title>
           <form className="camp-form" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-            <label>Campaign name<input className="input" required maxLength={80} value={f.name} onChange={set("name")} placeholder="e.g. Cliff's Second Crawl" /></label>
-            <label>Your crawler's name<input className="input" required maxLength={60} value={f.crawler} onChange={set("crawler")} /></label>
-            <div className="camp-form-pair">
-              <label>Race <span className="sub">(optional)</span><input className="input" maxLength={60} value={f.race} onChange={set("race")} placeholder="Human" /></label>
-              <label>Class <span className="sub">(optional)</span><input className="input" maxLength={60} value={f.class_name} onChange={set("class_name")} /></label>
-            </div>
-            <div className="camp-form-pair">
-              <label>Starting floor<input className="input" type="number" min={1} max={18} value={f.floor} onChange={set("floor")} /></label>
-              <label>Floor collapses in <span className="sub">(hours; Floor 1 is 5 days)</span><input className="input" type="number" min={1} value={f.floor_hours} onChange={set("floor_hours")} /></label>
-            </div>
-            <label className="row" style={{ gap: 8, display: "flex" }}>
-              <input type="checkbox" checked={f.clock_on_entry} onChange={(e) => setF({ ...f, clock_on_entry: e.target.checked })} />
-              <span>Start the floor clock when I enter the Dungeon <span className="sub">(otherwise it runs from the first turn)</span></span>
-            </label>
+            <label>Campaign name<input className="input" required maxLength={80} value={f.name} onChange={set("name")} placeholder="e.g. The Long Drive In" /></label>
+            <label>Your character's name<input className="input" required maxLength={60} value={f.character} onChange={set("character")} /></label>
             <label>Starting location <span className="sub">(optional)</span><input className="input" maxLength={120} value={f.location} onChange={set("location")} /></label>
             <label>Premise <span className="sub">(optional: what the GM should know going in; the party knows it too)</span>
               <textarea className="input" rows={3} maxLength={2000} value={f.premise} onChange={set("premise")} /></label>
-            <div className="sub">Stats, skills and gear start empty: build your crawler with the GM in the first turns. Nothing is made up for you.</div>
+            <div className="sub">Stats, Archetype and tickets start empty: Carousel assigns them in play. Nothing is made up for you.</div>
             {err && <div className="sub" style={{ color: "var(--red)" }}>{err}</div>}
             <div className="row" style={{ justifyContent: "flex-end" }}>
               <Dialog.Close type="button" className="btn ghost">Cancel</Dialog.Close>
-              <button className="btn" disabled={busy || !f.name.trim() || !f.crawler.trim()}>{busy ? <Loader2 size={13} className="spin" /> : <Plus size={13} />} Start campaign</button>
+              <button className="btn" disabled={busy || !f.name.trim() || !f.character.trim()}>{busy ? <Loader2 size={13} className="spin" /> : <Plus size={13} />} Start campaign</button>
             </div>
           </form>
         </Dialog.Content>

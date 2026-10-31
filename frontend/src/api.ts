@@ -1,17 +1,24 @@
 // Typed client for the player API. The frontend never calls /api/gm: GM-only data is not part of this bundle.
 
-export type Stats = { stats?: Record<string, number>; modifiers?: Record<string, number>; unenhanced?: Record<string, number> };
+/** Carousel sheet (carousel/sheet.py): base stats, current after buffs, Plot Armor base/current/effective. */
+export type StatName = "Mettle" | "Moxie" | "Hustle" | "Savvy" | "Grit";
+export type CarouselStats = {
+  stats: Record<StatName, number | null>; current: Record<StatName, number | null>;
+  plot_armor: { base: number | null; current: number | null; effective: number | null };
+  modifiers: { id: number; target: string; op: "add" | "multiply"; value: number; source: string; scope: string }[];
+};
+export type Ticket = { ref: string; name: string; text: string; equipped: boolean; uses_left: number | null; uses_max: number | null; recharge: string | null };
 export type Status = { id: number; name: string; description?: string | null; polarity: string; expires_at_minutes?: number | null };
 export type CharacterCard = {
-  id: number; slug: string; name: string; kind: string; roster_category?: string | null; crawler_number?: string | null; species?: string | null; race?: string | null;
-  class_name?: string | null; level?: number | null; status: string; location?: string | null; in_party: number; party_order: number;
-  hp_current?: number | null; hp_max?: number | null; mana_current?: number | null; mana_max?: number | null; ai_favor?: number | null;
+  id: number; slug: string; name: string; kind: string; roster_category?: string | null; species?: string | null;
+  status: string; location?: string | null; in_party: number; party_order: number;
+  role_id?: string | null; aspect_id?: string | null; advanced_role_id?: string | null; role_reason?: string | null;
   portrait_crop?: { cx: number; cy: number; k: number; ar: number } | null;
-  stats: Stats; derived: Record<string, unknown>; portrait_path?: string | null; statuses: Status[]; equipped: { id: number; name: string; slot?: string }[];
+  stats: CarouselStats; tickets?: Ticket[]; portrait_path?: string | null; statuses: Status[]; equipped: { id: number; name: string; slot?: string }[];
   personality?: string | null; known_motivation?: string | null; attitude?: number | null; voice?: string | null; assignment?: string | null;
   life?: Life;
 };
-/** Whether someone is around at all, apart from combat HP (a deceased character's HP is the last record). */
+/** Whether someone is around at all. */
 export type Life = { state: "active" | "deceased" | "missing" | "retired" | "contact"; label: string; note: string | null };
 export type Person = CharacterCard & {
   life: Life; allegiance: string | null; relationship_notes: string[]; where: string | null;
@@ -51,7 +58,7 @@ export type FloorClock = { elapsed_minutes: number; deadline_minutes: number | n
   pending_minutes?: number | null; pending_display?: string | null };
 export type Clock = { key: string; label: string; kind: string; current: number; maximum: number | null; unit?: string | null };
 export type Campaign = {
-  id: number; name: string; is_demo: number; data_source: string; current_floor: number | null; current_location: string | null; safe_room: number;
+  id: number; name: string; is_demo: number; data_source: string; current_location: string | null; safe_room: number;
   game_time_minutes: number; floor_deadline_minutes: number | null; active_character_id: number | null; active_objective: string | null;
   floor_clock?: FloorClock; party: CharacterCard[]; quests: Quest[]; clocks: Clock[];
   encounter: Encounter | null;
@@ -70,12 +77,12 @@ export type ArtJob = { id: number; campaign_id: number; kind: ArtKind; subject_i
 export type Combatant = { id: string; name: string; side: "party" | "foe"; defeated?: boolean; hb_percent?: number; actions_left?: number;
   evading?: boolean; hp_current?: number | null; hp_max?: number | null; dead?: boolean; dying?: string | null };
 export type Encounter = { id: number; name: string; round: number; phase?: string; summary?: string | null; combatants: Combatant[] };
-export type CampaignListItem = { id: number; name: string; is_demo: number; data_source: string; current_floor: number | null; current_location: string | null; archived: number };
+export type CampaignListItem = { id: number; name: string; is_demo: number; data_source: string; current_location: string | null; archived: number };
 export type Achievements = { total: number; unopened_boxes: number; characters: {
   id: number; name: string; is_player: boolean; in_party: boolean; status: string; portrait_path: string | null; portrait_crop: CharacterCard["portrait_crop"];
   achievements: { id: number; title: string; description: string | null; reward: string | null; game_time_minutes: number | null; box: string | null; box_opened: boolean | null }[];
   boxes: { id: number; name: string; tier: string | null; from: string | null }[] }[] };
-export type ManagedCampaign = CampaignListItem & { created_at: string; updated_at: string; turns: number; last_played: string | null; characters: number; crawler: string | null };
+export type ManagedCampaign = CampaignListItem & { created_at: string; updated_at: string; turns: number; last_played: string | null; characters: number; character: string | null };
 export type RollCard = { roll_id: number; expression: string; dice: { sides: number; value: number; kept: boolean }[]; total: number; target: number | null;
   outcome: string | null; degree: string | null; reason: string | null; detail: Record<string, any> };
 export type Message = { id: number; turn_id: number | null; role: "player" | "gm" | "system"; content: string; created_at: string;
@@ -164,7 +171,7 @@ export const api = {
   health: () => req<{ provider: string; codex_cli: string | null; rulebook_index: boolean }>("api/health"),
   campaigns: () => req<CampaignListItem[]>("api/campaigns"),
   manageCampaigns: () => req<ManagedCampaign[]>("api/campaigns-manage"),
-  createCampaign: (body: { name: string; crawler: string; race: string | null; class_name: string | null; floor: number; location: string | null; floor_hours: number | null; premise: string | null; clock_on_entry: boolean }) =>
+  createCampaign: (body: { name: string; character: string; location: string | null; premise: string | null }) =>
     post<{ campaign_id: number }>("api/campaigns", body),
   editCampaign: (id: number, body: { name?: string; archived?: boolean }) => req<{ ok: boolean }>(`api/campaigns/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteCampaign: (id: number, confirmName: string) => post<{ deleted: string; backup: string; pictures_moved: number }>(`api/campaigns/${id}/delete`, { confirm_name: confirmName }),

@@ -1,11 +1,12 @@
 """Carousel IDs that saved campaign state depends on. A re-import may only replace reference.db if every one of them
-still resolves. Later phases add their columns here (party positions, Omen instances, owned tickets, ...)."""
+still resolves. Later phases add their columns here (party positions, Omen instances, ...)."""
 from __future__ import annotations
 
 import json
 import sqlite3
 
-REFERENCE_COLUMNS: dict[str, tuple[str, str]] = {"place": ("locations", "ref_id"), "npc": ("npc_profiles", "ref_id")}
+REFERENCE_COLUMNS: dict[str, tuple[str, str]] = {"place": ("locations", "ref_id"), "npc": ("npc_profiles", "ref_id"),
+                                                  "ticket": ("character_tickets", "ticket_ref")}
 
 
 def referenced_ids(campaign_conn: sqlite3.Connection) -> dict[str, set[str]]:
@@ -25,6 +26,8 @@ def unresolved(ref: sqlite3.Connection, ids: dict[str, set[str]]) -> dict[str, l
     checks = {
         "place": lambda i: resolve_place(ref, i) is not None,
         "npc": lambda i: ref.execute("SELECT 1 FROM npc_templates WHERE id = ?", (i,)).fetchone() is not None,
+        "ticket": lambda i: ref.execute("SELECT 1 FROM tropes WHERE id = ?", (i[len("trope:"):],)).fetchone() is not None if i.startswith("trope:")
+        else ref.execute("SELECT 1 FROM tickets WHERE id = ?", (i,)).fetchone() is not None,
     }
     out = {kind: sorted(i for i in found if not checks[kind](i)) for kind, found in ids.items()}
     return {k: v for k, v in out.items() if v}
