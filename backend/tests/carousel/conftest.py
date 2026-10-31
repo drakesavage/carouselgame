@@ -48,3 +48,16 @@ def ref_real(real_files, tmp_path_factory):
     conn.commit()
     yield conn
     conn.close()
+
+
+@pytest.fixture(scope="session")
+def real_ref_conn(ref_real):
+    """A bare connection with the real reference DB attached as `ref`, like a campaign connection."""
+    import sqlite3
+    from app.carousel.refdata import attach_reference
+    path = ref_real.execute("PRAGMA database_list").fetchone()[2]
+    c = sqlite3.connect(":memory:", check_same_thread=False)
+    c.row_factory = sqlite3.Row
+    attach_reference(c, path)
+    yield c
+    c.close()
