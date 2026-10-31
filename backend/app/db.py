@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS campaigns (
   active_character_id INTEGER,                     -- the player character
   active_objective TEXT,
   objective_quests_json TEXT NOT NULL DEFAULT '[]',
+  node_id TEXT,                                    -- the player character's group's travel-graph node (carousel/travel.py)
+  travel_seq INTEGER NOT NULL DEFAULT 0,           -- travels so far; seeds the interruption decision (carousel/interruptions.py)
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -407,7 +409,32 @@ CREATE TABLE IF NOT EXISTS party_groups (
   activity TEXT,
   status TEXT NOT NULL DEFAULT 'active',     -- active | disbanded
   source TEXT,
+  node_id TEXT,                              -- travel-graph node
   UNIQUE (campaign_id, key)
+);
+
+-- Carousel map state: places the group knows, story flags that open graph edges (GM-only), Omens the group has seen.
+CREATE TABLE IF NOT EXISTS known_places (
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  place_id TEXT NOT NULL,
+  how TEXT,                                  -- start | visited | told
+  known_at_minutes INTEGER,
+  PRIMARY KEY (campaign_id, place_id)
+);
+CREATE TABLE IF NOT EXISTS campaign_flags (
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  flag TEXT NOT NULL,
+  set_at_minutes INTEGER,
+  source TEXT,
+  PRIMARY KEY (campaign_id, flag)
+);
+CREATE TABLE IF NOT EXISTS omen_states (
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  omen_id TEXT NOT NULL,
+  stage TEXT NOT NULL CHECK (stage IN ('visible', 'examined')),
+  seen_at_node TEXT,
+  seen_at_minutes INTEGER,
+  PRIMARY KEY (campaign_id, omen_id)
 );
 
 -- The current scene the GM is running (one active per campaign) and closed scenes with their summaries.
@@ -498,7 +525,10 @@ COLUMN_MIGRATIONS = [
     ("rulings", "review_note", "TEXT"),
     ("rulings", "reviewed_at", "TEXT"),
     ("campaigns", "archived", "INTEGER NOT NULL DEFAULT 0"),
-    ("campaigns", "objective_quests_json", "TEXT NOT NULL DEFAULT '[]'"),  # ordered quest ids that make up the immediate objective  # {cx, cy, k, ar}: square crop of the portrait image (null = default)  # comfy | codex (art/codex_image.py)  # staged tool calls and roll records while a turn is in flight
+    ("campaigns", "objective_quests_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ("campaigns", "node_id", "TEXT"),
+    ("campaigns", "travel_seq", "INTEGER NOT NULL DEFAULT 0"),
+    ("party_groups", "node_id", "TEXT"),  # ordered quest ids that make up the immediate objective  # {cx, cy, k, ar}: square crop of the portrait image (null = default)  # comfy | codex (art/codex_image.py)  # staged tool calls and roll records while a turn is in flight
 ]
 
 

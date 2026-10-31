@@ -1,12 +1,14 @@
 """Carousel IDs that saved campaign state depends on. A re-import may only replace reference.db if every one of them
-still resolves. Later phases add their columns here (party positions, Omen instances, ...)."""
+still resolves. Later phases add their columns here."""
 from __future__ import annotations
 
 import json
 import sqlite3
 
 REFERENCE_COLUMNS: dict[str, tuple[str, str]] = {"place": ("locations", "ref_id"), "npc": ("npc_profiles", "ref_id"),
-                                                  "ticket": ("character_tickets", "ticket_ref")}
+                                                  "ticket": ("character_tickets", "ticket_ref"),
+                                                  "node": ("campaigns", "node_id"), "group_node": ("party_groups", "node_id"),
+                                                  "known_place": ("known_places", "place_id"), "omen": ("omen_states", "omen_id")}
 
 
 def referenced_ids(campaign_conn: sqlite3.Connection) -> dict[str, set[str]]:
@@ -25,9 +27,18 @@ def referenced_ids(campaign_conn: sqlite3.Connection) -> dict[str, set[str]]:
 def unresolved(ref: sqlite3.Connection, ids: dict[str, set[str]]) -> dict[str, list[str]]:
     """{kind: sorted IDs the reference DB cannot resolve}; kinds with none are left out. Place aliases count."""
     from .import_places import resolve_place
+
+    def place(i: str) -> bool:
+        return resolve_place(ref, i) is not None
+
+    def node(i: str) -> bool:
+        return ref.execute("SELECT 1 FROM graph_nodes WHERE id = ?", (i,)).fetchone() is not None
+
     checks = {
-        "place": lambda i: resolve_place(ref, i) is not None,
+        "place": place,
         "npc": lambda i: ref.execute("SELECT 1 FROM npc_templates WHERE id = ?", (i,)).fetchone() is not None,
+        "node": node, "group_node": node, "known_place": place,
+        "omen": lambda i: ref.execute("SELECT 1 FROM omens WHERE id = ?", (i,)).fetchone() is not None,
         "ticket": lambda i: ref.execute("SELECT 1 FROM tropes WHERE id = ?", (i[len("trope:"):],)).fetchone() is not None if i.startswith("trope:")
         else ref.execute("SELECT 1 FROM tickets WHERE id = ?", (i,)).fetchone() is not None,
     }

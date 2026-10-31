@@ -22,7 +22,7 @@ def campaign_conn(settings_mini):
     c = connect(settings_mini.campaign_db)
     init_db(c)
     c.execute("INSERT INTO campaigns (id, name, game_time_minutes, created_at, updated_at) VALUES (1, 'T', 0, ?, ?)", (now_iso(), now_iso()))
-    c.execute("INSERT INTO locations (campaign_id, name, ref_id) VALUES (1, 'Town Square', 'CAR-001')")
+    c.execute("INSERT INTO locations (campaign_id, name, ref_id) VALUES (1, 'Town Square', 'CAR-002')")
     c.commit()
     yield c
     c.close()
@@ -66,7 +66,7 @@ def test_ids_kept_only_in_a_save_point_are_protected(settings_mini, campaign_con
     from app.memory.snapshots import create_save_point
     campaign_conn.execute("UPDATE locations SET ref_id = 'CAR-999'")
     create_save_point(campaign_conn, 1, "before the fix")
-    campaign_conn.execute("UPDATE locations SET ref_id = 'CAR-001'")   # live state is fine, the save is not
+    campaign_conn.execute("UPDATE locations SET ref_id = 'CAR-002'")   # live state is fine, the save is not
     campaign_conn.commit()
     r = run_import(settings_mini)
     assert not r.ok and r.missing == {"place": ["CAR-999"]}

@@ -1,5 +1,5 @@
 """Test-only Carousel campaign: player character Mara, companion Jonah, resident Adeline (with a hidden trope),
-on the mini reference data (tests/carousel/mini_data.py)."""
+on the mini reference data (tests/carousel/mini_data.py), standing on the Town Square and knowing the Lodge and the Diner."""
 from __future__ import annotations
 
 import json
@@ -16,8 +16,10 @@ def seed_carousel(conn: sqlite3.Connection) -> int:
     with transaction(conn):
         cid = next_campaign_id(conn)
         conn.execute("""INSERT INTO campaigns (id, name, is_demo, data_source, current_location, safe_room, game_time_minutes, active_objective,
-                                               created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                     (cid, NAME, 1, "test", "Town Square", 1, 600, "Get everyone to Dyer's Lodge before dark.", t, t))
+                                               node_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                     (cid, NAME, 1, "test", "Town Square", 1, 600, "Get everyone to Dyer's Lodge before dark.", "CAR-002", t, t))
+        for place in ("CAR-047", "CAR-002", "CAR-006"):
+            conn.execute("INSERT INTO known_places (campaign_id, place_id, how, known_at_minutes) VALUES (?,?,?,?)", (cid, place, "start", 600))
 
         def char(slug, name, kind, cat, stats, role, order, bio, in_party=1):
             return conn.execute(
@@ -45,7 +47,7 @@ def seed_carousel(conn: sqlite3.Connection) -> int:
         conn.execute("INSERT INTO npc_profiles (character_id, personality, voice, known_motivation, attitude, ref_id) VALUES (?,?,?,?,?,?)",
                      (adeline, "Patient in public, hard underneath.", "Measured, never hurried.", "Keep the camp alive.", 1, "CAR-NPC-001"))
         conn.execute("INSERT INTO locations (campaign_id, name, description, ref_id) VALUES (?,?,?,?)",
-                     (cid, "Town Square", "A safe zone between stories.", "CAR-001"))
+                     (cid, "Town Square", "A safe zone between stories.", "CAR-002"))
         conn.execute("INSERT INTO gm_secrets (campaign_id, subject, kind, content, created_at) VALUES (?,?,?,?,?)",
                      (cid, "adeline", "motivation", "DEMO SECRET: Adeline knows the lodge key is hidden in the boathouse.", t))
         for title, kind, prio in [("Reach Dyer's Lodge", "quest", 1), ("Build a Sock Launcher", "project", 2)]:
