@@ -3,12 +3,10 @@ import json
 import uuid
 from pathlib import Path
 
-from app.carousel.importer import run_import
 from app.db import now_iso, transaction
-from tests.carousel.conftest import write_mini_source
 
 SECRETS = ["GMSECRET-ALPHA-1", "GMSECRET-BRAVO-2", "GMSECRET-CHARLIE-3", "GMSECRET-DELTA-4", "GMSECRET-ECHO-5", "GMSECRET-FOXTROT-6",
-           "DEMO SECRET", "MINI-SEALED-TRUTH", "MINI-NPC-SECRET"]   # last two: Omen sealed truth and NPC gm_only (reference.db)
+           "DEMO SECRET", "MINI-SEALED-TRUTH", "MINI-NPC-SECRET"]   # last two: Omen sealed truth and NPC gm_only (mini reference.db, conftest)
 
 
 def _plant(conn, cid):
@@ -43,9 +41,7 @@ def _player_urls(client, cid):
     return urls
 
 
-def test_no_gm_material_in_any_player_response(client, conn, demo_id, settings, tmp_path):
-    settings.source_dir = write_mini_source(tmp_path / "src")   # reference data carrying sealed truth and NPC gm_only text
-    assert run_import(settings).ok
+def test_no_gm_material_in_any_player_response(client, conn, demo_id):
     cid = demo_id
     _plant(conn, cid)
     # a turn so that the GM context (which DOES contain secrets) is exercised

@@ -178,7 +178,8 @@ class AppState:
         return prov
 
     def conn(self):
-        return connect(self.settings.campaign_db)
+        from .carousel.refdata import open_campaign
+        return open_campaign(self.settings)
 
 
 def create_app(settings: Settings | None = None, *, bootstrap: bool = True, local_hosts: set[str] | None = None) -> FastAPI:

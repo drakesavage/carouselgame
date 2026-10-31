@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from ..carousel.refdata import open_campaign
 from ..config import Settings
 from ..db import connect, now_iso, one, rows, transaction
 from ..memory.context import PROFILES, build_context
@@ -73,7 +74,7 @@ class TurnService:
         self.progress: dict[int, Progress] = {}
 
     def _conn(self):
-        return connect(self.settings.campaign_db)
+        return open_campaign(self.settings)
 
     def _rule_conn(self):
         p: Path = self.settings.rulebook_db
@@ -242,7 +243,7 @@ class TurnService:
                     "provider": "codex", "model": "codex", "gemini_usage": usage}
             nxt = root.codex() if hasattr(root, "codex") else self.provider_factory()
             if exc.reroute and hasattr(root, "route"):
-                c2 = connect(self.settings.campaign_db)
+                c2 = open_campaign(self.settings)
                 try:
                     active = story_active(c2, cid)
                     absent = absent_names(c2, cid)
