@@ -36,9 +36,11 @@ SNAPSHOT_TABLES: dict[str, str] = {
     "scenes": "SELECT * FROM scenes WHERE campaign_id = ?",
     "memories": "SELECT * FROM memories WHERE campaign_id = ?",
     "ability_uses": "SELECT * FROM ability_uses WHERE campaign_id = ?",
+    "character_tickets": "SELECT * FROM character_tickets WHERE campaign_id = ?",
+    "stat_modifiers": "SELECT * FROM stat_modifiers WHERE campaign_id = ?",
 }
 # Delete children before parents.
-_DELETE_ORDER = ["skills", "status_effects", "npc_profiles", "relationships", "achievements", "items", "locations",
+_DELETE_ORDER = ["character_tickets", "stat_modifiers", "skills", "status_effects", "npc_profiles", "relationships", "achievements", "items", "locations",
                  "quests", "encounters", "clocks", "house_rules", "rulings", "lore_facts", "gm_secrets",
                  "memory_summaries", "party_groups", "scenes", "memories", "ability_uses", "characters"]
 _LOGS = {"messages": "max_message_id", "events": "max_event_id", "turns": "max_turn_id"}

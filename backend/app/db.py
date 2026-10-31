@@ -67,7 +67,42 @@ CREATE TABLE IF NOT EXISTS characters (
   bio TEXT,
   portrait_path TEXT,
   provenance TEXT NOT NULL DEFAULT 'manual',
+  mettle INTEGER, moxie INTEGER, hustle INTEGER, savvy INTEGER, grit INTEGER,  -- base stats (NULL = not assigned yet)
+  role_id TEXT,                            -- starting Archetype (reference roles, kind base)
+  aspect_id TEXT,
+  advanced_role_id TEXT,
+  ruleset_version TEXT,                    -- e.g. SB-0.4.1/role-0.4.2, pinned when stats are initialized
+  role_reason TEXT,                        -- why Carousel assigned the role (player-visible)
   UNIQUE (campaign_id, slug)
+);
+
+-- Trope tickets a character owns. ticket_ref: hb.ticket.* (reference tickets) or trope:<id> (reference tropes).
+CREATE TABLE IF NOT EXISTS character_tickets (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  character_id INTEGER NOT NULL REFERENCES characters(id),
+  ticket_ref TEXT NOT NULL,
+  equipped INTEGER NOT NULL DEFAULT 0,
+  uses_left INTEGER,                       -- NULL = no counted uses (the GM applies the text)
+  uses_max INTEGER,
+  recharge TEXT,                           -- scene | story | NULL
+  hidden INTEGER NOT NULL DEFAULT 0,       -- 1 = an NPC's unrevealed trope (GM-only)
+  source TEXT,
+  acquired_turn_id INTEGER,
+  UNIQUE (character_id, ticket_ref)
+);
+
+-- Temporary stat and Plot Armor changes; base stats are never edited by them.
+CREATE TABLE IF NOT EXISTS stat_modifiers (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  character_id INTEGER NOT NULL REFERENCES characters(id),
+  target TEXT NOT NULL CHECK (target IN ('mettle','moxie','hustle','savvy','grit','plot_armor')),
+  op TEXT NOT NULL CHECK (op IN ('add','multiply')),
+  value REAL NOT NULL,
+  source TEXT NOT NULL,
+  scope TEXT NOT NULL CHECK (scope IN ('scene','story','until_removed')),
+  turn_id INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS skills (
@@ -213,6 +248,7 @@ CREATE TABLE IF NOT EXISTS rulings (
   certainty TEXT NOT NULL DEFAULT 'provisional',       -- canonical | provisional | uncertain
   label TEXT NOT NULL DEFAULT 'INTERPRETATION',        -- BOOK | CAMPAIGN | INTERPRETATION | ONE-SCENE | OPEN
   sources_json TEXT NOT NULL DEFAULT '[]',
+  ticket_ref TEXT,                         -- the ticket this ruling interprets, if any
   created_at TEXT NOT NULL
 );
 
@@ -502,6 +538,11 @@ def connect(path: Path) -> sqlite3.Connection:
 
 # Columns added after v1. init_db adds any that an existing database lacks; nothing is ever dropped or rewritten.
 COLUMN_MIGRATIONS = [
+    ("locations", "ref_id", "TEXT"),
+    ("npc_profiles", "ref_id", "TEXT"),
+    ("rulings", "ticket_ref", "TEXT"),
+    *[("characters", c, "INTEGER") for c in ("mettle", "moxie", "hustle", "savvy", "grit")],
+    *[("characters", c, "TEXT") for c in ("role_id", "aspect_id", "advanced_role_id", "ruleset_version", "role_reason")],
     ("characters", "assignment", "TEXT"),
     ("campaigns", "day_length_minutes", "INTEGER"),
     ("quests", "details_json", "TEXT NOT NULL DEFAULT '{}'"),
