@@ -6,7 +6,8 @@ from pathlib import Path
 from app.db import now_iso, transaction
 
 SECRETS = ["GMSECRET-ALPHA-1", "GMSECRET-BRAVO-2", "GMSECRET-CHARLIE-3", "GMSECRET-DELTA-4", "GMSECRET-ECHO-5", "GMSECRET-FOXTROT-6",
-           "DEMO SECRET", "MINI-SEALED-TRUTH", "MINI-NPC-SECRET"]   # last two: Omen sealed truth and NPC gm_only (mini reference.db, conftest)
+           "DEMO SECRET", "MINI-SEALED-TRUTH", "MINI-NPC-SECRET",   # Omen sealed truth and NPC gm_only (mini reference.db, conftest)
+           "HIDDENTROPE-GOLF-7", "Doors open for it alone.", "trope:1"]   # Adeline's hidden trope: name, text, ref
 
 
 def _plant(conn, cid):
@@ -22,6 +23,8 @@ def _plant(conn, cid):
         conn.execute("INSERT INTO clocks (campaign_id, key, label, kind, visibility) VALUES (?,?,?,?,?)", (cid, "secret", SECRETS[4], "faction", "gm"))
         conn.execute("INSERT INTO memories (campaign_id, layer, subject, content, visibility, created_at) VALUES (?,?,?,?,?,?)",
                      (cid, "npc", "adeline", SECRETS[5], "gm", now_iso()))
+    from tests.conftest import apply
+    apply(conn, cid, {"op": "use_trope", "character": "Adeline Winter", "ticket": "trope:1", "effect": "she knew where they hid"})
 
 
 def _player_urls(client, cid):

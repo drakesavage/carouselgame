@@ -124,7 +124,7 @@ def build(conn: sqlite3.Connection, cid: int, char_id: int) -> dict | None:
             "status": c.get("status"), "life": life_state(c), "in_party": bool(c.get("in_party")), "roster_category": c.get("roster_category"),
             "portrait_path": c.get("portrait_path"), "portrait_crop": c.get("portrait_crop"),
             "role": {"id": c.get("role_id"), "reason": c.get("role_reason"), "aspect_id": c.get("aspect_id"), "advanced_role_id": c.get("advanced_role_id")},
-            "stats": c["stats"], "statuses": c.get("statuses") or [], "group": group, "location": story["location"],
+            "stats": c["stats"], "tickets": c["tickets"], "statuses": c.get("statuses") or [], "group": group, "location": story["location"],
             "equipment": {"equipped": [i for i in items if i["equipped"]], "carried": [i for i in items if not i["equipped"]],
                           "linked_shared": linked, "commitments": mine, "slot_labels": SLOT_LABELS},
             "story": story, "history": history,

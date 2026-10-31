@@ -36,12 +36,25 @@ def life_state(c: dict) -> dict:
     return {"state": state, "label": label, "note": None}
 
 
+def visible_tickets(conn: sqlite3.Connection, char_id: int) -> list[dict]:
+    """Owned tickets the party knows about. Hidden ones (an NPC's unrevealed tropes) are left out entirely: no entry,
+    no count, no placeholder."""
+    from ..carousel.refdata import has_reference, ticket_definition
+    out = []
+    for t in rows(conn, "SELECT * FROM character_tickets WHERE character_id = ? AND hidden = 0 ORDER BY equipped DESC, id", (char_id,)):
+        d = (ticket_definition(conn, t["ticket_ref"]) if has_reference(conn) else None) or {"name": t["ticket_ref"], "text": ""}
+        out.append({"ref": t["ticket_ref"], "name": d["name"], "text": d["text"], "equipped": bool(t["equipped"]),
+                    "uses_left": t["uses_left"], "uses_max": t["uses_max"], "recharge": t["recharge"]})
+    return out
+
+
 def character_card(conn: sqlite3.Connection, c: dict) -> dict:
     c = dict(c)
     c["life"] = life_state(c)
     c["statuses"] = _statuses(conn, c["id"])
     from ..carousel.sheet import sheet
     c["stats"] = sheet(conn, c["id"])   # Carousel stats and Plot Armor; c["sheet"] is the decoded sheet_json
+    c["tickets"] = visible_tickets(conn, c["id"])
     c["equipped"] = rows(conn, "SELECT id, name, slot FROM items WHERE owner_character_id = ? AND equipped = 1 ORDER BY id", (c["id"],))
     return c
 

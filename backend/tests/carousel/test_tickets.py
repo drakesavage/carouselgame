@@ -95,3 +95,17 @@ def test_record_ruling_can_name_a_ticket(conn, campaign_id):
         bad = ToolRunner(conn, None, campaign_id, 1).run("record_ruling", {"topic": "x", "ruling": "y", "ticket": "hb.ticket.nope"})
     assert ok["ok"] and not bad["ok"] and "no such ticket" in bad["result"]["error"]
     assert [r["ticket_ref"] for r in rulings(conn, campaign_id)] == [FG]
+
+
+def test_cards_show_visible_tickets_and_omit_hidden_ones(client, conn, campaign_id, npc):
+    def card(slug):
+        return next(c for c in client.get(f"/api/campaigns/{campaign_id}/characters").json() if c["slug"] == slug)
+    mara = card("mara")
+    assert [t["ref"] for t in mara["tickets"]] == [FG]
+    assert mara["tickets"][0] == {"ref": FG, "name": "[HB] Last One Standing", "text": "Once per story, survive one certain death.",
+                                  "equipped": True, "uses_left": 1, "uses_max": 1, "recharge": "story"}
+    assert card("adeline")["tickets"] == []                                # hidden: no entry, no count, no placeholder
+    dossier = client.get(f"/api/campaigns/{campaign_id}/characters/{npc}/dossier").json()
+    assert dossier["tickets"] == [] and "HIDDENTROPE" not in str(dossier)
+    apply(conn, campaign_id, {"op": "reveal_ticket", "character": "Adeline Winter", "ticket": "trope:1", "how": "Trope Master"})
+    assert [t["name"] for t in card("adeline")["tickets"]] == ["HIDDENTROPE-GOLF-7"]
