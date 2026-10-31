@@ -79,6 +79,42 @@ def _sheet_lines(conn: sqlite3.Connection, c: dict) -> list[str]:
     return lines
 
 
+def _tickets(conn: sqlite3.Connection, char_id: int, *, hidden: bool) -> list[tuple[dict, dict | None]]:
+    """(owned row, reference definition or None when reference data is missing) for a character's tickets."""
+    from ..carousel.refdata import has_reference, ticket_definition
+    ref = has_reference(conn)
+    return [(t, ticket_definition(conn, t["ticket_ref"]) if ref else None)
+            for t in rows(conn, "SELECT * FROM character_tickets WHERE character_id = ? AND hidden = ? ORDER BY equipped DESC, id", (char_id, int(hidden)))]
+
+
+def _ticket_rulings(conn: sqlite3.Connection, cid: int, ref: str) -> list[str]:
+    from .rulings import ruling_status
+    out = []
+    for r in rows(conn, "SELECT topic, ruling, label, certainty, review FROM rulings WHERE campaign_id = ? AND ticket_ref = ? ORDER BY id DESC", (cid, ref)):
+        st = ruling_status(r)
+        if st != "rejected":
+            out.append(f"    ruling ({'precedent' if st == 'precedent' else 'provisional'}): {r['topic']}: {r['ruling']}")
+    return out
+
+
+def _ticket_line(t: dict, d: dict | None) -> str:
+    if d is None:
+        return f"- {t['ticket_ref']} (ticket text unavailable: reference data not imported)"
+    state = "[EQUIPPED]" if t["equipped"] else "[owned, not equipped]"
+    uses = (f"uses left {t['uses_left']}/{t['uses_max']}" + (f" (recharges per {t['recharge']})" if t["recharge"] else "")
+            if t["uses_max"] is not None else "GM-adjudicated uses")
+    return f"- {d['name']} ({t['ticket_ref']}) {state}, {uses}: {d['text']}"
+
+
+def _tickets_block(conn: sqlite3.Connection, cid: int, c: dict) -> str:
+    """Every owned, non-hidden ticket with its full rule text and the rulings on it. Never cut by the sheet budget."""
+    lines = []
+    for t, d in _tickets(conn, c["id"], hidden=False):
+        lines.append(_ticket_line(t, d))
+        lines += _ticket_rulings(conn, cid, t["ticket_ref"])
+    return f"{c['name']}'s tickets:\n" + "\n".join(lines) if lines else f"{c['name']}'s tickets: none"
+
+
 def _pa(conn: sqlite3.Connection, c: dict) -> str:
     from ..carousel.sheet import sheet
     pa = sheet(conn, c["id"])["plot_armor"]
@@ -254,6 +290,7 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
         if len(sheet) > B["present_each"]:
             omissions.append(f"PRESENT: {c['name']}'s sheet cut by {len(sheet) - B['present_each']} characters")
         blocks.append(_cut(sheet, B["present_each"]))
+        blocks.append(_tickets_block(conn, cid, c))
         if pc and i == pc["id"]:
             continue
         mem = rows(conn, "SELECT content, visibility FROM memories WHERE campaign_id = ? AND character_id = ? ORDER BY importance, id DESC LIMIT 6", (cid, i))
@@ -355,8 +392,14 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     if len(secrets) > len(chosen):
         omissions.append(f"GM-ONLY SECRETS: {len(secrets) - len(chosen)} lower-ranked unrevealed secrets not included "
                          f"({max(len(hi) - len(chosen), 0)} of them matched this scene)")
+    hidden_tickets = [f"- {by_id[i]['name']} secretly holds {d['name'] if d else t['ticket_ref']}"
+                      + (f" ({'equipped' if t['equipped'] else 'not equipped'}): {d['text']}" if d else "")
+                      for i in full_ids for t, d in _tickets(conn, i, hidden=True)]
+    if hidden_tickets:
+        sections["GM-ONLY SECRETS"] = ("Hidden tropes (reveal only through play or a trope such as Trope Master, then op reveal_ticket):\n"
+                                       + "\n".join(hidden_tickets))
     if chosen:
-        sections["GM-ONLY SECRETS"] = cut("GM-ONLY SECRETS", "Never reveal directly; reveal only through play, then reveal_secret.\n"
+        sections["GM-ONLY SECRETS"] = (sections.get("GM-ONLY SECRETS", "") + "\n" if hidden_tickets else "") + cut("GM-ONLY SECRETS", "Never reveal directly; reveal only through play, then reveal_secret.\n"
                                           + "\n".join(f"- #{s['id']} [{s['kind']}] {s['subject']}: {s['content'][:500]}" for s in chosen), B["secrets"])
 
     # transcript
