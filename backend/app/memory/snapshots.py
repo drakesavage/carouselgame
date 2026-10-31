@@ -41,7 +41,7 @@ SNAPSHOT_TABLES: dict[str, str] = {
 _DELETE_ORDER = ["skills", "status_effects", "npc_profiles", "relationships", "achievements", "items", "locations",
                  "quests", "encounters", "clocks", "house_rules", "rulings", "lore_facts", "gm_secrets",
                  "memory_summaries", "party_groups", "scenes", "memories", "ability_uses", "characters"]
-_LOGS = {"messages": "max_message_id", "events": "max_event_id", "dice_rolls": "max_roll_id", "turns": "max_turn_id"}
+_LOGS = {"messages": "max_message_id", "events": "max_event_id", "turns": "max_turn_id"}
 
 
 def _raw_rows(conn: sqlite3.Connection, sql: str, cid: int) -> list[dict]:
@@ -72,9 +72,9 @@ def create_save_point(conn: sqlite3.Connection, cid: int, label: str, kind: str 
     snapshot = {t: _raw_rows(conn, sql, cid) for t, sql in SNAPSHOT_TABLES.items()}
     hw = _high_water(conn, cid)
     sp_id = conn.execute(
-        """INSERT INTO save_points (campaign_id, label, kind, turn_id, max_message_id, max_event_id, max_roll_id,
-                                    max_turn_id, snapshot_json, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
-        (cid, label, kind, turn_id, hw["max_message_id"], hw["max_event_id"], hw["max_roll_id"], hw["max_turn_id"],
+        """INSERT INTO save_points (campaign_id, label, kind, turn_id, max_message_id, max_event_id,
+                                    max_turn_id, snapshot_json, created_at) VALUES (?,?,?,?,?,?,?,?,?)""",
+        (cid, label, kind, turn_id, hw["max_message_id"], hw["max_event_id"], hw["max_turn_id"],
          json.dumps(snapshot), now_iso()),
     ).lastrowid
     if keep_auto is not None and kind == "auto":

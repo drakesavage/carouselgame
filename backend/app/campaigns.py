@@ -1,11 +1,11 @@
 """Campaign management: start a new campaign, rename, archive, and delete.
 
-* New: a blank campaign with one crawler (the player character) and an opening save point. Stats, skills and gear are
+* New: a blank campaign with one player character and an opening save point. Stats, skills and gear are
   left empty for character creation in play; nothing is invented.
 * Archive: hidden from the campaign picker, nothing removed. Unarchive brings it back.
 * Delete: game PC only, the exact name must be typed, and never while a turn is running. A database backup is taken
   first and the campaign's art and portraits are moved into that backup folder, so a delete can always be undone by
-  restoring that backup (docs/OPERATIONS.md). The Git ledger is never touched.
+  restoring that backup (docs/OPERATIONS.md).
 """
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ from pathlib import Path
 
 from .config import Settings
 from .db import next_campaign_id, now_iso, one, remember_campaign_id, rows, transaction
-from .gm import constitution
 from .memory.snapshots import create_save_point
 
 # tables that hang off characters instead of carrying campaign_id
@@ -64,21 +63,8 @@ def create(conn: sqlite3.Connection, *, name: str, crawler: str, race: str | Non
         if (premise or "").strip():
             conn.execute("""INSERT INTO lore_facts (campaign_id, subject, fact, certainty, visibility, source, created_at)
                             VALUES (?,?,?,?,?,?,?)""", (cid, "Campaign premise", premise.strip(), "canonical", "player", "campaign setup", t))
-        constitution.install(conn, cid)  # the GM procedure an imported ledger would bring (System AI, achievements, opening)
-        add_advancement_clock(conn, cid)
         create_save_point(conn, cid, "Campaign started", kind="manual")
     return cid
-
-
-def add_advancement_clock(conn: sqlite3.Connection, cid: int) -> bool:
-    """The correspondence-advancement counter (12 cycles = one two-hour interval; count_cycle). Without it every cycle the
-    GM counts is silently skipped. Returns False when the campaign already has one."""
-    from .rules.checks import ADVANCEMENT_CLOCK
-    if one(conn, "SELECT id FROM clocks WHERE campaign_id = ? AND key = ?", (cid, ADVANCEMENT_CLOCK)):
-        return False
-    conn.execute("INSERT INTO clocks (campaign_id, key, label, kind, current, maximum, unit) VALUES (?,?,?,?,?,?,?)",
-                 (cid, ADVANCEMENT_CLOCK, "Advancement cycles", "advancement_checkpoint", 0, 12, "cycles"))
-    return True
 
 
 def rename(conn: sqlite3.Connection, cid: int, name: str) -> None:

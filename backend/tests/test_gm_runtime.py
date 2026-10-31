@@ -46,27 +46,24 @@ def test_no_write_lock_is_held_while_the_gm_thinks(client, settings, demo_id):
     assert len(seen) == 2 and all(v < 1 for v in seen.values())
 
 
-def test_dice_are_drawn_once_and_reused_by_every_replay(client, settings, demo_id):
+def test_staged_calls_are_applied_once_in_the_commit(client, settings, demo_id):
     class TwoStep(MockProvider):
         def complete(self, system, steps, tools, *, job_label):
             res = [r for s in steps if s["kind"] == "tool_results" for r in s["results"]]
             if not res:
-                return ProviderResponse([ToolCall("roll_dice", {"expression": "2d4+2", "reason": "Healing Potion", "character": "player"})], None)
+                return ProviderResponse([ToolCall("apply_changes", {"changes": [{"op": "advance_time", "minutes": 30, "reason": "walk"}]})], None)
             if len(res) == 1:
-                heal = res[0]["result"]["total"]
-                return ProviderResponse([ToolCall("apply_changes", {"changes": [{"op": "hp", "character": "player", "delta": heal, "cause": "potion"}]}),
-                                         ToolCall("roll_dice", {"expression": "1d20", "reason": "second"})], None)
-            return ProviderResponse([], "You feel better.")
+                return ProviderResponse([ToolCall("apply_changes", {"changes": [{"op": "add_item", "character": "player", "name": "Flashlight"}]}),
+                                         ToolCall("lookup_records", {"query": "flashlight"})], None)
+            return ProviderResponse([], "You find a flashlight.")
 
     client.app_state.turns = TurnService(settings, TwoStep, run_async=False)
     c = connect(settings.campaign_db)
-    c.execute("UPDATE characters SET hp_current = 1 WHERE slug = 'juniper'")
-    body = _turn(client, demo_id, "drink")
+    t0 = client.get(f"/api/campaigns/{demo_id}").json()["game_time_minutes"]
+    body = _turn(client, demo_id, "walk")
     assert body["status"] == "completed", body
-    audit = rows(c, "SELECT reason, total FROM dice_rolls WHERE turn_id = ? ORDER BY id", (body["turn_id"],))
-    assert [a["reason"] for a in audit] == ["Healing Potion", "second"]  # replays never add or re-roll dice
-    assert _hp(client, demo_id) == 1 + audit[0]["total"]
-    assert [r["total"] for r in body["result"]["rolls"]] == [a["total"] for a in audit]
+    assert client.get(f"/api/campaigns/{demo_id}").json()["game_time_minutes"] == t0 + 30   # each round replays, the commit applies once
+    assert one(c, "SELECT COUNT(*) AS n FROM items WHERE campaign_id = ? AND name = 'Flashlight'", (demo_id,))["n"] == 1
     diag = one(c, "SELECT usage_json FROM turn_diagnostics WHERE turn_id = ?", (body["turn_id"],))["usage"]
     assert diag["staged_calls"] == 3 and diag["continuity"]["checks"]
 
@@ -89,21 +86,19 @@ def test_a_concurrent_state_change_aborts_the_turn_without_partial_commit(client
     assert not [m for m in client.get(f"/api/campaigns/{demo_id}/messages").json() if m["role"] == "player"]
 
 
-def test_failed_codex_call_after_staging_applies_nothing_and_audits_dice(client, settings, demo_id):
+def test_failed_codex_call_after_staging_applies_nothing(client, settings, demo_id):
     class Dies(MockProvider):
         def complete(self, system, steps, tools, *, job_label):
             if not any(s["kind"] == "tool_results" for s in steps):
-                return ProviderResponse([ToolCall("roll_dice", {"expression": "1d20", "reason": "doomed"}),
-                                         ToolCall("apply_changes", {"changes": [{"op": "hp", "character": "player", "delta": -2, "cause": "x"}]})], None)
+                return ProviderResponse([ToolCall("apply_changes", {"changes": [{"op": "advance_time", "minutes": 45, "reason": "x"}]})], None)
             raise ProviderError("Codex exited with code 1: network down")
 
     client.app_state.turns = TurnService(settings, Dies, run_async=False)
-    hp0 = _hp(client, demo_id)
+    t0 = client.get(f"/api/campaigns/{demo_id}").json()["game_time_minutes"]
     body = _turn(client, demo_id, "anything", key="retry-me")
     assert body["status"] == "failed" and "network down" in body["error"]
-    assert _hp(client, demo_id) == hp0
+    assert client.get(f"/api/campaigns/{demo_id}").json()["game_time_minutes"] == t0
     c = connect(settings.campaign_db)
-    assert [r["reason"] for r in rows(c, "SELECT reason FROM dice_rolls WHERE turn_id = ?", (body["turn_id"],))] == ["[failed turn] doomed"]
     assert one(c, "SELECT stage_json IS NULL AS cleared FROM turns WHERE id = ?", (body["turn_id"],))["cleared"]
     # the same request can be retried and then succeeds
     client.app_state.turns = TurnService(settings, MockProvider, run_async=False)
@@ -111,17 +106,13 @@ def test_failed_codex_call_after_staging_applies_nothing_and_audits_dice(client,
     assert again["status"] == "completed" and again["turn_id"] == body["turn_id"]
 
 
-def test_restart_mid_turn_records_staged_dice_and_fails_the_turn(conn, demo_id):
-    stage = {"calls": [{"name": "roll_dice", "arguments": {"expression": "1d20"}, "ok": True}],
-             "rolls": [{"result": {"expression": "1d20", "dice": [{"sides": 20, "value": 17, "kept": True}], "modifier": 0, "total": 17,
-                                   "target": None, "outcome": None, "reason": "sneak", "degree": None, "detail": {}},
-                        "character_id": None, "hidden": False}]}
+def test_restart_mid_turn_fails_the_turn(conn, demo_id):
+    stage = {"calls": [{"name": "apply_changes", "arguments": {"changes": [{"op": "advance_time", "minutes": 5, "reason": "sneak"}]}, "ok": True}]}
     tid = conn.execute("INSERT INTO turns (campaign_id, idempotency_key, status, player_input, stage_json, created_at) VALUES (?,?,?,?,?,?)",
                        (demo_id, "crash-1", "processing", "sneak past", json.dumps(stage), "2026-10-24T00:00:00Z")).lastrowid
     assert recover_interrupted_turns(conn) == 1
     t = one(conn, "SELECT status, error, stage_json IS NULL AS cleared FROM turns WHERE id = ?", (tid,))
     assert t["status"] == "failed" and "Interrupted" in t["error"] and t["cleared"]
-    assert [(r["reason"], r["total"]) for r in rows(conn, "SELECT reason, total FROM dice_rolls WHERE turn_id = ?", (tid,))] == [("[interrupted turn] sneak", 17)]
 
 
 # ------------------------------------------------------------------ Codex event watcher (fake codex binary)

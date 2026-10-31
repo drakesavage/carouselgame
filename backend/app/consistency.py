@@ -35,25 +35,18 @@ def run(conn: sqlite3.Connection, cid: int) -> list[dict]:
     vals = {"inventory": gold and gold["quantity"], **({"gm_context": int(m.group(1))} if m else {})}
     out.append(_check("Gold", vals, len(set(vals.values())) == 1))
 
-    # Floor clock
-    fc = hud["floor_clock"]
-    m = re.search(r"FLOOR COLLAPSE in \S+ \((\d+) min\)", ctx)
-    want = None if camp["floor_deadline_minutes"] is None else camp["floor_deadline_minutes"] - camp["game_time_minutes"]
-    vals = {"campaign": want, "hud": fc.get("remaining_minutes"), "gm_context": int(m.group(1)) if m else None}
-    out.append(_check("Floor clock (minutes remaining)", vals, len(set(vals.values())) == 1))
-
-    # Advancement and other player clocks
+    # Player clocks
     for c in hud["clocks"]:
         m = re.search(rf"Clock {re.escape(c['key'])} \([^)]*\): (\d+)/", ctx)
         vals = {"clock": c["current"], "gm_context": int(m.group(1)) if m else None}
         out.append(_check(f"Clock: {c['label']}", vals, len(set(vals.values())) == 1))
 
-    # Location and saferoom
-    m = re.search(r"^Floor \S+ — (.+?) \[(SAFEROOM|NOT a saferoom)\]", ctx, re.M)
-    vals = {"campaign": f"{camp['current_location']} ({'saferoom' if camp['safe_room'] else 'not a saferoom'})",
-            "hud": f"{hud['current_location']} ({'saferoom' if hud['safe_room'] else 'not a saferoom'})",
-            "gm_context": f"{m.group(1)} ({'saferoom' if m.group(2) == 'SAFEROOM' else 'not a saferoom'})" if m else None}
-    out.append(_check("Location and saferoom", vals, len(set(vals.values())) == 1))
+    # Location and safe place
+    m = re.search(r"^Location: (.+?) \[(SAFE PLACE|NOT a safe place)\]", ctx, re.M)
+    vals = {"campaign": f"{camp['current_location'] or 'unknown location'} ({'safe' if camp['safe_room'] else 'not safe'})",
+            "hud": f"{hud['current_location'] or 'unknown location'} ({'safe' if hud['safe_room'] else 'not safe'})",
+            "gm_context": f"{m.group(1)} ({'safe' if m.group(2) == 'SAFE PLACE' else 'not safe'})" if m else None}
+    out.append(_check("Location and safe place", vals, len(set(vals.values())) == 1))
     groups = {g["key"]: g for g in hud["groups"]}
     pc = one(conn, "SELECT name, assignment FROM characters WHERE id = ?", (camp["active_character_id"],)) if camp["active_character_id"] else None
     if pc and pc["assignment"] in groups:

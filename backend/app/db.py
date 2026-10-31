@@ -3,7 +3,7 @@
 Two kinds of tables:
   * State tables hold the *current* structured state the UI renders. They are captured by save points
     and replaced wholesale on restore (see memory/snapshots.py: SNAPSHOT_TABLES).
-  * Append-only logs (turns, events, messages, dice_rolls) are never deleted. A restore marks rows newer
+  * Append-only logs (turns, events, messages) are never deleted. A restore marks rows newer
     than the save point as rolled_back so history stays auditable.
 
 Visibility: every row that could leak GM knowledge either lives in a GM-only table (gm_secrets) or carries
@@ -363,26 +363,6 @@ CREATE TABLE IF NOT EXISTS events (
   created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS dice_rolls (
-  id INTEGER PRIMARY KEY,
-  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
-  turn_id INTEGER,
-  character_id INTEGER,
-  expression TEXT NOT NULL,
-  dice_json TEXT NOT NULL,                -- [{"sides":6,"value":4,"kept":true}, ...]
-  modifier INTEGER NOT NULL DEFAULT 0,
-  total INTEGER NOT NULL,
-  target INTEGER,
-  outcome TEXT,                           -- success | failure | NULL
-  reason TEXT,
-  degree TEXT,                            -- Critical Hit | Amazing Success | Success | Near Miss | Fail | Major Fail | Critical Fail
-  detail_json TEXT NOT NULL DEFAULT '{}', -- check breakdown (skill rank, stat mod, help, advantage...)
-  hidden INTEGER NOT NULL DEFAULT 0,      -- secret GM roll
-  rng TEXT NOT NULL,
-  rolled_back INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS save_points (
   id INTEGER PRIMARY KEY,
   campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
@@ -391,7 +371,6 @@ CREATE TABLE IF NOT EXISTS save_points (
   turn_id INTEGER,
   max_message_id INTEGER NOT NULL,
   max_event_id INTEGER NOT NULL,
-  max_roll_id INTEGER NOT NULL,
   max_turn_id INTEGER NOT NULL,
   snapshot_json TEXT NOT NULL,
   created_at TEXT NOT NULL
@@ -501,7 +480,6 @@ CREATE TABLE IF NOT EXISTS turn_diagnostics (
 
 CREATE INDEX IF NOT EXISTS ix_messages_campaign ON messages(campaign_id, id);
 CREATE INDEX IF NOT EXISTS ix_events_campaign ON events(campaign_id, id);
-CREATE INDEX IF NOT EXISTS ix_rolls_campaign ON dice_rolls(campaign_id, id);
 CREATE INDEX IF NOT EXISTS ix_items_owner ON items(campaign_id, owner_character_id);
 """
 

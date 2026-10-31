@@ -109,12 +109,11 @@ Reply ONLY with the JSON object required by the output schema. Do not run shell 
 you need is in this prompt, and the server runs your tools.
 - `tool_calls`: tools to run now (each `arguments_json` is a JSON object encoded as a string). Batch independent calls.
 - `narration`: the player-facing narration in Markdown, or null while you still need tool results.
-If you request rolls, checks, searches or lookups, set narration to null: you will be called again with results.
-If you only need to record bookkeeping (apply_changes, count_cycle, record_ruling, gm_note, system_notice,
+If you request searches or lookups, set narration to null: you will be called again with results.
+If you only need to record bookkeeping (apply_changes, record_ruling, gm_note, system_notice,
 reveal_secret) you may return those tool calls together with final narration; if any of them fails validation
 you will be called again to fix it. A response with no tool calls and non-null narration ends the turn.
-Never end a turn by promising to resolve something "next": if the action needs a check or roll, request it now (with
-narration null) and narrate the outcome when the result comes back."""
+Never end a turn by promising to resolve something "next": decide the outcome now and narrate it."""
 
 
 # ------------------------------------------------------------------ Codex CLI
@@ -542,8 +541,8 @@ class GeminiProvider:
 
 # ------------------------------------------------------------------ Mock
 class MockProvider:
-    """Scripted GM. Picks tools from keywords in the player's input so the full pipeline (checks, dice,
-    validated state changes, notices, persistence) can be exercised without any model."""
+    """Scripted GM. Picks tools from keywords in the player's input so the full pipeline (lookups, validated state
+    changes, notices, persistence) can be exercised without any model."""
 
     name = "mock"
 
@@ -559,35 +558,28 @@ class MockProvider:
         pc = ctx.get("player_character", "player")
         if rounds == 0:
             if any(w in text for w in ("search", "look", "inspect", "examine", "investigate")):
-                return ProviderResponse([ToolCall("skill_check", {"character": pc, "skill": "Investigation", "stat": "intelligence",
-                                                                  "dc_kind": "unopposed", "reason": "Search the area"})], None)
+                return ProviderResponse([ToolCall("lookup_records", {"query": player})], None)
             if any(w in text for w in ("potion", "heal", "drink")):
-                return ProviderResponse([ToolCall("roll_dice", {"expression": "2d4+2", "reason": "Healing Potion", "character": pc})], None)
+                return ProviderResponse([ToolCall("apply_changes", {"changes": [
+                    {"op": "remove_item", "character": pc, "name": "Healing Potion", "quantity": 1, "cause": "drunk"}]})],
+                    "*[MOCK GM]* You knock back the potion. It tastes like cherry cough syrup and regret.")
             if any(w in text for w in ("rest", "sleep", "wait", "nap")):
-                return ProviderResponse([ToolCall("apply_changes", {"changes": [{"op": "advance_time", "minutes": 60, "reason": "Rest"}]}),
-                                         ToolCall("count_cycle", {"decision": "Chose to rest", "resolution": "An hour passes in the saferoom"})],
-                                        "*[MOCK GM]* You rest. The saferoom hums. Somewhere, a sponsor is disappointed.")
+                return ProviderResponse([ToolCall("apply_changes", {"changes": [{"op": "advance_time", "minutes": 60, "reason": "Rest"}]})],
+                                        "*[MOCK GM]* You rest. Somewhere across town, a carousel turns without music.")
             if any(w in text for w in ("rule", "how does", "what happens")):
-                return ProviderResponse([ToolCall("search_rules", {"queries": [player, "skill check difficulty"], "limit": 3})], None)
+                return ProviderResponse([ToolCall("search_rules", {"queries": [player, "plot armor tropes"], "limit": 3})], None)
             if any(w in text for w in ("loot", "pick up", "grab", "take")):
                 return ProviderResponse([ToolCall("apply_changes", {"changes": [{"op": "add_item", "character": pc, "name": "Suspicious Gray Rock",
-                                                                                  "quantity": 1, "description": "It is a rock. The System insists it is 'collectible'."}]}),
-                                         ToolCall("system_notice", {"text": "New Item! **Suspicious Gray Rock.** Congratulations on picking up the floor.", "style": "notice"})],
+                                                                                  "quantity": 1, "description": "It is a rock. It feels like a prop."}]}),
+                                         ToolCall("system_notice", {"text": "New Item! **Suspicious Gray Rock.**", "style": "notice"})],
                                         "*[MOCK GM]* You pocket the rock. It feels judgmental.")
-            return ProviderResponse([ToolCall("system_notice", {"text": "The System notes your decision and has *chosen* not to comment. Yet.", "style": "notice"})],
-                                    f"*[MOCK GM]* You decide to: “{player.strip()[:200]}”. The dungeon considers this, then lets the moment pass. "
+            return ProviderResponse([ToolCall("system_notice", {"text": "The town notes your decision.", "style": "notice"})],
+                                    f"*[MOCK GM]* You decide to: “{player.strip()[:200]}”. The town considers this, then lets the moment pass. "
                                     "(Mock mode narrates generically; switch the GM to Codex in Settings for real play.)")
         last = results[-1] if results else None
-        if last and last["name"] == "roll_dice" and rounds == 1:
-            heal = last["result"].get("total", 0)
-            return ProviderResponse([ToolCall("apply_changes", {"changes": [
-                {"op": "remove_item", "character": pc, "name": "Healing Potion", "quantity": 1, "cause": "drunk"},
-                {"op": "hp", "character": pc, "delta": heal, "cause": "Healing Potion"}]})],
-                f"*[MOCK GM]* You knock back the potion. It tastes like cherry cough syrup and regret. You heal {heal}.")
-        if last and last["name"] == "skill_check":
-            r = last["result"]
-            outcome = "you find a loose panel hiding a single, sad copper coin" if r.get("success") else "you find nothing but dust and a smell"
-            return ProviderResponse([], f"*[MOCK GM]* {r.get('summary', '')}\n\nYou search carefully — {outcome}.")
+        if last and last["name"] == "lookup_records":
+            found = len(last["result"].get("events", [])) + len(last["result"].get("facts", []))
+            return ProviderResponse([], f"*[MOCK GM]* You search carefully and turn up {found} thing(s) worth remembering.")
         if last and last["name"] == "search_rules":
             refs = [p["ref"] for p in last["result"].get("official", [])][:3]
             return ProviderResponse([], "*[MOCK GM]* The relevant references are: " + ("; ".join(refs) if refs else "no indexed rulebook passages matched."))

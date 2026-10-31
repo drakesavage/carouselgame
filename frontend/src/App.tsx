@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Award, Backpack, BookOpen, Clock3, FileText, Flag, GitCommitHorizontal, Map as MapIcon, MessageSquareText, Search, Settings2, UserRound, Users } from "lucide-react";
+import { Backpack, BookOpen, Clock3, FileText, Flag, Map as MapIcon, MessageSquareText, Search, Settings2, UserRound, Users } from "lucide-react";
 import { api, Campaign, CampaignListItem, fmtMinutes, Manifest } from "./api";
 import { ManifestContext } from "./views/Hud";
 import { Chip } from "./ui";
@@ -13,10 +13,8 @@ import { Announcement, AnnouncementStage, THEATRICAL } from "./views/Announce";
 import { applyMotion, getPrefs, play } from "./prefs";
 import { InventoryView } from "./views/Inventory";
 import { PeopleView } from "./views/People";
-import { AchievementsView } from "./views/Achievements";
 import { RecordsView, RulesView } from "./views/Reference";
 import { SettingsView } from "./views/Settings";
-import { LedgerView } from "./views/Ledger";
 
 const TABS = [
   { id: "story", label: "Story", icon: MessageSquareText },
@@ -24,12 +22,10 @@ const TABS = [
   { id: "inventory", label: "Inventory", icon: Backpack },
   { id: "quests", label: "Quests", icon: Flag },
   { id: "people", label: "People", icon: Users },
-  { id: "achievements", label: "Achievements", icon: Award },
   { id: "timeline", label: "Chronicle", icon: Clock3 },
   { id: "world", label: "World", icon: MapIcon },
   { id: "rules", label: "Rules", icon: BookOpen },
   { id: "records", label: "Records", icon: FileText },
-  { id: "ledger", label: "Ledger", icon: GitCommitHorizontal },
   { id: "settings", label: "Saves & Settings", icon: Settings2 },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
@@ -166,7 +162,6 @@ export default function App() {
             {tab === "characters" && <CharactersView cid={cid} version={version} openCharacter={setSheet} />}
             {tab === "inventory" && <InventoryView cid={cid} version={version} openQuest={openQuest} />}
             {tab === "quests" && <QuestsView cid={cid} version={version} focus={focusQuest} openCharacter={setSheet} />}
-            {tab === "achievements" && <AchievementsView cid={cid} version={version} openCharacter={setSheet} />}
             {tab === "people" && <PeopleView cid={cid} version={version} openCharacter={setSheet} openQuest={openQuest}
               pcAssignment={campaign.roster.find((c) => c.id === campaign.active_character_id)?.assignment}
               pcName={campaign.roster.find((c) => c.id === campaign.active_character_id)?.name} />}
@@ -174,7 +169,6 @@ export default function App() {
             {tab === "world" && <WorldView cid={cid} campaign={campaign} version={version} onChanged={refresh} openCharacter={setSheet} />}
             {tab === "rules" && <RulesView cid={cid} />}
             {tab === "records" && <RecordsView cid={cid} />}
-            {tab === "ledger" && <LedgerView cid={cid} version={version} onChanged={refresh} />}
             {tab === "settings" && <SettingsView cid={cid} version={version} onChanged={refresh} onCampaign={chooseCampaign} />}
           </div>
         )}

@@ -1,7 +1,0 @@
-schema_version: 1
-clock:
-  before_minutes_remaining: 1000
-  after_minutes_remaining: 940
-transaction:
-  gold_before: 500
-  gold_after: 470

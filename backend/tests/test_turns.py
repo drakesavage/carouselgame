@@ -10,25 +10,16 @@ def _turn(client, cid, text, key=None):
 
 
 def test_turn_persists_transcript_and_state(client, settings, demo_id):
-    before = client.get(f"/api/campaigns/{demo_id}").json()
     r = _turn(client, demo_id, "I drink a healing potion")
     body = r.json()
     assert r.status_code == 200 and body["status"] == "completed", body
-    res = body["result"]
-    assert res["rolls"] and res["rolls"][0]["reason"] == "Healing Potion"
-    heal = res["rolls"][0]["total"]
-    after = client.get(f"/api/campaigns/{demo_id}").json()
-    pc_before = next(p for p in before["party"] if p["slug"] == "juniper")
-    pc_after = next(p for p in after["party"] if p["slug"] == "juniper")
-    assert pc_after["hp_current"] == min(pc_before["hp_max"], pc_before["hp_current"] + heal)
+    assert "rolls" not in body["result"]
     inv = client.get(f"/api/campaigns/{demo_id}/inventory").json()
     assert next(i for i in inv["by_character"] if i["name"] == "Healing Potion")["quantity"] == 1
     msgs = client.get(f"/api/campaigns/{demo_id}/messages").json()
     assert [m["role"] for m in msgs[-2:]] == ["player", "gm"]
-    assert msgs[-1]["meta"]["floor_clock"]["remaining_minutes"] is not None
     c = connect(settings.campaign_db)
     assert one(c, "SELECT kind FROM save_points WHERE campaign_id = ? ORDER BY id DESC LIMIT 1", (demo_id,))["kind"] == "auto"
-    assert one(c, "SELECT COUNT(*) AS n FROM dice_rolls WHERE turn_id = ?", (body["turn_id"],))["n"] == 1
 
 
 def test_retried_request_is_not_applied_twice(client, demo_id):
@@ -43,12 +34,11 @@ def test_retried_request_is_not_applied_twice(client, demo_id):
     assert len(msgs) == 1
 
 
-def test_failed_turn_rolls_back_state_but_keeps_dice_audit(client, settings, demo_id):
+def test_failed_turn_rolls_back_state(client, settings, demo_id):
     class Exploding(MockProvider):
         def complete(self, system, steps, tools, *, job_label):
             if not any(s["kind"] == "tool_results" for s in steps):
-                return ProviderResponse([ToolCall("roll_dice", {"expression": "1d20", "reason": "doomed"}),
-                                         ToolCall("apply_changes", {"changes": [{"op": "advance_time", "minutes": 90, "reason": "x"}]})], None)
+                return ProviderResponse([ToolCall("apply_changes", {"changes": [{"op": "advance_time", "minutes": 90, "reason": "x"}]})], None)
             raise RuntimeError("model fell over")
 
     client.app_state.turns = TurnService(settings, Exploding, run_async=False)
@@ -56,9 +46,6 @@ def test_failed_turn_rolls_back_state_but_keeps_dice_audit(client, settings, dem
     body = _turn(client, demo_id, "anything").json()
     assert body["status"] == "failed" and "fell over" in body["error"]
     assert client.get(f"/api/campaigns/{demo_id}").json()["game_time_minutes"] == t0
-    c = connect(settings.campaign_db)
-    audit = rows(c, "SELECT reason FROM dice_rolls WHERE turn_id = ?", (body["turn_id"],))
-    assert len(audit) == 1 and audit[0]["reason"].startswith("[failed turn]")
     assert not [m for m in client.get(f"/api/campaigns/{demo_id}/messages").json() if m["role"] == "player"]
 
 

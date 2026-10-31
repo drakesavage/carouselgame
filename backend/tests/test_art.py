@@ -88,12 +88,11 @@ def test_gm_suggestion_waits_for_approval_then_renders_and_installs_the_portrait
 
 def test_one_suggestion_per_turn_and_no_duplicates(conn, settings, demo_id):
     from app.gm.tools import ToolRunner
-    from app.rules.dice import DiceRoller
-    r = ToolRunner(conn, None, DiceRoller(), demo_id, 999)
+    r = ToolRunner(conn, None, demo_id, 999)
     first = r.run("suggest_image", {"kind": "mob", "subject": "Lint Goblin", "description": "fuzzy grey goblin"})
     assert first["ok"] and first["result"]["suggestion_id"]
     assert not r.run("suggest_image", {"kind": "mob", "subject": "Other", "description": "x"})["ok"]
-    r2 = ToolRunner(conn, None, DiceRoller(), demo_id, 1000)
+    r2 = ToolRunner(conn, None, demo_id, 1000)
     assert r2.run("suggest_image", {"kind": "mob", "subject": "lint goblin", "description": "again"})["result"].get("skipped")
 
 

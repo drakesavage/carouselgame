@@ -28,16 +28,11 @@ from .gm.orchestrator import WRITE_LOCK, BusyError, TurnService, recover_interru
 from .art import service as art
 from .art.service import ArtWorker
 from .gm.providers import make_provider, prune_jobs, secure_dir
-from .importer.ledger import import_ledger, refresh_mechanical_status, report_markdown
-from .ledger import sync as ledger_sync
-from .ledger.sync import LedgerError
 from .memory import journal, places, snapshots, views
-from .reference import rulecenter
+from .memory import rulings as ruling_review
 from .reference import rulebooks
-from .seed.demo import seed_demo
 from . import campaigns as campaign_admin
 
-DEFAULT_LEDGER = ROOT_DIR / "campaign_sources" / "dccrepository"
 FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 REPORTS_DIR = ROOT_DIR / "reports"
 
@@ -146,20 +141,6 @@ class CampaignDeleteIn(BaseModel):
     confirm_name: str
 
 
-class ImportIn(BaseModel):
-    path: str | None = None
-
-
-
-class LedgerApplyIn(BaseModel):
-    fingerprint: str
-    selected: list[str] | None = None
-    message: str = Field(min_length=3, max_length=4000)
-    author_name: str = Field(min_length=1, max_length=120)
-    author_email: str = Field(min_length=3, max_length=200)
-    regenerate_checkpoint: bool = False
-
-
 class AppState:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -174,7 +155,7 @@ class AppState:
         base = {"gm_provider": self.settings.gm_provider, "codex_model": self.settings.codex_model, "gemini_model": self.settings.gemini_model, "context_profile": "standard",
                 "codex_reasoning_effort": self.settings.codex_reasoning_effort,
                 "rulebook_dir": str(self.settings.rulebook_dir) if self.settings.rulebook_dir else "",
-                "ledger_dir": str(self.settings.campaign_ledger_dir or DEFAULT_LEDGER), "active_campaign_id": None}
+                "active_campaign_id": None}
         try:
             base.update(json.loads(self.prefs_path.read_text(encoding="utf-8")))
         except (OSError, json.JSONDecodeError):
@@ -210,21 +191,10 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         settings.gm_token()  # make sure data/gm_token.txt exists for the GM-only API
         c = state.conn()
         init_db(c)
-        refresh_mechanical_status(c)
         if (n := recover_interrupted_turns(c)):
             print(f"[startup] marked {n} interrupted turn(s) as failed")
-        for camp in rows(c, "SELECT id FROM campaigns WHERE is_demo = 0"):
-            try:
-                vb = ledger_sync.load_visual_bible(c, camp["id"])
-                if vb.get("updated"):
-                    print(f"[startup] visual bible loaded for {len(vb['updated'])} characters ({vb['source']})")
-            except Exception as exc:  # never block startup on art metadata
-                print(f"[startup] visual bible not loaded: {exc}")
         secure_dir(settings.codex_jobs_dir)
         prune_jobs(settings)  # temporary GM job folders (full prompts) never outlive a run unless capture is on
-        from .importer.organization import backfill
-        for line in backfill(c):
-            print(f"[schema v2 backfill] {line}")
         if bootstrap:
             _bootstrap(state, c)
             state.art.start()  # background renderer for campaign art (idle until a picture is queued)
@@ -356,9 +326,6 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
             raise HTTPException(404, "campaign not found")
         return s
 
-    @app.post("/api/campaigns/demo")
-    def make_demo(c=Depends(db), _=Depends(write_lock)):
-        return {"campaign_id": seed_demo(c)}
 
     @app.get("/api/campaigns-manage")
     def campaigns_manage(c=Depends(db)):
@@ -402,45 +369,11 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     @app.get("/api/campaigns/{cid}/characters/{char_id}/dossier")
     def character_dossier(cid: int, char_id: int, c=Depends(db)):
         from .memory.dossier import build as build_dossier
-        from .memory.abilities import attach
         d = build_dossier(c, cid, char_id)
         if not d:
             raise HTTPException(404, "character not found")
-        return attach(c, cid, d)
+        return d
 
-    explaining: dict[int, dict] = {}
-
-    @app.post("/api/campaigns/{cid}/abilities/explain")
-    def explain_abilities(cid: int):
-        """Write explanations for dossier abilities that have none (template, rulebook, record or homebrew; Codex in the background)."""
-        if explaining.get(cid, {}).get("state") == "running":
-            return explaining[cid]
-        explaining[cid] = {"state": "running", "started_at": now_iso(), "progress": ""}
-
-        def work():
-            from .memory.abilities import explain_missing
-            conn = state.conn()
-            try:
-                counts = explain_missing(conn, cid, settings, log=lambda m: explaining[cid].update(progress=m))
-                explaining[cid] = {"state": "done", "finished_at": now_iso(), "counts": counts}
-            except Exception as exc:  # surfaced in the dossier
-                traceback.print_exc()
-                explaining[cid] = {"state": "failed", "error": str(exc)[:300]}
-            finally:
-                conn.close()
-
-        threading.Thread(target=work, daemon=True, name=f"abilities-{cid}").start()
-        return explaining[cid]
-
-    @app.get("/api/campaigns/{cid}/abilities/explain")
-    def explain_status(cid: int):
-        return explaining.get(cid, {"state": "idle"})
-
-    @app.get("/api/campaigns/{cid}/achievements")
-    def achievements_page(cid: int, c=Depends(db)):
-        campaign_or_404(c, cid)
-        from .memory.trophies import page
-        return page(c, cid)
 
     generating: dict[int, dict] = {}  # character id -> job state (memory/generate.py); results go to the records, never here
 
@@ -557,12 +490,6 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         campaign_or_404(c, cid)
         return summary(c, cid)
 
-    @app.get("/api/campaigns/{cid}/corrections")
-    def campaign_corrections(cid: int, c=Depends(db)):
-        """Owner-approved record corrections, with their evidence (player-visible: they change visible state)."""
-        from .reconcile import corrections
-        campaign_or_404(c, cid)
-        return corrections(c, cid)
 
     @app.get("/api/gemini/quota")
     def gemini_quota():
@@ -764,7 +691,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         return picture(path, w, "public, max-age=86400")  # uploaded and generated portraits get new file names
 
     for route, fn in {"inventory": views.inventory, "quests": views.quests, "npcs": views.npcs, "timeline": views.timeline,
-                      "rolls": views.player_rolls, "house-rules": views.house_rules, "rulings": rulecenter.rulings, "lore": views.lore,
+                      "house-rules": views.house_rules, "rulings": ruling_review.rulings, "lore": views.lore,
                       "journal": journal.journal, "lore-notebook": journal.lore_notebook, "chronology": journal.chronology,
                       "places": places.known_world}.items():
         def make(fn=fn):
@@ -919,52 +846,6 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
                 rc.close()
         return out
 
-    def rules_index(rc):
-        """The rules-center index, rebuilt when the rulebook index file changes."""
-        f = settings.rulebook_db
-        return rulecenter.index(rc, f"{f}:{f.stat().st_mtime_ns}")
-
-    @app.get("/api/rules/browse")
-    def rules_browse(book_id: int | None = None):
-        rc = rule_conn()
-        if rc is None:
-            return {"books": []} if book_id is None else {"book": None}
-        try:
-            return rulecenter.browse(rules_index(rc), book_id)
-        finally:
-            rc.close()
-
-    @app.get("/api/rules/suggest")
-    def rules_suggest(q: str = Query(min_length=1, max_length=100), cid: int | None = None, c=Depends(db)):
-        rc = rule_conn()
-        try:
-            return rulecenter.suggest(rules_index(rc) if rc else None, c, cid, q)
-        finally:
-            if rc:
-                rc.close()
-
-    @app.get("/api/rules/lookup")
-    def rules_lookup(q: str = Query(min_length=2, max_length=200), cid: int | None = None, c=Depends(db)):
-        """Where a rule is written, what overrides it, which rulings stand on it, and whether the console enforces it."""
-        rc = rule_conn()
-        try:
-            return rulecenter.lookup(rules_index(rc) if rc else None, c, cid, q)
-        finally:
-            if rc:
-                rc.close()
-
-    @app.get("/api/rules/cite")
-    def rules_cite(ref: str = Query(min_length=3, max_length=300)):
-        rc = rule_conn()
-        if rc is None:
-            raise HTTPException(404, "no rulebook index")
-        try:
-            out = rulecenter.cite(rules_index(rc), ref)
-        finally:
-            rc.close()
-        if not out:
-            raise HTTPException(404, "citation not found in the index")
-        return out
 
     @app.post("/api/campaigns/{cid}/rulings/{rid}/review")
     def review_ruling(cid: int, rid: int, body: ReviewIn, c=Depends(db)):
@@ -976,7 +857,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         with transaction(c):
             c.execute("UPDATE rulings SET review = ?, review_note = ?, reviewed_at = ? WHERE id = ?",
                       (review, body.note, now_iso() if review else None, rid))
-        return next(r for r in rulecenter.rulings(c, cid) if r["id"] == rid)
+        return next(r for r in ruling_review.rulings(c, cid) if r["id"] == rid)
 
     @app.get("/api/rules/page")
     def rule_page(document_id: int, page: int):
@@ -1007,67 +888,12 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
 
     # ------------------------------------------------------------------ import
 
-    @app.post("/api/import")
-    def run_import(body: ImportIn, c=Depends(db), _=Depends(write_lock)):
-        path = Path(body.path or state.prefs()["ledger_dir"])
-        if not path.is_dir():
-            raise HTTPException(422, f"ledger directory not found: {path}")
-        cid, report = import_ledger(c, path)
-        _write_report(report)
-        return {"campaign_id": cid, "report": player_safe_report(report)}
-
-    @app.get("/api/import/reports")
-    def import_reports(c=Depends(db)):
-        out = []
-        for r in rows(c, "SELECT id, campaign_id, source_path, report_json, created_at FROM import_reports ORDER BY id DESC"):
-            from .reconcile import annotate_report
-            out.append({"id": r["id"], "campaign_id": r["campaign_id"], "source_path": r["source_path"], "created_at": r["created_at"],
-                        "report": annotate_report(c, r["campaign_id"], player_safe_report(r["report"]))})
-        return out
 
     # ------------------------------------------------------------------ ledger write-back
-    def ledger_call(fn):
-        try:
-            return fn()
-        except LedgerError as exc:
-            raise HTTPException(409, str(exc))
 
-    def public_preview(pv: dict) -> dict:
-        pv = dict(pv)
-        pv.pop("_changes", None)
-        return pv
-
-    @app.get("/api/campaigns/{cid}/ledger/preview")
-    def ledger_preview(cid: int, fetch: bool = True, c=Depends(db)):
-        campaign_or_404(c, cid)
-        return public_preview(ledger_call(lambda: ledger_sync.preview(c, cid, fetch=fetch, redact=True)))
-
-    @app.post("/api/campaigns/{cid}/ledger/apply")
-    def ledger_apply(cid: int, body: LedgerApplyIn, c=Depends(db), _=Depends(write_lock)):
-        campaign_or_404(c, cid)
-        return ledger_call(lambda: ledger_sync.apply(c, cid, fingerprint=body.fingerprint, selected=body.selected, message=body.message,
-                                                     author_name=body.author_name, author_email=body.author_email,
-                                                     regenerate_checkpoint=body.regenerate_checkpoint))
-
-    @app.post("/api/campaigns/{cid}/ledger/pull")
-    def ledger_pull(cid: int, c=Depends(db), _=Depends(write_lock)):
-        return ledger_call(lambda: ledger_sync.pull(c, cid))
-
-    @app.post("/api/campaigns/{cid}/ledger/push")
-    def ledger_push(cid: int, c=Depends(db), _=Depends(write_lock)):
-        return ledger_call(lambda: ledger_sync.push(c, cid))
-
-    @app.get("/api/campaigns/{cid}/ledger/history")
-    def ledger_history(cid: int, c=Depends(db)):
-        campaign_or_404(c, cid)
-        return ledger_sync.history(c, cid)
-
-    @app.get("/api/gm/campaigns/{cid}/ledger/preview")
-    def gm_ledger_preview(cid: int, c=Depends(db), _=Depends(gm_auth)):
-        return public_preview(ledger_call(lambda: ledger_sync.preview(c, cid, fetch=False, redact=False)))
 
     # ------------------------------------------------------------------ GM only
-    gm = {"secrets": views.gm_secrets, "messages": views.gm_messages, "events": views.gm_events, "rolls": views.gm_rolls,
+    gm = {"secrets": views.gm_secrets, "messages": views.gm_messages, "events": views.gm_events, 
           "lore": views.gm_lore, "turns": views.gm_turns}
     for route, fn in gm.items():
         def make_gm(fn=fn):
@@ -1096,10 +922,9 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         if not d:
             raise HTTPException(404, "no diagnostics for this turn")
         t = one(c, "SELECT id, status, player_input, error, provider, created_at, completed_at FROM turns WHERE id = ?", (turn_id,))
-        rolls_ = rows(c, "SELECT id, expression, dice_json, total, target, outcome, degree, reason, hidden, rng FROM dice_rolls WHERE turn_id = ? ORDER BY id", (turn_id,))
         events_ = rows(c, "SELECT id, type, summary, visibility, rolled_back FROM events WHERE turn_id = ? ORDER BY id", (turn_id,))
         return {"turn": t, "context_text": d["context_text"], "steps": d["steps"], "usage": d["usage"], "integrity": d["integrity"],
-                "rolls": rolls_, "events": events_, "available_tools": TOOL_NAMES, "available_ops": sorted(CHANGE_OPS),
+                "events": events_, "available_tools": TOOL_NAMES, "available_ops": sorted(CHANGE_OPS),
                 "context_chars": len(d["context_text"])}
 
     @app.get("/api/gm/runtime")
@@ -1124,9 +949,6 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
             prune_jobs(settings)
         return {"active": settings.prompt_capture_active(), "minutes": minutes}
 
-    @app.get("/api/gm/import/reports")
-    def gm_import_reports(c=Depends(db), _=Depends(gm_auth)):
-        return rows(c, "SELECT * FROM import_reports ORDER BY id DESC")
 
     # ------------------------------------------------------------------ frontend
     if FRONTEND_DIST.exists():
@@ -1147,20 +969,6 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
             return JSONResponse({"message": "Frontend not built. Run build-frontend.cmd, or use the API at /docs."})
 
     return app
-
-
-def player_safe_report(report: dict) -> dict:
-    """Drop entries that concern GM-only files; keep counts."""
-    r = dict(report)
-    r["manual_review"] = [m for m in report.get("manual_review", []) if not str(m.get("record", "")).startswith("gm_state")]
-    r["conflicts"] = [x for x in report.get("conflicts", []) if "gm_state" not in json.dumps(x)]
-    return r
-
-
-def _write_report(report: dict) -> None:
-    REPORTS_DIR.mkdir(exist_ok=True)
-    (REPORTS_DIR / "migration_report.md").write_text(report_markdown(report), encoding="utf-8")
-    (REPORTS_DIR / "migration_report.json").write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
 
 
 def _start_index(state: AppState, directory: Path) -> None:
@@ -1187,17 +995,7 @@ def _quietly(fn, *args) -> None:
 
 
 def _bootstrap(state: AppState, c) -> None:
-    """First run: seed the demo campaign, import the ledger if present, index rulebooks if configured."""
-    if not views.list_campaigns(c):
-        seed_demo(c)
-        ledger = Path(state.prefs()["ledger_dir"])
-        if (ledger / "state" / "campaign.yaml").exists():
-            cid, report = import_ledger(c, ledger)
-            _write_report(report)
-            if cid:
-                p = state.prefs()
-                p["active_campaign_id"] = cid
-                state.save_prefs(p)
+    """First run chores: index rulebooks if configured, back up, warm thumbnails."""
     rb_dir = state.prefs().get("rulebook_dir")
     if rb_dir and Path(rb_dir).is_dir() and not state.settings.rulebook_db.exists():
         _start_index(state, Path(rb_dir))

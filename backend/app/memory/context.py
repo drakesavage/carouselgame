@@ -27,12 +27,11 @@ import re
 import sqlite3
 
 from ..db import one, rows
-from .views import floor_clock
 
 DEFAULT_BUDGET = {"scene": 3500, "party": 3000, "present_each": 2600, "companion": 3800, "objectives": 3500, "memory": 4500,
                   "transcript_msg": 1500, "rules_always_each": 2600, "rules_relevant": 2400, "official": 1600, "secrets": 3500,
                   "max_present_full": 10, "max_companions": 8, "max_named_absent": 4, "max_facts": 8, "max_secrets": 10,
-                  "official_passages": 2, "max_house_rules": 3, "house_rule_each": 700, "include_absent_party": 0, "ledger_docs": 0}
+                  "official_passages": 2, "max_house_rules": 3, "house_rule_each": 700, "include_absent_party": 0}
 BUDGET = DEFAULT_BUDGET  # backwards-compatible name
 # Profiles for models with very large context windows (e.g. Gemini, 1M tokens): front-load the whole party, every
 # private sheet, every house rule, a longer transcript and the ledger's current-state documents verbatim, instead of
@@ -44,7 +43,7 @@ PROFILES: dict[str, dict] = {
               "transcript_msg": 8000, "rules_always_each": 12000, "rules_relevant": 80000, "house_rule_each": 8000, "official": 9000,
               "secrets": 40000, "max_present_full": 40, "max_companions": 40, "max_named_absent": 40, "max_facts": 200,
               "max_secrets": 200, "official_passages": 6, "max_house_rules": 500, "recent_messages": 40, "include_absent_party": 1,
-              "ledger_docs": 112000},  # core state files only: ~55k tokens total, ~4 calls/minute on a 250k TPM tier
+},
 }
 CATEGORIES = {"CAMPAIGN": "state", "PARTY": "state", "PRESENT": "state", "OBJECTIVES": "state", "SHARED STASH": "state",
               "ACTIVE COMBAT": "state", "LEDGER RECORDS": "ledger", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
@@ -169,7 +168,6 @@ def _due(q: dict, now: int) -> str:
 
 def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_window: int = 12, rule_conn: sqlite3.Connection | None = None,
                   budgets: dict | None = None) -> dict:
-    from ..rules.state_ops import day_info
     B = {**DEFAULT_BUDGET, **(budgets or {})}
     omissions: list[str] = []
     recent_window = int(B.get("recent_messages") or recent_window)
@@ -180,7 +178,6 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
         return _cut(text, n)
 
     camp = one(conn, "SELECT * FROM campaigns WHERE id = ?", (cid,))
-    clock = floor_clock(camp)
     now = camp["game_time_minutes"]
     chars = rows(conn, "SELECT * FROM characters WHERE campaign_id = ? ORDER BY party_order, id", (cid,))
     by_id = {c["id"]: c for c in chars}
@@ -193,18 +190,12 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     sections: dict[str, str] = {}
 
     # 1 CAMPAIGN
-    d = day_info(conn, cid)
     last_event = one(conn, "SELECT MAX(id) AS m FROM events WHERE campaign_id = ?", (cid,))["m"] or 0
     last_save = one(conn, "SELECT id, label FROM save_points WHERE campaign_id = ? ORDER BY id DESC LIMIT 1", (cid,))
     ident = [f"Campaign #{cid}: {camp['name']}{' (DEMO DATA)' if camp['is_demo'] else ''} | state version: event {last_event}"
              + (f", save #{last_save['id']}" if last_save else ""),
-             f"Floor {camp['current_floor'] if camp['current_floor'] is not None else '?'} — {camp['current_location'] or 'unknown location'}"
-             f"{' [SAFEROOM]' if camp['safe_room'] else ' [NOT a saferoom]'}",
-             f"Game time: {now} min elapsed on this floor; dungeon day {d['day']} ({d['minutes_into_day'] // 60}h{d['minutes_into_day'] % 60:02d}m in, "
-             f"daily reset in {d['minutes_to_reset'] // 60}h{d['minutes_to_reset'] % 60:02d}m); "
-             + (f"FLOOR COLLAPSE in {clock['remaining_display']} ({clock['remaining_minutes']} min)" if clock["remaining_minutes"] is not None
-                else f"floor clock NOT STARTED ({clock['pending_display']} once it starts): start it with apply_changes op start_floor_clock "
-                     "the moment the player character enters the Dungeon" if clock["pending_minutes"] is not None else "floor clock unknown")]
+             f"Location: {camp['current_location'] or 'unknown location'}{' [SAFE PLACE]' if camp['safe_room'] else ' [NOT a safe place]'}",
+             f"Game time: {now // 60}h{now % 60:02d}m elapsed"]
     if scene and scene.get("location") and camp["current_location"] and             scene["location"].split(",")[0].split(" — ")[0].strip().lower() != camp["current_location"].split(",")[0].split(" — ")[0].strip().lower():
         ident.append(f"NOTE: the campaign record places the party at {camp['current_location']}"
                      f"{' (saferoom)' if camp['safe_room'] else ''}, but the current scene is at {scene['location']}. Records disagree: do not assume "
@@ -322,10 +313,6 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
         sections["SHARED STASH"] = ("(qty ? = count not established; set_quantity before spending)\n"
                                     + ", ".join(f"#{s['id']} {s['name']} ×{s['quantity'] if s['quantity'] is not None else '?'}{' (deployed)' if s['deployed'] else ''}{_item_note(s)}" for s in shared))
 
-    enc = one(conn, "SELECT * FROM encounters WHERE campaign_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1", (cid,))
-    if enc:
-        sections["ACTIVE COMBAT"] = _combat_context(conn, enc)
-
     # 6 MEMORY
     mem = []
     eps = rows(conn, "SELECT subject, content FROM memories WHERE campaign_id = ? AND layer = 'episodic' AND visibility = 'player' ORDER BY id DESC LIMIT 4", (cid,))[::-1]
@@ -359,8 +346,8 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
         label = "Possibly relevant house rules for this action" if B["max_house_rules"] <= 50 else "All other house rules (most relevant first)"
         ru.append(label + ":\n" + cut("HOUSE RULES: relevant", "\n".join(f"- §{h['section'] or ''} {h['title']} ({h['label'] or 'campaign'}): {h['text'][:B['house_rule_each']]}" for h in rel_rules), B["rules_relevant"]))
     # rulings: only precedents carry forward (approved, or the owner's CAMPAIGN/BOOK rulings); provisional ones only for the
-    # last few turns and labelled as such; rejected ones never (reference/rulecenter.py)
-    from ..reference.rulecenter import ruling_status
+    # last few turns and labelled as such; rejected ones never (memory/rulings.py)
+    from .rulings import ruling_status
     rl = rows(conn, "SELECT topic, ruling, label, certainty, review, turn_id FROM rulings WHERE campaign_id = ? ORDER BY id DESC LIMIT 300", (cid,))
     prec = [r for r in rl if ruling_status(r) == "precedent"]
     prec = sorted(prec, key=lambda r: -len(act & _words(r["topic"] + " " + r["ruling"])))[:8]
@@ -371,7 +358,7 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     if prov:
         ru.append("Provisional rulings from recent turns (keep consistent within the scene; NOT precedent, awaiting the owner's review): "
                   + " | ".join(f"({r['label']}) {r['topic']}: {r['ruling'][:200]}" for r in prov))
-    ru.append("Other constitution sections and the rulebooks: search_rules. Unsupported mechanics: retrieve, then record_ruling a provisional label.")
+    ru.append("Anything else: search_rules. Unsupported mechanics: retrieve, then record_ruling a provisional label.")
     sections["HOUSE RULES"] = "\n".join(ru)
     if rule_conn is not None and len(act) >= 2 and B["official_passages"] > 0:
         from ..reference import rulebooks
@@ -393,30 +380,6 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
         sections["GM-ONLY SECRETS"] = cut("GM-ONLY SECRETS", "Never reveal directly; reveal only through play, then reveal_secret.\n"
                                           + "\n".join(f"- #{s['id']} [{s['kind']}] {s['subject']}: {s['content'][:500]}" for s in chosen), B["secrets"])
 
-    # ledger documents (large profile): the imported current-state files, verbatim
-    if B["ledger_docs"]:
-        sections["LEDGER RECORDS"] = _ledger_docs(conn, cid, [by_id[i] for i in full_ids], B["ledger_docs"], omissions)
-
-    # recent rolls: the transcript shows narration, not the dice; without this the GM cannot see what was rolled
-    from ..rules.checks import untrained_attempts
-    names = {c["id"]: c["name"] for c in chars}
-    rolled = rows(conn, """SELECT d.turn_id, d.character_id, d.total, d.outcome, d.degree, d.hidden, d.detail_json FROM dice_rolls d
-                           JOIN turns t ON t.id = d.turn_id WHERE d.campaign_id = ? AND d.rolled_back = 0 AND t.rolled_back = 0
-                           AND t.status = 'completed' AND d.turn_id IN (SELECT id FROM turns WHERE campaign_id = ? AND status = 'completed'
-                           AND rolled_back = 0 ORDER BY id DESC LIMIT 3) ORDER BY d.id DESC LIMIT 15""", (cid, cid))
-    rl = []
-    for r in reversed(rolled):
-        d = r.get("detail") or {}
-        what = d.get("skill") or d.get("stat") or d.get("kind") or "roll"
-        rl.append(f"turn {r['turn_id']}: {names.get(r['character_id'], d.get('character') or '?')} {what} {r['total']} → {r['degree'] or r['outcome'] or '-'}"
-                  + (" [UNTRAINED]" if d.get("untrained") else "") + (" [secret]" if r["hidden"] else ""))
-    ua = untrained_attempts(conn, cid)
-    if ua:
-        rl.append("Untrained Skills attempted since the last advancement checkpoint (Floors 1-2: each crawler gains Rank 1 in ONE at "
-                  "the checkpoint): " + "; ".join(f"{names.get(k, k)}: {', '.join(v)}" for k, v in ua.items()))
-    if rl:
-        sections["RECENT ROLLS"] = "\n".join(rl)
-
     # transcript
     if recent:
         long_msgs = sum(1 for m in recent if len(m["content"]) > B["transcript_msg"])
@@ -434,54 +397,6 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
             "sizes": {k: len(v) for k, v in sections.items()}, "categories": categories, "omissions": omissions,
             "group_keys": [g["key"] for g in groups], "open_quest_ids": [q["id"] for q in rows(conn, "SELECT id FROM quests WHERE campaign_id = ? AND visibility = 'player' AND status IN ('active','paused')", (cid,))],
             "present": [by_id[i]["name"] for i in present], "named": [by_id[i]["name"] for i in named]}
-
-
-LEDGER_ORDER = ["checkpoints/latest.md", "state/campaign.yaml", "state/roster.yaml", "state/shared_inventory.yaml", "state/advancement.yaml"]
-
-
-def _ledger_docs(conn: sqlite3.Connection, cid: int, chars: list[dict], budget: int, omissions: list[str]) -> str:
-    """Current-state ledger files as imported (player-visible only; private sheets are already in PRESENT): the
-    checkpoint, campaign, roster, stash, advancement, other state files, then the YAML of each character shown above."""
-    docs = [r["document_path"] for r in rows(conn, "SELECT DISTINCT document_path FROM source_sections WHERE campaign_id = ? AND visibility = 'player'", (cid,))]
-    slugs = [c["slug"] for c in chars]
-    order = [d for d in LEDGER_ORDER if d in docs]
-    order += sorted(d for d in docs if d.startswith("state/") and not d.startswith("state/characters/") and d not in order)
-    if budget > 200000:  # only with a very large ledger budget: the per-character YAMLs (duplicates of the sheets)
-        order += [f"state/characters/{s}.yaml" for s in slugs if f"state/characters/{s}.yaml" in docs]
-    parts, used, dropped = [], 0, []
-    for d in order:
-        body = "\n".join(r["content"] for r in rows(conn, "SELECT content FROM source_sections WHERE campaign_id = ? AND document_path = ? AND visibility = 'player' ORDER BY id", (cid, d)))
-        if used + len(body) > budget:
-            dropped.append(d)
-            continue
-        parts.append(f"=== {d} ===\n{body}")
-        used += len(body)
-    if dropped:
-        omissions.append(f"LEDGER RECORDS: {len(dropped)} documents over budget ({', '.join(dropped[:6])})")
-    return ("As imported from the Git ledger at the last import. Where these differ from CAMPAIGN / PARTY / PRESENT / OBJECTIVES "
-            "above, the sections above are the current authoritative state (play since the import is applied there).\n\n" + "\n\n".join(parts))
-
-
-def _combat_context(conn: sqlite3.Connection, enc: dict) -> str:
-    st = enc["combatants"]
-    if not (isinstance(st, dict) and "combatants" in st):
-        return (f"{enc['name']} (round {enc['round']})\n{enc['summary'] or ''}\n"
-                f"Combatants: {json.dumps(enc['combatants'], ensure_ascii=False)[:1500]}")
-    lines = [f"{enc['name']} — round {st['round']}, phase {st['phase']} (stat blocks are GM-ONLY)", st.get("setup") or ""]
-    for c in st["combatants"]:
-        if c["side"] == "party":
-            ch = one(conn, "SELECT hp_current, hp_max, status FROM characters WHERE id = ?", (c["character_id"],))
-            lines.append(f"- [party {c['id']}] {c['name']}: HP {ch['hp_current']}/{ch['hp_max']} ({ch['status']}); Actions left {c['actions_left']}"
-                         + ("; EVADING" if c["evading"] else "") + ("; Advantage vs " + ",".join(c["advantage_vs"]) if c["advantage_vs"] else ""))
-        else:
-            atks = "; ".join(f"{x['name']} {x['to_hit']} to hit, {x['damage']}" + (" AREA" if x.get("area") else "") for x in c["attacks"])
-            lines.append(f"- [foe {c['id']}] {c['name']} ({c['kind']}): HB {sum(c['slots'])}/{c['max_hb']} {c['slots']}"
-                         + (" DEFEATED" if c["defeated"] else "") + f"; Evade {c['evade']}, DR {c['dr']}, Actions {c['actions_left']}/{c['actions']}; attacks: {atks}")
-    if st.get("declared"):
-        lines.append("Declared this round: " + "; ".join(f"{d['mob']} {d['attack']} -> {d['target']}" for d in st["declared"]))
-    lines.append("Procedure: declare Mob Attacks -> (player decides Interrupts) -> resolve -> crawler Actions -> end round. "
-                 "Never choose the player character's Actions; ask.")
-    return "\n".join(lines)
 
 
 def immediate_objective(conn, cid: int) -> list[dict]:

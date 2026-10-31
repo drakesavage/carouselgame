@@ -3,14 +3,14 @@
 Turn types (decided before any model is called, from the player's words and the campaign state):
 * meta    recaps, status and rules questions        -> gemini-3.5-flash-lite (500/day)
 * talk    conversation and roleplay, no mechanics   -> gemini-3.8-flash, then gemini-3.6-flash (20/day each)
-* action  anything with rolls, combat, purchases, travel or other state changes, or any turn during combat -> Codex;
+* action  anything with danger, a story in progress, purchases, travel or other state changes, or any turn while a story is active -> Codex;
           also any turn that involves characters who are not with the player character (messages, reports, debriefs,
           "when they get back"), discoveries or scouting: what absent people did must be resolved, not narrated
           (playtest 1, H3)
 A model without enough quota left for a turn is skipped; when none is left the turn goes to Codex.
 
 Gemini turns run in conversation mode: only low-risk tools (lookups, notes, NPC memories and attitudes, facts,
-cycle counting, picture suggestions). If the GM finds the turn needs dice or state changes it calls `escalate`, and the
+picture suggestions). If the GM finds the turn needs state changes it calls `escalate`, and the
 turn is re-run by Codex from scratch; staging means nothing was applied. Quotas reset at midnight Pacific, as Google's do.
 """
 from __future__ import annotations
@@ -29,16 +29,16 @@ ROUTES = {"meta": ["gemini-3.5-flash-lite"], "talk": ["gemini-3.8-flash", "gemin
 MIN_REQUESTS = {"meta": 2, "talk": 3}  # a turn can take a few calls; don't start one a model can't finish
 
 SAFE_TOOLS = {"search_rules", "read_rule_page", "lookup_records", "read_record", "record_ruling", "gm_note", "system_notice",
-              "count_cycle", "suggest_image", "apply_changes"}
+              "suggest_image", "apply_changes"}
 SAFE_OPS = {"remember", "npc_attitude"}   # no "fact": conversation never establishes canon (playtest 1, H3)
 ESCALATE_SPEC = {"name": "escalate",
                  "description": "Hand this turn to the mechanics GM. Call it (alone, with narration null) as soon as the player's action needs "
-                                "dice, a check, combat, time passing, travel, money, items, rest or any other state change you can't make here.",
+                                "danger, a contested outcome, time passing, travel, money, items, rest or any other state change you can't make here.",
                  "parameters": {"reason": "str"}}
 CONVERSATION_MODE = """# CONVERSATION MODE (this turn)
-This turn was routed to you as conversation, roleplay or a question. You have only lookup, note, memory, attitude, fact,
-cycle and picture tools; apply_changes accepts only the ops remember and npc_attitude. If answering properly needs
-dice, a check, combat, time passing, travel, money, items, rest or any other state change, call `escalate` immediately
+This turn was routed to you as conversation, roleplay or a question. You have only lookup, note, memory, attitude, fact
+and picture tools; apply_changes accepts only the ops remember and npc_attitude. If answering properly needs
+danger, a contested outcome, time passing, travel, money, items, rest or any other state change, call `escalate` immediately
 instead of narrating it. Never narrate an outcome that would need a mechanic you can't run. Never say what a character
 or group who is not present did, found, saw or says now (a report, a reply on the party chat, a return) beyond what
 the records already state: call `escalate`. Never present anything new as established fact."""
@@ -61,11 +61,11 @@ OFFSCREEN = re.compile(r"\b(message|messages|text|ping|radio|chat|contact|check 
                        r"(?:they|he|she) (?:should be|must be) back|recon team|the others|discover|discovers|find out|learn)\w*", re.I)
 
 
-def classify(text: str, combat_active: bool, absent: set[str] | frozenset = frozenset()) -> tuple[str, str]:
+def classify(text: str, story_active: bool, absent: set[str] | frozenset = frozenset()) -> tuple[str, str]:
     """(kind, reason) for routing. Errs toward 'action' (Codex) when unsure. `absent`: names and group labels of
     characters who are not with the player character."""
-    if combat_active:
-        return "action", "combat is active"
+    if story_active:
+        return "action", "a story is active"
     off = OFFSCREEN.search(text)
     if off:
         return "action", f"involves absent characters or discoveries ('{off.group(0)}')"
@@ -214,8 +214,8 @@ class AutoGM:
         p.conversation = conversation
         return p
 
-    def route(self, text: str, combat_active: bool, absent: set[str] | frozenset = frozenset()) -> tuple[object, dict]:
-        kind, why = classify(text, combat_active, absent)
+    def route(self, text: str, story_active: bool, absent: set[str] | frozenset = frozenset()) -> tuple[object, dict]:
+        kind, why = classify(text, story_active, absent)
         model = pick_model(kind, self.quota, bool(self.settings.gemini_api_key()))
         info = {"kind": kind, "reason": why, "provider": "gemini" if model else "codex", "model": model or (self.codex_model or "codex default")}
         if kind != "action" and not model:

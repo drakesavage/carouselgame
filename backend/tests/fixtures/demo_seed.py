@@ -1,12 +1,11 @@
-"""Clearly labelled FICTIONAL demo campaign for mock-mode testing. It contains no real campaign facts and uses
-made-up characters, so experiments never touch the imported Denton campaign."""
+"""Test-only demo campaign (inherited from Crawler Console; replaced by a Carousel seed in Phase 2)."""
 from __future__ import annotations
 
 import json
 import sqlite3
 
-from ..db import next_campaign_id, now_iso, transaction
-from ..memory.snapshots import create_save_point
+from app.db import next_campaign_id, now_iso, transaction
+from app.memory.snapshots import create_save_point
 
 DEMO_NAME = "DEMO — Fictional Sample Crawl"
 

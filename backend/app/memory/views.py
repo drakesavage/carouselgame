@@ -16,16 +16,6 @@ PUBLIC_CHAR_COLUMNS = """id, campaign_id, slug, name, kind, roster_category, cra
     derived_json, portrait_path, portrait_crop_json, provenance, assignment"""
 
 
-def floor_clock(camp: dict) -> dict:
-    deadline = camp["floor_deadline_minutes"]
-    elapsed = camp["game_time_minutes"]
-    remaining = None if deadline is None else max(0, deadline - elapsed)
-    pending = camp.get("floor_clock_pending_minutes") if deadline is None else None  # waiting to start on entry
-    return {"elapsed_minutes": elapsed, "deadline_minutes": deadline, "remaining_minutes": remaining,
-            "remaining_display": None if remaining is None else f"{remaining // 60}h{remaining % 60:02d}m",
-            "pending_minutes": pending, "pending_display": None if pending is None else f"{pending // 60}h{pending % 60:02d}m"}
-
-
 def _statuses(conn: sqlite3.Connection, char_id: int) -> list[dict]:
     return rows(conn, "SELECT id, name, description, polarity, expires_at_minutes FROM status_effects WHERE character_id = ? ORDER BY id", (char_id,))
 
@@ -68,16 +58,10 @@ def campaign_summary(conn: sqlite3.Connection, cid: int) -> dict | None:
     if not camp:
         return None
     party = rows(conn, f"SELECT {PUBLIC_CHAR_COLUMNS} FROM characters WHERE campaign_id = ? AND in_party = 1 ORDER BY party_order, id", (cid,))
-    camp["floor_clock"] = floor_clock(camp)
     camp["party"] = [character_card(conn, c) for c in party]
     order = {q: n for n, q in enumerate(camp.pop("objective_quests") or [])}
-    from ..rules.combat import public_encounter
-    camp["encounter"] = public_encounter(one(conn, """SELECT id, name, round, summary, combatants_json FROM encounters
-                                    WHERE campaign_id = ? AND status = 'active' AND visibility = 'player' ORDER BY id DESC LIMIT 1""", (cid,)), conn)
     camp["clocks"] = rows(conn, "SELECT key, label, kind, current, maximum, unit FROM clocks WHERE campaign_id = ? AND visibility = 'player'", (cid,))
     camp["last_save"] = one(conn, "SELECT id, label, kind, created_at FROM save_points WHERE campaign_id = ? ORDER BY id DESC LIMIT 1", (cid,))
-    from ..rules.state_ops import day_info
-    camp["day"] = day_info(conn, cid)
     from ..art.service import current_art
     camp["art"] = current_art(conn, cid)
     camp["scene"] = one(conn, """SELECT id, title, location, group_key, situation, conditions, threats, participants_json, started_game_minutes
@@ -192,12 +176,6 @@ def messages(conn: sqlite3.Connection, cid: int, before: int | None = None, limi
     return list(reversed(rows(conn, sql, params)))
 
 
-def player_rolls(conn: sqlite3.Connection, cid: int, limit: int = 100) -> list[dict]:
-    return rows(conn, """SELECT id, turn_id, character_id, expression, dice_json, modifier, total, target, outcome, degree, reason,
-                                detail_json, rng, created_at FROM dice_rolls
-                         WHERE campaign_id = ? AND hidden = 0 AND rolled_back = 0 ORDER BY id DESC LIMIT ?""", (cid, limit))
-
-
 def house_rules(conn: sqlite3.Connection, cid: int) -> list[dict]:
     return rows(conn, "SELECT id, section, title, text, label, status, mechanical_status, source FROM house_rules WHERE campaign_id = ? ORDER BY id", (cid,))
 
@@ -240,10 +218,6 @@ def gm_messages(conn: sqlite3.Connection, cid: int, limit: int = 200) -> list[di
 
 def gm_events(conn: sqlite3.Connection, cid: int, limit: int = 300) -> list[dict]:
     return rows(conn, "SELECT * FROM events WHERE campaign_id = ? ORDER BY id DESC LIMIT ?", (cid, limit))
-
-
-def gm_rolls(conn: sqlite3.Connection, cid: int, limit: int = 200) -> list[dict]:
-    return rows(conn, "SELECT * FROM dice_rolls WHERE campaign_id = ? ORDER BY id DESC LIMIT ?", (cid, limit))
 
 
 def gm_lore(conn: sqlite3.Connection, cid: int) -> list[dict]:

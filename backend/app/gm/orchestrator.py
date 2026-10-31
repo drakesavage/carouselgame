@@ -4,9 +4,8 @@ Guarantees
 * Idempotency: a turn is keyed by (campaign_id, idempotency_key). Re-submitting a completed key returns the
   stored result without re-running anything; a key that is still processing reports progress.
 * Atomicity without long locks: no write transaction is open while Codex runs. Tool calls are staged (run, then
-  rolled back); the commit re-applies them with the same dice in one transaction together with the transcript,
-  events and the autosave, after verifying the state fingerprint is unchanged. A failed turn commits nothing — except
-  its dice rolls, which are recorded against the failed turn so the audit log cannot be gamed by retrying.
+  rolled back); the commit re-applies them in one transaction together with the transcript, events and the autosave,
+  after verifying the state fingerprint is unchanged. A failed turn commits nothing.
 * One turn at a time (WRITE_LOCK). Other write endpoints refuse with 409 while the GM is working.
 """
 from __future__ import annotations
@@ -25,9 +24,7 @@ from ..db import connect, now_iso, one, rows, transaction
 from ..memory.context import PROFILES, build_context
 from ..memory.snapshots import create_save_point, state_fingerprint
 from ..memory.summaries import maybe_summarize
-from ..memory.views import floor_clock
 from ..reference import rulebooks
-from ..rules.dice import DiceRoller, record_roll
 from .integrity import check as check_integrity, continuity
 from .prompts import SYSTEM_PROMPT
 from .providers import GMProvider, ProviderError, prune_jobs
@@ -58,54 +55,20 @@ class StateConflict(RuntimeError):
     """The committed campaign state is not the one the GM's turn was staged against."""
 
 
-class ReplayDice:
-    """Dice source for one turn. A die is drawn from the CSPRNG the first time it is needed and logged; every replay
-    of the staged calls (each round, and the final commit) gets the same values back in order, so re-applying a turn
-    can never re-roll it."""
-
-    def __init__(self, base: Callable[[int], int]):
-        self.base = base
-        self.log: list[tuple[int, int]] = []
-        self.pos = 0
-
-    def rewind(self) -> None:
-        self.pos = 0
-
-    def __call__(self, sides: int) -> int:
-        if self.pos < len(self.log):
-            s, v = self.log[self.pos]
-            if s != sides:
-                raise StateConflict("A replayed roll asked for different dice than staging did; nothing was applied.")
-        else:
-            v = self.base(sides)
-            self.log.append((sides, v))
-        self.pos += 1
-        return v
-
-
 def recover_interrupted_turns(conn) -> int:
     """At startup: a turn still 'processing' was cut off by a stop/crash. Staging never leaves writes behind, so
-    nothing of it was applied; dice it had already drawn are recorded against it from its persisted stage."""
-    from ..rules.dice import Die, RollResult
-    stuck = rows(conn, "SELECT id, campaign_id, stage_json FROM turns WHERE status = 'processing'")
+    nothing of it was applied."""
+    stuck = rows(conn, "SELECT id FROM turns WHERE status = 'processing'")
     for t in stuck:
-        stage = t.get("stage") or {}  # rows() parses *_json columns
-        for r in stage.get("rolls", []):
-            d = r["result"]
-            res = RollResult(d["expression"], [Die(**x) for x in d["dice"]], d["modifier"], d["total"], d.get("target"), d.get("outcome"),
-                             f"[interrupted turn] {d.get('reason') or ''}", None, bool(r["hidden"]), d.get("degree"), d.get("detail") or {})
-            record_roll(conn, t["campaign_id"], res, turn_id=t["id"], character_id=r["character_id"], hidden=bool(r["hidden"]))
         conn.execute("UPDATE turns SET status = 'failed', error = 'Interrupted: the server stopped while this turn was being resolved. "
                      "Nothing was applied; retry it.', stage_json = NULL, completed_at = ? WHERE id = ?", (now_iso(), t["id"]))
     return len(stuck)
 
 
 class TurnService:
-    def __init__(self, settings: Settings, provider_factory: Callable[[], GMProvider], roller: DiceRoller | None = None,
-                 run_async: bool = True):
+    def __init__(self, settings: Settings, provider_factory: Callable[[], GMProvider], run_async: bool = True):
         self.settings = settings
         self.provider_factory = provider_factory
-        self.roller = roller or DiceRoller()
         self.run_async = run_async
         self.progress: dict[int, Progress] = {}
 
@@ -178,7 +141,7 @@ class TurnService:
     def _process(self, turn_id: int, forced: tuple | None = None) -> None:
         """No write transaction is held while the GM thinks. Each round's tool calls run against the committed state
         inside a short transaction that is then rolled back (staging); the final commit re-applies every staged call
-        with the same dice in one transaction, after checking the state fingerprint is still the one the GM saw."""
+        in one transaction, after checking the state fingerprint is still the one the GM saw."""
         prog = self.progress.setdefault(turn_id, Progress())
         conn = self._conn()
         rule_conn = self._rule_conn()
@@ -189,15 +152,12 @@ class TurnService:
         if forced is not None:  # an escalated conversation turn, re-run by the mechanics GM
             provider, route = forced
         elif hasattr(provider, "route"):
-            combat = one(conn, "SELECT 1 AS x FROM encounters WHERE campaign_id = ? AND status = 'active'", (cid,)) is not None
-            provider, route = provider.route(turn["player_input"], combat, absent_names(conn, cid))
+            provider, route = provider.route(turn["player_input"], story_active(conn, cid), absent_names(conn, cid))
         conversation = bool(getattr(provider, "conversation", False))
         tools = [t for t in TOOL_SPECS if t["name"] in SAFE_TOOLS] + [ESCALATE_SPEC] if conversation else TOOL_SPECS
         system = SYSTEM_PROMPT + "\n\n" + CONVERSATION_MODE if conversation else SYSTEM_PROMPT
-        dice = ReplayDice(self.roller.source)
-        roller = DiceRoller(source=dice)
         staged: list[dict] = []  # executed tool calls: {name, arguments, ok}
-        runner = ToolRunner(conn, rule_conn, roller, cid, turn_id, settings=self.settings)
+        runner = ToolRunner(conn, rule_conn, cid, turn_id, settings=self.settings)
         steps: list[dict] = []
         usage: list[dict] = []
         t_before = None
@@ -236,8 +196,8 @@ class TurnService:
                 steps.append({"kind": "gm_request", "tool_calls": [{"name": c.name, "arguments": c.arguments} for c in resp.tool_calls],
                               "draft": resp.narration})
                 prog.set("resolving", ", ".join(c.name for c in resp.tool_calls))
-                runner, results = self._stage(conn, rule_conn, roller, dice, cid, turn_id, base, staged, resp.tool_calls)
-                self._save_stage(conn, turn_id, staged, runner)
+                runner, results = self._stage(conn, rule_conn, cid, turn_id, base, staged, resp.tool_calls)
+                self._save_stage(conn, turn_id, staged)
                 steps.append({"kind": "tool_results", "results": results})
                 all_bookkeeping = all(c.name in BOOKKEEPING_TOOLS for c in resp.tool_calls)
                 any_failed = any(not r["ok"] or any(not x.get("ok", True) for x in r["result"].get("results", [])) for r in results)
@@ -250,7 +210,7 @@ class TurnService:
                 raise ProviderError("the GM did not produce narration within the tool-round limit")
             prog.set("saving", "transcript, events, autosave")
             with transaction(conn):
-                runner = self._replay(conn, rule_conn, roller, dice, cid, turn_id, base, staged, final=True)
+                runner = self._replay(conn, rule_conn, cid, turn_id, base, staged)
                 response = self._commit_turn(conn, cid, turn, narration, runner, provider.name)
                 conn.execute("UPDATE turns SET status = 'completed', provider = ?, response_json = ?, stage_json = NULL, completed_at = ? WHERE id = ?",
                              (provider.name, json.dumps(response), now_iso(), turn_id))
@@ -258,14 +218,14 @@ class TurnService:
                 if runner.effects.save_label:  # the player asked to save (save_game): a manual point, never pruned (playtest 1, M6)
                     create_save_point(conn, cid, runner.effects.save_label, kind="manual", turn_id=turn_id)
                 fx = runner.effects
-                flags = check_integrity(conn, cid, turn["player_input"], narration, fx.changes, fx.rolls, fx.errors, fx.notices, turn_id)
+                flags = check_integrity(conn, cid, turn["player_input"], narration, fx.changes, [], fx.errors, fx.notices, turn_id)
                 from ..consistency import run as consistency_run
                 flags += [{"level": "warn", "message": f"Records disagree after this turn: {c['check']} {c['values']}"}
                           for c in consistency_run(conn, cid) if not c["ok"]]
                 t_after = one(conn, "SELECT game_time_minutes FROM campaigns WHERE id = ?", (cid,))["game_time_minutes"]
                 self._save_diagnostics(conn, turn_id, cid, steps, usage, flags, {"game_time_before": t_before, "game_time_after": t_after,
                                                                                    "changes": fx.changes, "errors": fx.errors,
-                                                                                   "staged_calls": len(staged), "dice_drawn": len(dice.log), "route": route,
+                                                                                   "staged_calls": len(staged), "route": route,
                                                                                    "continuity": continuity(conn, cid, steps[0], flags, t_before, t_after, fx.changes)})
             prog.set("done")
             try:
@@ -284,11 +244,11 @@ class TurnService:
             if exc.reroute and hasattr(root, "route"):
                 c2 = connect(self.settings.campaign_db)
                 try:
-                    combat = one(c2, "SELECT 1 AS x FROM encounters WHERE campaign_id = ? AND status = 'active'", (cid,)) is not None
+                    active = story_active(c2, cid)
                     absent = absent_names(c2, cid)
                 finally:
                     c2.close()
-                nxt, again = root.route(turn["player_input"], combat, absent)
+                nxt, again = root.route(turn["player_input"], active, absent)
                 info = {**again, "rerouted_from": (route or {}).get("model"), "reroute_reason": str(exc)[:300]}
             conn.close()
             if rule_conn is not None:
@@ -306,12 +266,9 @@ class TurnService:
             with transaction(conn):
                 conn.execute("UPDATE turns SET status = 'failed', error = ?, provider = ?, stage_json = NULL, completed_at = ? WHERE id = ?",
                              (err[:2000], provider.name, now_iso(), turn_id))
-                for res, char_id, hidden in runner.effects.roll_records:  # dice audit survives the rollback
-                    res.reason = f"[failed turn] {res.reason or ''}"
-                    record_roll(conn, cid, res, turn_id=turn_id, character_id=char_id, hidden=hidden)
                 self._save_diagnostics(conn, turn_id, cid, steps, usage, [{"level": "error", "message": err[:1000]}],
                                        {"game_time_before": t_before, "game_time_after": t_before, "changes": [], "errors": runner.effects.errors,
-                                        "rolled_back": True, "staged_calls": len(staged), "dice_drawn": len(dice.log), "route": route})
+                                        "rolled_back": True, "staged_calls": len(staged), "route": route})
             if not isinstance(exc, (ProviderError, StateConflict, ValueError, KeyError)):
                 traceback.print_exc()
         finally:
@@ -321,26 +278,22 @@ class TurnService:
                 rule_conn.close()
 
     # ------------------------------------------------------------ staging
-    def _replay(self, conn, rule_conn, roller, dice: "ReplayDice", cid: int, turn_id: int, base: str, staged: list[dict],
-                final: bool = False) -> ToolRunner:
+    def _replay(self, conn, rule_conn, cid: int, turn_id: int, base: str, staged: list[dict]) -> ToolRunner:
         """Inside an open transaction: verify nothing else changed the campaign, then re-apply the staged calls."""
         if state_fingerprint(conn, cid) != base:
             raise StateConflict("The campaign changed while the GM was working (another write, restore or import). "
                                 "Nothing from this turn was applied; retry it.")
-        dice.rewind()
-        runner = ToolRunner(conn, rule_conn, roller, cid, turn_id, settings=self.settings)
+        runner = ToolRunner(conn, rule_conn, cid, turn_id, settings=self.settings)
         for call in staged:
             if runner.run(call["name"], call["arguments"])["ok"] != call["ok"]:
                 raise StateConflict(f"Replaying {call['name']} gave a different outcome; nothing from this turn was applied.")
-        if final and dice.pos != len(dice.log):
-            raise StateConflict("Replay used a different number of dice than staging; nothing from this turn was applied.")
         return runner
 
-    def _stage(self, conn, rule_conn, roller, dice, cid, turn_id, base, staged, calls) -> tuple[ToolRunner, list[dict]]:
+    def _stage(self, conn, rule_conn, cid, turn_id, base, staged, calls) -> tuple[ToolRunner, list[dict]]:
         """Run this round's calls on top of the staged ones, keep the results, and discard the writes."""
         conn.execute("BEGIN IMMEDIATE")
         try:
-            runner = self._replay(conn, rule_conn, roller, dice, cid, turn_id, base, staged)
+            runner = self._replay(conn, rule_conn, cid, turn_id, base, staged)
             results = [{"name": c.name, **runner.run(c.name, c.arguments)} for c in calls]
         finally:
             conn.execute("ROLLBACK")
@@ -348,10 +301,9 @@ class TurnService:
         return runner, results
 
     @staticmethod
-    def _save_stage(conn, turn_id: int, staged: list[dict], runner: ToolRunner) -> None:
-        """Persist the in-flight stage (one small autocommit write) so a crash can still audit the dice already drawn."""
-        rolls = [{"result": res.to_dict(), "character_id": char_id, "hidden": hidden} for res, char_id, hidden in runner.effects.roll_records]
-        conn.execute("UPDATE turns SET stage_json = ? WHERE id = ?", (json.dumps({"calls": staged, "rolls": rolls}, default=str), turn_id))
+    def _save_stage(conn, turn_id: int, staged: list[dict]) -> None:
+        """Persist the in-flight stage (one small autocommit write) for diagnostics after a crash."""
+        conn.execute("UPDATE turns SET stage_json = ? WHERE id = ?", (json.dumps({"calls": staged}, default=str), turn_id))
 
     @staticmethod
     def _save_diagnostics(conn, turn_id: int, cid: int, steps: list[dict], usage: list[dict], flags: list[dict], extra: dict) -> None:
@@ -377,14 +329,10 @@ class TurnService:
         fx = runner.effects
         pmsg = conn.execute("INSERT INTO messages (campaign_id, turn_id, role, content, created_at) VALUES (?,?,?,?,?)",
                             (cid, turn["id"], "player", turn["player_input"], ts)).lastrowid
-        camp = one(conn, "SELECT game_time_minutes, floor_deadline_minutes FROM campaigns WHERE id = ?", (cid,))
-        card_types = ("item_added", "achievement", "level_awarded", "skill_changed", "quest_added", "quest_completed", "quest_failed",
-                      "status_added", "character_down", "character_death", "mob_defeated", "advancement_checkpoint", "encounter_start",
-                      "encounter_end", "stats_allocated", "ai_favor_changed", "floor_collapse", "dungeon_day", "group_moved", "scene_started")
+        card_types = ("item_added", "quest_added", "quest_completed", "quest_failed", "status_added", "group_moved", "scene_started")
         cards = [{"type": e["type"], "summary": e["summary"]} for e in rows(conn, f"""SELECT type, summary FROM events WHERE turn_id = ? AND visibility = 'player'
                  AND type IN ({','.join('?' * len(card_types))}) ORDER BY id""", (turn["id"], *card_types))]
-        meta = {"rolls": fx.rolls, "changes": fx.changes, "rules_cited": sorted(set(fx.rules_cited)), "provider": provider_name,
-                "floor_clock": floor_clock(camp), "cards": cards}
+        meta = {"changes": fx.changes, "rules_cited": sorted(set(fx.rules_cited)), "provider": provider_name, "cards": cards}
         gmsg = conn.execute("INSERT INTO messages (campaign_id, turn_id, role, content, meta_json, created_at) VALUES (?,?,?,?,?,?)",
                             (cid, turn["id"], "gm", narration, json.dumps(meta), ts)).lastrowid
         notice_ids = []
@@ -393,8 +341,13 @@ class TurnService:
                                            (cid, turn["id"], "system", n["text"], json.dumps({"style": n["style"]}), ts)).lastrowid)
         conn.execute("UPDATE campaigns SET updated_at = ? WHERE id = ?", (ts, cid))
         return {"player_message_id": pmsg, "gm_message_id": gmsg, "notice_message_ids": notice_ids, "narration": narration,
-                "rolls": fx.rolls, "changes": fx.changes, "notices": fx.notices, "rules_cited": meta["rules_cited"],
+                "changes": fx.changes, "notices": fx.notices, "rules_cited": meta["rules_cited"],
                 "state_changed": bool(fx.changes)}
+
+
+def story_active(conn, cid: int) -> bool:
+    """Whether a story is in progress (every such turn goes to the mechanics GM). Stories arrive with the Omen runner."""
+    return False
 
 
 def absent_names(conn, cid: int) -> frozenset:

@@ -3,18 +3,10 @@ import { DeviceSettings } from "./DeviceSettings";
 import { BackupsPanel, RestorePreview } from "./Backups";
 import { CampaignsPanel } from "./Campaigns";
 import * as Dialog from "@radix-ui/react-dialog";
-import { AlertTriangle, Bot, Copy, Database, Download, Eye, EyeOff, History, KeyRound, Save, Smartphone } from "lucide-react";
+import { AlertTriangle, Bot, Copy, Database, Eye, EyeOff, History, KeyRound, Save, Smartphone } from "lucide-react";
 import { api, Prefs, SavePoint } from "../api";
 import { Chip, Empty, Panel } from "../ui";
 import { Diagnostics } from "./Diagnostics";
-
-type ReportEntry = { status?: "resolved" | "open"; correction?: { id: number; subject: string; decision: string } };
-const openOf = (es?: ReportEntry[]) => (es ?? []).filter((e) => e.status === "open").length;
-const statusLine = (es?: ReportEntry[]) => es?.length ? ` (${es.length - openOf(es)} resolved, ${openOf(es)} open)` : "";
-/** Resolved by an owner-approved correction (reconcile.py), or still open: ambiguous records are never fixed silently. */
-function Resolution({ e }: { e: ReportEntry }) {
-  return e.correction ? <Chip tone="green" title={e.correction.subject}>correction #{e.correction.id}</Chip> : <Chip tone="amber">open</Chip>;
-}
 
 export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: number; version: number; onChanged: () => void; onCampaign: (id: number | null) => void }) {
   const [prefs, setPrefs] = useState<Prefs | null>(null);
@@ -22,11 +14,9 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
   const [label, setLabel] = useState("");
   const [confirm, setConfirm] = useState<SavePoint | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [reports, setReports] = useState<Awaited<ReturnType<typeof api.importReports>> | null>(null);
-  const [importing, setImporting] = useState(false);
 
   const [access, setAccess] = useState<Awaited<ReturnType<typeof api.access>> | null>(null);
-  useEffect(() => { api.settings().then(setPrefs); api.importReports().then(setReports); api.access().then(setAccess).catch(() => setAccess(null)); }, []);
+  useEffect(() => { api.settings().then(setPrefs); api.access().then(setAccess).catch(() => setAccess(null)); }, []);
   const [showCode, setShowCode] = useState(false);  // the device passcode stays masked until deliberately revealed
   useEffect(() => { if (cid) api.saves(cid).then(setSaves).catch(() => setSaves([])); }, [cid, version]);
 
@@ -40,13 +30,6 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
     catch (e) { setMsg(String(e)); }
     setConfirm(null);
   };
-  const runImport = async () => {
-    setImporting(true);
-    try { const r = await api.importLedger(prefs?.ledger_dir); setReports(await api.importReports()); setMsg(r.campaign_id ? `Imported as a new campaign (#${r.campaign_id}).` : "Nothing imported — see the report."); if (r.campaign_id) onCampaign(r.campaign_id); }
-    catch (e) { setMsg(String(e)); } finally { setImporting(false); }
-  };
-  const report = reports?.[0]?.report;
-
   return (
     <div className="view-inner">
       <div className="h1">Saves &amp; settings</div>
@@ -130,39 +113,12 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
                 </button>
               )}
             </div>
-            {access.fixed_by_env && <div className="sub">Set by CRAWLER_PASSCODE in .env.</div>}
+            {access.fixed_by_env && <div className="sub">Set by CAROUSEL_PASSCODE in .env.</div>}
           </Panel>
         )}
 
-        <Panel title={<><Database size={13} /> Campaign import</>}>
-          {prefs && (
-            <>
-              <label>Ledger folder
-                <input className="input" defaultValue={prefs.ledger_dir} onBlur={(e) => e.target.value !== prefs.ledger_dir && update({ ledger_dir: e.target.value })} />
-              </label>
-              <div className="row" style={{ marginTop: 8 }}>
-                <button className="btn" disabled={importing} onClick={runImport}><Download size={14} /> {importing ? "Importing…" : "Import as new campaign"}</button>
-                <button className="btn ghost" onClick={async () => { const r = await api.makeDemo(); onCampaign(r.campaign_id); }}>Open demo campaign</button>
-              </div>
-              <div className="sub" style={{ marginTop: 6 }}>Read-only: the ledger is never modified. Each import creates a new campaign.</div>
-            </>
-          )}
-          {report && (
-            <div style={{ marginTop: 12 }}>
-              <div className="h2" style={{ marginTop: 0 }}>Latest migration report</div>
-              <div className="chips" style={{ marginBottom: 8 }}>
-                {Object.entries(report.imported ?? {}).map(([k, v]) => <Chip key={k} tone="green">{k.replace(/_/g, " ")}: {String(v)}</Chip>)}
-              </div>
-              <details><summary className="row" style={{ cursor: "pointer" }}>{openOf(report.conflicts) ? <AlertTriangle size={13} color="var(--amber)" /> : null} {report.conflicts?.length ?? 0} conflicts{statusLine(report.conflicts)}</summary>
-                <ul>{report.conflicts?.map((c: any, i: number) => <li key={i} style={{ fontSize: 13 }}><Resolution e={c} /> <b>{c.topic}</b>: {JSON.stringify(c.values)} — <span className="sub">{c.correction ? c.correction.decision : c.resolution}</span></li>)}</ul></details>
-              <details><summary style={{ cursor: "pointer" }}>{report.manual_review?.length ?? 0} items for manual review{statusLine(report.manual_review)}</summary>
-                <ul>{report.manual_review?.map((m: any, i: number) => <li key={i} style={{ fontSize: 13 }}><Resolution e={m} /> <span className="mono">{m.record}</span> {m.path ? <span className="mono">{m.path}</span> : null} {m.issue}</li>)}</ul></details>
-              <details><summary style={{ cursor: "pointer" }}>{report.rules_pending_implementation?.length ?? 0} house rules awaiting mechanical implementation</summary>
-                <ul>{report.rules_pending_implementation?.map((r: any, i: number) => <li key={i} style={{ fontSize: 13 }}>{r.rule} <Chip>{r.status ?? "pending"}</Chip></li>)}</ul></details>
-              <div className="sub">Full report: reports/migration_report.md</div>
-              <Consistency cid={cid} version={version} />
-            </div>
-          )}
+        <Panel title={<><Database size={13} /> Records</>}>
+          <Consistency cid={cid} version={version} />
         </Panel>
       </div>
 

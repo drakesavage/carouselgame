@@ -16,9 +16,9 @@ def new(client, **kw):
 
 
 def test_a_new_campaign_has_its_crawler_and_a_start_save_and_nothing_invented(client, conn):
-    cid = new(client, floor_hours=120)
+    cid = new(client)
     camp = client.get(f"/api/campaigns/{cid}").json()
-    assert camp["name"] == "Second Crawl" and camp["current_floor"] == 1 and camp["floor_clock"]["remaining_minutes"] == 7200
+    assert camp["name"] == "Second Crawl" and "floor_clock" not in camp
     pc = one(conn, "SELECT * FROM characters WHERE id = ?", (camp["active_character_id"],))
     assert pc["name"] == "Donut Jr" and pc["race"] == "Cat" and pc["in_party"] == 1
     assert pc["level"] is None and pc["hp_max"] is None and pc["ai_favor"] is None      # unknown stays unknown
@@ -84,21 +84,6 @@ def test_delete_is_refused_from_a_phone_and_while_a_turn_runs(settings, conn, cl
     assert one(conn, "SELECT id FROM campaigns WHERE id = ?", (cid,))
 
 
-def test_a_new_campaign_gets_the_default_gm_constitution_in_every_briefing(client, conn):
-    from app.memory.context import build_context
-    cid = new(client)
-    titles = [r["title"] for r in rows(conn, "SELECT title FROM house_rules WHERE campaign_id = ? AND always_include = 1", (cid,))]
-    assert {"Achievement procedure", "Entering the World Dungeon (First Floor)", "People are records", "GM fairness constraints",
-            "Crazy Dungeon critical flourish", "The Collapse", "Achievements as the novels write them",
-            "Borant announcements and admin notices"} <= set(titles) and len(titles) == 22
-    every = rows(conn, "SELECT title, text FROM house_rules WHERE campaign_id = ?", (cid,))
-    assert len(every) > 90 and not [r["title"] for r in every if "Cliff" in r["text"] or "Denton" in r["text"] or ".yaml" in r["text"]]
-    assert one(conn, "SELECT current, maximum FROM clocks WHERE campaign_id = ? AND key = 'advancement_cycles'", (cid,)) == {"current": 0, "maximum": 12}
-    ctx = build_context(conn, cid, "I look around")
-    text = ctx if isinstance(ctx, str) else getattr(ctx, "text", str(ctx))
-    assert "plentiful and generous" in text and "Tutorial Guilds" in text
-
-
 def test_npc_op_puts_a_met_person_on_the_people_page_and_updates_them(client, conn):
     from app.db import transaction
     from app.rules.engine import ChangeError, apply_change
@@ -118,51 +103,9 @@ def test_npc_op_puts_a_met_person_on_the_people_page_and_updates_them(client, co
             apply_change(conn, cid, None, {"op": "npc", "name": "Donut Jr"})       # the player character is not an NPC
 
 
-def test_initialize_sheet_sets_a_blank_crawler_once(client, conn):
-    import pytest
-    from app.db import transaction
-    from app.rules.engine import ChangeError, apply_change
-    cid = new(client)
-    stats = {"strength": 4, "intelligence": 2, "constitution": 3, "dexterity": 4, "charisma": 5}
-    mods = {"strength": 2, "intelligence": 1, "constitution": 2, "dexterity": 2, "charisma": 2}
-    with transaction(conn):
-        apply_change(conn, cid, None, {"op": "initialize_sheet", "character": "player", "stats": stats, "modifiers": mods,
-                                       "health_slots": 10, "health_per_slot": 2, "mana_max": 2, "race": "Human", "source": "rolled at creation"})
-    pc = one(conn, "SELECT * FROM characters WHERE campaign_id = ? AND kind = 'crawler'", (cid,))
-    assert (pc["hp_current"], pc["hp_max"], pc["mana_max"], pc["level"], pc["race"]) == (20, 20, 2, 1, "Human")   # the System's assignment replaces what was typed at setup
-    assert pc["stats"]["stats"] == stats and pc["derived"]["health_bar"] == {"slots": 10, "health_per_slot": 2}
-    with transaction(conn):
-        with pytest.raises(ChangeError):
-            apply_change(conn, cid, None, {"op": "initialize_sheet", "character": "player", "stats": stats, "modifiers": mods,
-                                           "health_slots": 10, "health_per_slot": 2, "mana_max": 2, "source": "again"})
-
-
 def test_the_gm_input_names_no_particular_player():
     from app.gm.providers import render_steps
     assert "Cliff" not in render_steps([{"kind": "player", "text": "hello"}])
-
-
-def test_a_floor_clock_can_wait_until_the_crawler_enters_the_dungeon(client, conn):
-    import pytest
-    from app.db import transaction
-    from app.memory.context import build_context
-    from app.rules.engine import ChangeError, apply_change
-    cid = new(client, floor_hours=120, clock_on_entry=True)
-    fc = client.get(f"/api/campaigns/{cid}").json()["floor_clock"]
-    assert fc["remaining_minutes"] is None and fc["pending_minutes"] == 7200 and fc["pending_display"] == "120h00m"
-    ctx = build_context(conn, cid, "I wait"); text = ctx if isinstance(ctx, str) else getattr(ctx, "text", str(ctx))
-    assert "floor clock NOT STARTED" in text and "start_floor_clock" in text
-    with transaction(conn):
-        apply_change(conn, cid, None, {"op": "advance_time", "minutes": 45, "reason": "tailgating before the collapse"})
-        out = apply_change(conn, cid, None, {"op": "start_floor_clock", "elapsed_minutes": 5, "reason": "Donut Jr steps through the entrance"})
-    assert out["remaining_minutes"] == 7195
-    fc = client.get(f"/api/campaigns/{cid}").json()["floor_clock"]
-    assert fc["remaining_minutes"] == 7195 and fc["pending_minutes"] is None
-    with transaction(conn):
-        with pytest.raises(ChangeError):
-            apply_change(conn, cid, None, {"op": "start_floor_clock", "reason": "twice"})
-    running = new(client, name="Running Clock", floor_hours=120)
-    assert client.get(f"/api/campaigns/{running}").json()["floor_clock"]["remaining_minutes"] == 7200
 
 
 def test_an_npc_carries_gender_and_pronouns_and_the_gm_is_told_when_they_are_missing(client, conn):
@@ -181,78 +124,3 @@ def test_an_npc_carries_gender_and_pronouns_and_the_gm_is_told_when_they_are_mis
     jamie = [p for p in client.get(f"/api/campaigns/{cid}/npcs").json() if p["name"] == "Jamie Cole"][0]
     assert jamie["identity"] == {"gender": "woman", "pronouns": "she/her", "apparent_age": "early 30s"}
 
-
-def test_achievements_reward_boxes_to_companions_and_boxes_open_only_in_a_saferoom(client, conn):
-    import pytest
-    from app.db import transaction
-    from app.rules.engine import ChangeError, apply_change
-    cid = new(client, location="Paintball course")
-    with transaction(conn):
-        apply_change(conn, cid, None, {"op": "npc", "name": "Eli Park", "category": "allied_npcs"})
-        conn.execute("UPDATE characters SET in_party = 1, kind = 'crawler' WHERE campaign_id = ? AND name = 'Eli Park'", (cid,))
-        apply_change(conn, cid, None, {"op": "achievement", "title": "Empty Pockets", "description": "You brought nothing. Bold.",
-                                       "box": "Bronze Adventurer Box", "also": ["Eli Park"]})
-        apply_change(conn, cid, None, {"op": "achievement", "title": "Loner?", "description": "Not quite.", "reward": "Yeah, no."})
-        with pytest.raises(ChangeError):
-            apply_change(conn, cid, None, {"op": "achievement", "title": "Empty Pockets", "box": "Bronze Adventurer Box"})   # no duplicates
-        with pytest.raises(ChangeError):
-            apply_change(conn, cid, None, {"op": "achievement", "title": "Bad", "box": "Shiny Thing"})
-    page = client.get(f"/api/campaigns/{cid}/achievements").json()
-    assert page["total"] == 3 and page["unopened_boxes"] == 2
-    me, eli = page["characters"][0], [c for c in page["characters"] if c["name"] == "Eli Park"][0]
-    assert me["is_player"] and [a["title"] for a in me["achievements"]] == ["Loner?", "Empty Pockets"]
-    assert me["achievements"][0]["reward"] == "Yeah, no." and me["achievements"][1]["reward"] == "You've received a Bronze Adventurer Box!"
-    assert eli["boxes"][0]["name"] == "Bronze Adventurer Box" and eli["boxes"][0]["tier"] == "Bronze"
-    with transaction(conn):
-        with pytest.raises(ChangeError):
-            apply_change(conn, cid, None, {"op": "open_box", "character": "player", "box": "Bronze Adventurer Box"})        # not a saferoom
-        apply_change(conn, cid, None, {"op": "set_location", "location": "Tutorial Guild", "safe_room": True})
-        apply_change(conn, cid, None, {"op": "open_box", "character": "player", "box": "Bronze Adventurer Box"})
-        apply_change(conn, cid, None, {"op": "add_item", "character": "player", "name": "Healing Potion", "quantity": 2})
-    page = client.get(f"/api/campaigns/{cid}/achievements").json()
-    me = page["characters"][0]
-    assert me["boxes"] == [] and me["achievements"][1]["box_opened"] is True and page["unopened_boxes"] == 1
-
-
-def test_an_npc_can_become_a_crawler_in_the_party_and_shows_on_the_achievements_page(client, conn):
-    from app.db import transaction
-    from app.rules.engine import apply_change
-    cid = new(client)
-    with transaction(conn):
-        apply_change(conn, cid, None, {"op": "npc", "name": "Ben Ortiz", "description": "EMT teammate."})
-    assert [c["name"] for c in client.get(f"/api/campaigns/{cid}/achievements").json()["characters"]] == ["Donut Jr"]
-    with transaction(conn):
-        apply_change(conn, cid, None, {"op": "npc", "name": "Ben Ortiz", "crawler": True, "in_party": True})
-    ben = one(conn, "SELECT kind, in_party, roster_category FROM characters WHERE campaign_id = ? AND name = 'Ben Ortiz'", (cid,))
-    assert (ben["kind"], ben["in_party"], ben["roster_category"]) == ("crawler", 1, "core_party")
-    assert [c["name"] for c in client.get(f"/api/campaigns/{cid}/achievements").json()["characters"]] == ["Donut Jr", "Ben Ortiz"]
-
-
-def test_untrained_attempts_reach_the_briefing_and_the_checkpoint(client, conn, roller):
-    import json as _json
-    from app.db import now_iso, transaction
-    from app.memory.context import build_context
-    from app.rules.checks import resolve_advancement_checkpoint, untrained_attempts
-    from app.rules.engine import apply_change
-    cid = new(client)
-    with transaction(conn):
-        eli = apply_change(conn, cid, None, {"op": "npc", "name": "Eli Park", "crawler": True, "in_party": True})["character_id"]
-        conn.execute("UPDATE characters SET level = 1 WHERE campaign_id = ? AND kind = 'crawler'", (cid,))
-    def roll(turn_status, skill, untrained, who):
-        tid = conn.execute("INSERT INTO turns (campaign_id, idempotency_key, player_input, status, created_at) VALUES (?,?,?,?,?)",
-                           (cid, f"k-{skill}-{turn_status}-{who}", "x", turn_status, now_iso())).lastrowid
-        conn.execute("""INSERT INTO dice_rolls (campaign_id, turn_id, character_id, expression, dice_json, total, outcome, degree, detail_json, rng, created_at)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?)""", (cid, tid, who, "1d20", "[]", 14, "success", "Success",
-                        _json.dumps({"kind": "skill_check", "skill": skill, "untrained": untrained, "character": "Eli Park"}), "test", now_iso()))
-    roll("completed", "Stealth", True, eli)
-    roll("completed", "Perception", False, eli)
-    roll("failed", "Climbing", True, eli)                                           # a failed turn's roll does not count
-    assert untrained_attempts(conn, cid) == {eli: ["Stealth"]}
-    text = build_context(conn, cid, "next")
-    text = text if isinstance(text, str) else getattr(text, "text", str(text))
-    assert "## RECENT ROLLS" in text and "Eli Park Stealth 14 → Success [UNTRAINED]" in text and "Eli Park: Stealth" in text
-    with transaction(conn):
-        conn.execute("UPDATE clocks SET current = 12 WHERE campaign_id = ? AND key = 'advancement_cycles'", (cid,))
-        out = resolve_advancement_checkpoint(conn, conn, roller, cid, None, "test checkpoint")
-    assert any("untrained this interval: Stealth" in l for l in out["lines"])
-    assert untrained_attempts(conn, cid) == {}                                       # the interval resets at the checkpoint

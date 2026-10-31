@@ -228,7 +228,6 @@ function Overview({ d, cid, openSkill, openTab, reload }: { d: Dossier; cid: num
   return (
     <div className="ov-grid">
       <div className="ov-col">
-      {!!d.explanations_missing && <ExplainMissing cid={cid} count={d.explanations_missing} reload={reload} />}
       <section className="dpanel ov-attrs">
         <h3>Core attributes</h3>
         {d.attributes.length === 0 ? <Empty>Stats not established in the record.</Empty> : (
@@ -507,27 +506,6 @@ function EffectRow({ e }: { e: Effect }) {
       </button>
       {open && x && <WhatItDoes x={x} />}
     </li>
-  );
-}
-
-function ExplainMissing({ cid, count, reload }: { cid: number; count: number; reload: () => void }) {
-  const [st, setSt] = useState<{ state: string; progress?: string; error?: string } | null>(null);
-  useEffect(() => {
-    if (st?.state !== "running") return;
-    const t = setInterval(async () => {
-      const s = await api.explainStatus(cid);
-      setSt(s);
-      if (s.state === "done") reload();
-    }, 3000);
-    return () => clearInterval(t);
-  }, [st?.state, cid]); // eslint-disable-line react-hooks/exhaustive-deps
-  return (
-    <div className="explain-missing">
-      <BookOpen size={14} />
-      <span className="grow">{st?.state === "running" ? `Writing explanations… ${st.progress ?? ""}` : st?.state === "failed" ? `Couldn't write explanations: ${st.error}`
-        : `${count} abilit${count === 1 ? "y has" : "ies have"} no explanation yet.`}</span>
-      {st?.state !== "running" && <button className="btn small" onClick={async () => setSt(await api.explainAbilities(cid))}>Explain them</button>}
-    </div>
   );
 }
 

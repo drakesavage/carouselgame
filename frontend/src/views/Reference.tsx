@@ -1,28 +1,14 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { BookOpen, Check, ChevronRight, FileSearch, Gavel, History, Search, X } from "lucide-react";
-import { api, HouseRule, Passage, RuleBrowse, RuleLookup, RuleSuggestion, Ruling } from "../api";
+import { Check, FileSearch, Search, X } from "lucide-react";
+import { api, HouseRule, Ruling } from "../api";
 import "../rules.css";
 import { Chip, Empty, Markdown } from "../ui";
 
 const LABEL_TONE: Record<string, string> = { BOOK: "cyan", CAMPAIGN: "magenta", INTERPRETATION: "amber", "ONE-SCENE": "amber", OPEN: "red", mixed: "violet" };
 const MECH_TONE: Record<string, string> = { implemented: "green", partial: "amber", pending: "red", narrative_only: "" };
 
-function highlight(text: string, q: string) {
-  const terms = q.toLowerCase().split(/\W+/).filter((t) => t.length > 2);
-  if (!terms.length) return text;
-  const re = new RegExp(`(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "gi");
-  return text.split(re).map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part));
-}
-
-const STATUS_TONE: Record<string, string> = { tested: "green", untested: "green", partial: "amber", gm_ruling: "cyan", reference: "", missing: "red", no_code: "red" };
-const STATUS_LABEL: Record<string, string> = { tested: "Enforced and tested", untested: "Enforced, untested", partial: "Partly enforced", gm_ruling: "GM applies it",
-  reference: "Reference only", missing: "Missing code", no_code: "No dedicated code" };
 const RULING_TONE: Record<string, string> = { precedent: "green", provisional: "amber", rejected: "red" };
-const LAYER_LABEL: Record<string, string> = { ruling: "Ruling", house_rule: "House rule", book: "Rulebook", gm: "GM judgment", note: "Note" };
-
-function loadRecent(): string[] { try { return JSON.parse(localStorage.getItem("rules-recent") ?? "[]"); } catch { return []; } }
-function saveRecent(list: string[]) { try { localStorage.setItem("rules-recent", JSON.stringify(list)); } catch { /* storage unavailable */ } }
 
 /** Opens one rulebook page (from a story citation or a lookup) in the page viewer. */
 export function RulePageDialog({ page, onClose }: { page: { doc: number; page: number } | null; onClose: () => void }) {
@@ -41,13 +27,11 @@ export function RulePageDialog({ page, onClose }: { page: { doc: number; page: n
 }
 
 export function RulesView({ cid }: { cid: number }) {
-  const [tab, setTab] = useState<"lookup" | "browse" | "house" | "rulings" | "books">("lookup");
+  const [tab, setTab] = useState<"house" | "rulings" | "books">("rulings");
   const [page, setPage] = useState<{ doc: number; page: number } | null>(null);
   const [house, setHouse] = useState<HouseRule[] | null>(null);
   const [rulings, setRulings] = useState<Ruling[] | null>(null);
   const [docs, setDocs] = useState<Awaited<ReturnType<typeof api.ruleDocs>> | null>(null);
-  const [q, setQ] = useState("");
-  const lookupRef = useRef<(q: string) => void>(() => {});
 
   useEffect(() => { api.houseRules(cid).then(setHouse); api.rulings(cid).then(setRulings); api.ruleDocs().then(setDocs); }, [cid]);
   useEffect(() => {
@@ -56,22 +40,19 @@ export function RulesView({ cid }: { cid: number }) {
     return () => clearInterval(iv);
   }, [docs?.index_status?.state]);
   const pending = rulings?.filter((r) => r.status === "provisional" && !r.review).length ?? 0;
-  const openEntry = (name: string) => { setTab("lookup"); setQ(name); lookupRef.current(name); };
 
   return (
     <div className="view-inner rules">
       <div className="h1">Rules center</div>
       <div className="sub">Precedence: an approved ruling → campaign state → a campaign house rule → the official rulebooks → GM judgment. Source books stay local and are never published.</div>
       <div className="tabs" style={{ marginTop: 12 }} role="tablist">
-        {(["lookup", "browse", "house", "rulings", "books"] as const).map((t) => (
+        {(["house", "rulings", "books"] as const).map((t) => (
           <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
             {{ lookup: "Look up", browse: "Browse", house: `House rules ${house ? `(${house.length})` : ""}`,
                rulings: `Rulings ${rulings ? `(${rulings.length}${pending ? `, ${pending} to review` : ""})` : ""}`, books: `Rulebooks ${docs ? `(${docs.documents.length})` : ""}` }[t]}
           </button>
         ))}
       </div>
-      <div hidden={tab !== "lookup"}><LookupPanel cid={cid} q={q} setQ={setQ} onOpenPage={setPage} register={(fn) => { lookupRef.current = fn; }} /></div>
-      {tab === "browse" && <BrowsePanel onEntry={openEntry} onOpenPage={setPage} />}
       {tab === "house" && (house?.length ? house.map((h) => (
         <details key={h.id} className="card" style={{ marginBottom: 6 }}>
           <summary className="row" style={{ cursor: "pointer" }}>
@@ -86,130 +67,6 @@ export function RulesView({ cid }: { cid: number }) {
       {tab === "rulings" && <RulingsPanel cid={cid} rulings={rulings} onChanged={(r) => setRulings((all) => all?.map((x) => (x.id === r.id ? r : x)) ?? null)} />}
       {tab === "books" && docs && <BooksPanel docs={docs} onIndex={async (d) => { await api.indexRules(d); setDocs(await api.ruleDocs()); }} />}
       <RulePageDialog page={page} onClose={() => setPage(null)} />
-    </div>
-  );
-}
-
-function LookupPanel({ cid, q, setQ, onOpenPage, register }: { cid: number; q: string; setQ: (q: string) => void; onOpenPage: (p: { doc: number; page: number }) => void;
-  register: (fn: (q: string) => void) => void }) {
-  const [res, setRes] = useState<RuleLookup | null>(null);
-  const [full, setFull] = useState<{ campaign: (HouseRule & { score: number })[]; official: Passage[] } | null>(null);
-  const [sugg, setSugg] = useState<RuleSuggestion[]>([]);
-  const [showSugg, setShowSugg] = useState(false);
-  const [recent, setRecent] = useState<string[]>(loadRecent);
-  const [busy, setBusy] = useState(false);
-  const run = async (query: string) => {
-    if (query.trim().length < 2) return;
-    setShowSugg(false); setBusy(true); setFull(null);
-    try {
-      setRes(await api.ruleLookup(query.trim(), cid));
-      const next = [query.trim(), ...recent.filter((r) => r.toLowerCase() !== query.trim().toLowerCase())].slice(0, 8);
-      setRecent(next); saveRecent(next);
-    } finally { setBusy(false); }
-  };
-  register(run);
-  useEffect(() => {
-    if (q.trim().length < 2) { setSugg([]); return; }
-    const t = setTimeout(() => api.ruleSuggest(q.trim(), cid).then(setSugg).catch(() => setSugg([])), 150);
-    return () => clearTimeout(t);
-  }, [q, cid]);
-  return (
-    <>
-      <form className="rules-search" onSubmit={(e: FormEvent) => { e.preventDefault(); run(q); }}>
-        <Search size={16} color="var(--muted)" />
-        <input className="input" placeholder="A rule, skill, spell or situation: Stealth, Catcher, drowning, AI Favor reroll…" value={q} aria-label="Look up a rule"
-          onChange={(e) => { setQ(e.target.value); setShowSugg(true); }} onFocus={() => setShowSugg(true)} onBlur={() => setTimeout(() => setShowSugg(false), 150)} />
-        <button className="btn primary" disabled={busy}>Look up</button>
-        {showSugg && sugg.length > 0 && (
-          <ul className="rules-suggest" role="listbox">{sugg.map((s) => (
-            <li key={`${s.kind}-${s.label}`}><button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { setQ(s.label); run(s.label); }}>
-              {s.kind === "house_rule" ? <Gavel size={12} /> : <BookOpen size={12} />} <span className="grow">{s.label}</span>
-              <span className="muted">{s.kind === "house_rule" ? `house rule${s.section ? ` §${s.section}` : ""}` : s.ref?.replace(/^.*?—\s*/, "")}</span></button></li>))}
-          </ul>
-        )}
-      </form>
-      {recent.length > 0 && <div className="chips rules-recent"><History size={12} color="var(--muted)" />{recent.map((r) => <button key={r} className="chip" onClick={() => { setQ(r); run(r); }}>{r}</button>)}</div>}
-      {res && (
-        <div className="rules-answer">
-          <ol className="precedence" aria-label="Which rule governs">{res.precedence.map((l, i) => (
-            <li key={i} className={`layer-${l.layer}`}><span className="layer-tag">{LAYER_LABEL[l.layer]}</span>{l.says}</li>))}</ol>
-          <div className={`impl tone-${STATUS_TONE[res.implementation.status] ?? ""}`}>
-            <Chip tone={STATUS_TONE[res.implementation.status]}>{STATUS_LABEL[res.implementation.status] ?? res.implementation.status}</Chip>
-            <span>{res.implementation.gap ? res.implementation.gap : res.implementation.evidence}</span>
-            {res.implementation.gap && res.implementation.evidence && <span className="sub">Covered: {res.implementation.evidence}</span>}
-          </div>
-          {res.book.map((b) => (
-            <article key={b.ref} className="card rule-entry">
-              <div className="row"><b className="grow">{b.name}</b>{b.chapter && <span className="sub">{b.chapter}</span>}<Chip tone="cyan">{b.ref}</Chip>
-                <button className="btn small ghost" onClick={() => onOpenPage({ doc: b.document_id, page: b.page })}>Open page</button></div>
-              <div className="rule-text">{b.excerpt}</div>
-            </article>
-          ))}
-          {res.house_rules.map((h) => (
-            <article key={h.id} className="card rule-house">
-              <div className="row"><Gavel size={14} /><b className="grow">{h.section ? `§${h.section} ` : ""}{h.title}</b>{h.label && <Chip tone={LABEL_TONE[h.label]}>{h.label}</Chip>}
-                <Chip tone={STATUS_TONE[h.coverage.status]} title={h.coverage.evidence}>{STATUS_LABEL[h.coverage.status] ?? h.coverage.status}</Chip></div>
-              <div className="rule-text">{highlight(h.text.replace(/\*\*/g, ""), res.query)}</div>
-              {h.coverage.gap && <div className="sub" style={{ color: "var(--amber)" }}>Not yet enforced: {h.coverage.gap}</div>}
-            </article>
-          ))}
-          {res.rulings.map((r) => (
-            <article key={r.id} className="card">
-              <div className="row"><b className="grow">{r.topic}</b><Chip tone={LABEL_TONE[r.label]}>{r.label}</Chip><Chip tone={RULING_TONE[r.status]}>{r.status}</Chip></div>
-              <div className="rule-text">{r.ruling}</div>
-            </article>
-          ))}
-          {!res.book.length && !res.house_rules.length && !res.rulings.length && <Empty>No entry, house rule or ruling matches. Try the full-text search below.</Empty>}
-          <button className="link-btn" onClick={async () => setFull(await api.ruleSearch(res.query, cid))}>Search all rulebook text for "{res.query}" <ChevronRight size={12} /></button>
-          {full && (full.official.length ? full.official.map((p) => (
-            <div key={p.chunk_id} className="card" style={{ marginBottom: 8 }}>
-              <div className="row"><Chip tone="cyan">{p.ref}</Chip><span className="spacer" /><button className="btn small ghost" onClick={() => onOpenPage({ doc: p.document_id, page: p.page })}>Open page</button></div>
-              <div style={{ fontSize: 13.5, marginTop: 6, whiteSpace: "pre-wrap" }}>{highlight(p.text.slice(0, 700), res.query)}{p.text.length > 700 ? "…" : ""}</div>
-            </div>)) : <div className="muted">No passages matched.</div>)}
-        </div>
-      )}
-    </>
-  );
-}
-
-function BrowsePanel({ onEntry, onOpenPage }: { onEntry: (name: string) => void; onOpenPage: (p: { doc: number; page: number }) => void }) {
-  const [books, setBooks] = useState<RuleBrowse["books"] | null>(null);
-  const [book, setBook] = useState<number | null>(null);
-  const [data, setData] = useState<RuleBrowse | null>(null);
-  const [f, setF] = useState("");
-  useEffect(() => { api.ruleBrowse().then((r) => { setBooks(r.books ?? []); if (r.books?.length) setBook(r.books[0].id); }); }, []);
-  useEffect(() => { if (book != null) { setData(null); api.ruleBrowse(book).then(setData); } }, [book]);
-  if (!books) return <div className="muted">Loading…</div>;
-  if (!books.length) return <Empty>No rulebooks indexed (see the Rulebooks tab).</Empty>;
-  const entries = (data?.entries ?? []).filter((e) => !f || e.name.toLowerCase().includes(f.toLowerCase()));
-  const byChapter = entries.reduce<Record<string, typeof entries>>((m, e) => { (m[e.chapter ?? "Entries"] ??= []).push(e); return m; }, {});
-  return (
-    <div className="rules-browse">
-      <nav className="rb-books" aria-label="Rulebooks">{books.map((b) => (
-        <button key={b.id} className={book === b.id ? "active" : ""} onClick={() => setBook(b.id)}>{b.title}<span className="muted"> · {b.entry_count}</span></button>))}
-      </nav>
-      <div className="rb-main">
-        {!data ? <div className="muted">Loading…</div> : (
-          <>
-            {data.chapters && data.chapters.length > 0 && (
-              <details className="card" open={!f}>
-                <summary style={{ cursor: "pointer" }}><b>Contents</b></summary>
-                <ul className="rb-toc">{data.chapters.map((c) => (
-                  <li key={c.title}><button className="link-btn" onClick={() => onOpenPage({ doc: data.book!.id, page: c.page })}>{c.title} <span className="muted">p. {c.page}</span></button>
-                    {c.sections.length > 0 && <ul>{c.sections.map((s) => <li key={s.title + s.page}><button className="link-btn" onClick={() => onOpenPage({ doc: data.book!.id, page: s.page })}>{s.title} <span className="muted">p. {s.page}</span></button></li>)}</ul>}
-                  </li>))}
-                </ul>
-              </details>
-            )}
-            <div className="rules-search"><Search size={14} color="var(--muted)" /><input className="input" placeholder="Filter entries" value={f} onChange={(e) => setF(e.target.value)} aria-label="Filter entries" /></div>
-            {Object.entries(byChapter).map(([ch, list]) => (
-              <section key={ch}><div className="h2">{ch} <span className="muted">{list.length}</span></div>
-                <div className="rb-entries">{list.map((e) => <button key={e.name + e.page} className="chip" onClick={() => onEntry(e.name)} title={`p. ${e.page}`}>{e.name}</button>)}</div>
-              </section>
-            ))}
-          </>
-        )}
-      </div>
     </div>
   );
 }

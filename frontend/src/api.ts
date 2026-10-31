@@ -163,7 +163,6 @@ const post = <T,>(path: string, body?: unknown) => req<T>(path, { method: "POST"
 export const api = {
   health: () => req<{ provider: string; codex_cli: string | null; rulebook_index: boolean }>("api/health"),
   campaigns: () => req<CampaignListItem[]>("api/campaigns"),
-  achievements: (cid: number) => req<Achievements>(`api/campaigns/${cid}/achievements`),
   manageCampaigns: () => req<ManagedCampaign[]>("api/campaigns-manage"),
   createCampaign: (body: { name: string; crawler: string; race: string | null; class_name: string | null; floor: number; location: string | null; floor_hours: number | null; premise: string | null; clock_on_entry: boolean }) =>
     post<{ campaign_id: number }>("api/campaigns", body),
@@ -173,10 +172,8 @@ export const api = {
   characters: (id: number) => req<CharacterCard[]>(`api/campaigns/${id}/characters`),
   character: (id: number, cid: number) => req<CharacterSheet>(`api/campaigns/${id}/characters/${cid}`),
   dossier: (id: number, cid: number) => req<Record<string, unknown>>(`api/campaigns/${id}/characters/${cid}/dossier`),
-  explainAbilities: (id: number) => req<{ state: string; progress?: string; error?: string }>(`api/campaigns/${id}/abilities/explain`, { method: "POST" }),
   generateCharacter: (cid: number, charId: number) => post<{ state: string; error?: string }>(`api/campaigns/${cid}/characters/${charId}/generate`),
   generateStatus: (cid: number, charId: number) => req<{ state: string; error?: string }>(`api/campaigns/${cid}/characters/${charId}/generate`),
-  explainStatus: (id: number) => req<{ state: string; progress?: string; error?: string }>(`api/campaigns/${id}/abilities/explain`),
   inventory: (id: number) => req<Inventory>(`api/campaigns/${id}/inventory`),
   quests: (id: number) => req<Quest[]>(`api/campaigns/${id}/quests`),
   npcs: (id: number) => req<Person[]>(`api/campaigns/${id}/npcs`),
@@ -209,20 +206,8 @@ export const api = {
   rulePage: (doc: number, page: number) => req<{ document: string; page: number; page_count: number; text: string }>(`api/rules/page?document_id=${doc}&page=${page}`),
   ruleDocs: () => req<{ documents: { id: number; title: string; filename: string; page_count: number; chunks: number }[]; index_status: Record<string, any> }>("api/rules/documents"),
   indexRules: (directory?: string) => post<Record<string, any>>("api/rules/index", { directory }),
-  ruleLookup: (q: string, cid?: number) => req<RuleLookup>(`api/rules/lookup?q=${encodeURIComponent(q)}${cid ? `&cid=${cid}` : ""}`),
-  ruleSuggest: (q: string, cid?: number) => req<RuleSuggestion[]>(`api/rules/suggest?q=${encodeURIComponent(q)}${cid ? `&cid=${cid}` : ""}`),
-  ruleBrowse: (bookId?: number) => req<RuleBrowse>(`api/rules/browse${bookId ? `?book_id=${bookId}` : ""}`),
-  ruleCite: (ref: string) => req<{ document_id: number; page: number; document: string }>(`api/rules/cite?ref=${encodeURIComponent(ref)}`),
   settings: () => req<Prefs>("api/settings"),
   saveSettings: (p: Partial<Prefs>) => req<Prefs>("api/settings", { method: "PUT", body: JSON.stringify(p) }),
-  importLedger: (path?: string) => post<{ campaign_id: number | null; report: any }>("api/import", { path }),
-  importReports: () => req<{ id: number; campaign_id: number | null; source_path: string; created_at: string; report: any }[]>("api/import/reports"),
-  ledgerPreview: (id: number, fetch = true) => req<LedgerPreview>(`api/campaigns/${id}/ledger/preview?fetch=${fetch}`),
-  ledgerApply: (id: number, body: { fingerprint: string; selected: string[]; message: string; author_name: string; author_email: string; regenerate_checkpoint: boolean }) =>
-    post<{ commit: string; summary: { changes: number; files: string[]; skipped: number; conflicts: number }; checkpoint: string | null }>(`api/campaigns/${id}/ledger/apply`, body),
-  ledgerPull: (id: number) => post<LedgerPreview["status"]>(`api/campaigns/${id}/ledger/pull`),
-  ledgerPush: (id: number) => post<LedgerPreview["status"]>(`api/campaigns/${id}/ledger/push`),
-  ledgerHistory: (id: number) => req<{ id: number; base_commit: string; new_commit: string; summary: { changes: number; files: string[] }; created_at: string }[]>(`api/campaigns/${id}/ledger/history`),
   access: () => req<{ passcode: string; lan_addresses: string[]; path: string; port: number; fixed_by_env: boolean }>("api/access"),
   regeneratePasscode: () => post<{ passcode: string }>("api/access/regenerate"),
   manifest: () => req<Manifest>("api/assets/manifest"),
@@ -265,7 +250,6 @@ export const api = {
   gmRuntime: (token: string) => req<Record<string, any>>("api/gm/runtime", { headers: { "X-GM-Token": token } }),
   gmPromptCapture: (minutes: number, token: string) =>
     req<{ active: boolean; minutes: number }>("api/gm/runtime/prompt-capture", { method: "POST", headers: { "X-GM-Token": token, "Content-Type": "application/json" }, body: JSON.stringify({ minutes }) }),
-  makeDemo: () => post<{ campaign_id: number }>("api/campaigns/demo"),
   uploadPortrait: (id: number, cid: number, file: File) => {
     const fd = new FormData();
     fd.append("file", file);

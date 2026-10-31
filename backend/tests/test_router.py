@@ -28,7 +28,7 @@ def test_classify(text, kind):
 
 
 def test_any_turn_during_combat_goes_to_codex():
-    assert classify('"Surrender!" Cliff shouts at the goblin.', True) == ("action", "combat is active")
+    assert classify('"Surrender!" Cliff shouts at the goblin.', True) == ("action", "a story is active")
 
 
 def test_pacific_day_follows_us_dst():
@@ -88,7 +88,7 @@ def test_conversation_turn_escalates_to_codex_without_applying_anything(client, 
             seen["system"] = system
             if not any(s["kind"] == "tool_results" for s in steps):
                 return ProviderResponse([ToolCall("gm_note", {"subject": "probe", "content": "should be discarded"})], None)
-            return ProviderResponse([ToolCall("apply_changes", {"changes": [{"op": "hp", "character": "player", "delta": -3}]})], "Ouch.")
+            return ProviderResponse([ToolCall("apply_changes", {"changes": [{"op": "add_item", "character": "player", "name": "Cursed Locket"}]})], "Ouch.")
 
     class Cdx(MockProvider):
         def complete(self, system, steps, tools, *, job_label):
@@ -96,16 +96,15 @@ def test_conversation_turn_escalates_to_codex_without_applying_anything(client, 
             return ProviderResponse([], "Codex resolves it properly.")
 
     client.app_state.turns = TurnService(settings, lambda: FakeAuto(Gem(), Cdx()), run_async=False)
-    hp0 = next(p for p in client.get(f"/api/campaigns/{demo_id}").json()["party"] if p["slug"] == "juniper")["hp_current"]
     body = client.post(f"/api/campaigns/{demo_id}/turns", json={"text": '"Hi," Juniper says.', "idempotency_key": uuid.uuid4().hex}).json()
     assert body["status"] == "completed" and body["result"]["narration"] == "Codex resolves it properly."
-    assert "skill_check" not in seen["tools"] and "escalate" in seen["tools"] and "CONVERSATION MODE" in seen["system"]
-    assert "skill_check" in seen["codex_tools"]
+    assert "save_game" not in seen["tools"] and "escalate" in seen["tools"] and "CONVERSATION MODE" in seen["system"]
+    assert "save_game" in seen["codex_tools"]
     c = connect(settings.campaign_db)
     assert not rows(c, "SELECT id FROM gm_secrets WHERE subject = 'probe'")  # the Gemini round's note was never committed
-    assert next(p for p in client.get(f"/api/campaigns/{demo_id}").json()["party"] if p["slug"] == "juniper")["hp_current"] == hp0
+    assert not rows(c, "SELECT id FROM items WHERE name = 'Cursed Locket'")
     usage = one(c, "SELECT usage_json FROM turn_diagnostics WHERE turn_id = ?", (body["turn_id"],))["usage"]
-    assert usage["route"]["escalated_from"] == "gemini-3.8-flash" and "hp" in usage["route"]["escalation_reason"]
+    assert usage["route"]["escalated_from"] == "gemini-3.8-flash" and "add_item" in usage["route"]["escalation_reason"]
 
 
 def test_conversation_turn_that_stays_conversation_commits_on_gemini(client, settings, demo_id):

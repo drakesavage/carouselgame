@@ -5,7 +5,7 @@ against current state, applied inside the caller's transaction, and recorded as 
 Invalid requests raise ChangeError and change nothing, and the GM is told why.
 
 Extension point: add a new op by writing a pydantic model + an `_apply_<op>` function and registering it
-in CHANGE_OPS. Combat, crafting and leveling rules should land here as further ops, not in prompts.
+in CHANGE_OPS. Carousel rules (tickets, Plot Armor, story phases, fate) land here as further ops, not in prompts.
 """
 from __future__ import annotations
 
@@ -24,18 +24,6 @@ class ChangeError(ValueError):
 
 
 # ---------------------------------------------------------------- op models
-class HpChange(BaseModel):
-    op: Literal["hp"]
-    character: str
-    delta: int = Field(ge=-10000, le=10000)
-    cause: str | None = None
-
-
-class ManaChange(BaseModel):
-    op: Literal["mana"]
-    character: str
-    delta: int = Field(ge=-10000, le=10000)
-    cause: str | None = None
 
 
 class AddItem(BaseModel):
@@ -138,26 +126,7 @@ class NpcAttitude(BaseModel):
     note: str | None = None
 
 
-class Achievement(BaseModel):
-    op: Literal["achievement"]
-    character: str | None = None
-    title: str = Field(min_length=1, max_length=160)
-    description: str | None = None
-    reward: str | None = Field(default=None, max_length=400)   # the Reward line: a box, a perk, or the joke ("Bitches don't get rewards.")
-    box: str | None = Field(default=None, max_length=80)       # a loot box granted, e.g. "Silver Adventurer Box" (an unopened item)
-    also: list[str] = Field(default_factory=list)              # companions who earn the same achievement (each gets their own box)
-
-
 BOX_TIERS = ("Bronze", "Silver", "Gold", "Platinum", "Legendary", "Celestial")
-
-
-class OpenBox(BaseModel):
-    """Open a loot box. Boxes are opened in a saferoom (Par for the Course p. 27; Atlas p. 27); add the contents with
-    add_item in the same apply_changes."""
-    op: Literal["open_box"]
-    character: str
-    box: str | None = None        # the box's name, or
-    item_id: int | None = None
 
 
 class RecordFact(BaseModel):
@@ -166,23 +135,6 @@ class RecordFact(BaseModel):
     fact: str
     certainty: Literal["canonical", "uncertain", "provisional"] = "canonical"
     visibility: Literal["player", "gm"] = "player"
-
-
-class Encounter(BaseModel):
-    op: Literal["encounter"]
-    action: Literal["start", "update", "end"]
-    name: str
-    round: int | None = Field(default=None, ge=1)
-    summary: str | None = None
-    combatants: list[dict[str, Any]] | None = None
-
-
-class AllocateStats(BaseModel):
-    op: Literal["allocate_stats"]
-    character: str
-    stat: Literal["strength", "intelligence", "constitution", "dexterity", "charisma"]
-    points: int = Field(ge=1, le=60)
-    new_modifier: int | None = Field(default=None, ge=-10, le=30)  # from the rulebook's table; never guessed
 
 
 class NpcUpsert(BaseModel):
@@ -203,27 +155,6 @@ class NpcUpsert(BaseModel):
     attitude: int | None = Field(default=None, ge=-3, le=3)        # only when first recorded; later shifts use npc_attitude
     crawler: bool | None = None     # true once they have entered the Dungeon as a crawler (they get crawler rules, achievements, boxes)
     in_party: bool | None = None    # true when they travel and fight with the player character's party
-
-
-class InitializeSheet(BaseModel):
-    """Character creation: a crawler's starting stats, Health Bar and Mana, once, before any are recorded."""
-    op: Literal["initialize_sheet"]
-    character: str
-    stats: dict[Literal["strength", "intelligence", "constitution", "dexterity", "charisma"], int]
-    modifiers: dict[Literal["strength", "intelligence", "constitution", "dexterity", "charisma"], int]  # from the rulebook table
-    health_slots: int = Field(ge=1, le=50)
-    health_per_slot: int = Field(ge=1, le=50)
-    mana_max: int = Field(ge=0, le=500)
-    level: int = Field(default=1, ge=1, le=60)
-    race: str | None = Field(default=None, max_length=60)
-    source: str = Field(min_length=3, max_length=200)                # book and page, or the rolls this came from
-
-
-class StartFloorClock(BaseModel):
-    """A floor clock set to wait (new campaign option) starts when the player character enters the Dungeon."""
-    op: Literal["start_floor_clock"]
-    elapsed_minutes: int = Field(default=0, ge=0, le=600)   # minutes since the entry, when it happened earlier this turn
-    reason: str = Field(min_length=3, max_length=200)
 
 
 class SetQuantity(BaseModel):
@@ -305,33 +236,6 @@ class Ctx:
 
 
 # ---------------------------------------------------------------- appliers
-def _resource(ctx: Ctx, op: HpChange | ManaChange, field: str, label: str) -> dict:
-    c = resolve_character(ctx.conn, ctx.campaign_id, op.character)
-    cur, mx = c[f"{field}_current"], c[f"{field}_max"]
-    if cur is None:
-        raise ChangeError(f"{c['name']} has no recorded {label}; it must be established before it can change")
-    if op.delta < 0 and field == "mana" and cur + op.delta < 0:
-        raise ChangeError(f"{c['name']} has only {cur} mana; cannot spend {-op.delta}")
-    new = max(0, cur + op.delta)
-    if mx is not None:
-        new = min(new, mx)
-    ctx.conn.execute(f"UPDATE characters SET {field}_current = ? WHERE id = ?", (new, c["id"]))
-    word = "gains" if new >= cur else "loses"
-    summary = f"{c['name']} {word} {abs(new - cur)} {label} ({cur} → {new}{'/' + str(mx) if mx else ''})"
-    if op.cause:
-        summary += f" — {op.cause}"
-    ctx.event(f"{field}_changed", summary, {"character_id": c["id"], "before": cur, "after": new, "requested_delta": op.delta})
-    if field == "hp" and new == 0:
-        ctx.event("character_down", f"{c['name']} is at 0 HP", {"character_id": c["id"]})
-    return {"summary": summary, "character_id": c["id"], "before": cur, "after": new}
-
-
-def _apply_hp(ctx: Ctx, op: HpChange) -> dict:
-    return _resource(ctx, op, "hp", "HP")
-
-
-def _apply_mana(ctx: Ctx, op: ManaChange) -> dict:
-    return _resource(ctx, op, "mana", "mana")
 
 
 def _unreserved(ctx: Ctx, name: str) -> None:
@@ -446,12 +350,7 @@ def _apply_remove_status(ctx: Ctx, op: RemoveStatus) -> dict:
 
 
 def _apply_advance_time(ctx: Ctx, op: AdvanceTime) -> dict:
-    if ctx.turn_id is not None and one(ctx.conn, "SELECT 1 AS x FROM events WHERE campaign_id = ? AND turn_id = ? AND type = 'rest' AND rolled_back = 0",
-                                       (ctx.campaign_id, ctx.turn_id)):
-        from .state_ops import REST_WORDS
-        if REST_WORDS.search(op.reason):
-            raise ChangeError("the rest op already advanced the clock for this rest; do not add its hours again")
-    camp = one(ctx.conn, "SELECT game_time_minutes, floor_deadline_minutes FROM campaigns WHERE id = ?", (ctx.campaign_id,))
+    camp = one(ctx.conn, "SELECT game_time_minutes FROM campaigns WHERE id = ?", (ctx.campaign_id,))
     before = camp["game_time_minutes"]
     after = before + op.minutes
     ctx.conn.execute("UPDATE campaigns SET game_time_minutes = ?, updated_at = ? WHERE id = ?", (after, now_iso(), ctx.campaign_id))
@@ -465,20 +364,7 @@ def _apply_advance_time(ctx: Ctx, op: AdvanceTime) -> dict:
     ctx.event("time_advanced", summary, {"before": before, "after": after, "expired_statuses": [f"{s['who']}: {s['name']}" for s in expired]})
     for s in expired:
         ctx.event("status_expired", f"{s['who']}'s {s['name']} wears off", {"status": s["name"]})
-    deadline = camp["floor_deadline_minutes"]
-    if deadline is not None and before < deadline <= after:
-        ctx.event("floor_collapse", "THE FLOOR TIMER HAS EXPIRED", {"deadline": deadline})
-    from .state_ops import apply_mending, reset_uses
-    day_len = one(ctx.conn, "SELECT day_length_minutes FROM campaigns WHERE id = ?", (ctx.campaign_id,))["day_length_minutes"] or 1800
-    if before // day_len != after // day_len:
-        reset_uses(ctx, ("day",))
-        ctx.event("dungeon_day", f"Dungeon day {after // day_len + 1} begins (daily abilities and grinding limits reset)", {"day": after // day_len + 1})
-    mended = apply_mending(ctx, op.mending, op.minutes // 60) if op.mending else []
-    for line in mended:
-        ctx.event("mending", line, {})
-    return {"summary": summary + (f"; mending: {'; '.join(mended)}" if mended else ""), "game_time_minutes": after,
-            "remaining_minutes": None if deadline is None else max(0, deadline - after)}
-
+    return {"summary": summary, "game_time_minutes": after}
 
 def _apply_set_location(ctx: Ctx, op: SetLocation) -> dict:
     camp = one(ctx.conn, "SELECT current_floor FROM campaigns WHERE id = ?", (ctx.campaign_id,))
@@ -574,57 +460,6 @@ def _apply_npc_attitude(ctx: Ctx, op: NpcAttitude) -> dict:
     return {"summary": summary}
 
 
-def _apply_achievement(ctx: Ctx, op: Achievement) -> dict:
-    box = (op.box or "").strip()
-    if box and not box.lower().endswith("box"):
-        raise ChangeError(f"a loot box is named like 'Silver Adventurer Box', not {box!r}")
-    tier = next((t for t in BOX_TIERS if box.lower().startswith(t.lower())), None)
-    if box and not tier:
-        raise ChangeError(f"a loot box name starts with its tier ({', '.join(BOX_TIERS)}): {box!r}")
-    lines = []
-    for ref in [op.character or "player", *op.also]:
-        c = resolve_character(ctx.conn, ctx.campaign_id, ref)
-        if any(r["character_id"] == c["id"] for r in rows(ctx.conn, "SELECT character_id FROM achievements WHERE campaign_id = ? AND title = ?",
-                                                              (ctx.campaign_id, op.title))):
-            raise ChangeError(f"{c['name']} already has the achievement {op.title!r}; rewards are not duplicated")
-        item_id = None
-        if box:
-            item_id = ctx.conn.execute(
-                "INSERT INTO items (campaign_id, owner_character_id, name, quantity, description, rarity, properties_json) VALUES (?,?,?,?,?,?,?)",
-                (ctx.campaign_id, c["id"], box, 1, f"Unopened. Reward for the achievement {op.title}. Open it in a saferoom.", tier,
-                 json.dumps({"loot_box": True, "tier": tier, "from_achievement": op.title, "opened": False}))).lastrowid
-        ctx.conn.execute(
-            """INSERT INTO achievements (campaign_id, character_id, title, description, reward, box_item_id, game_time_minutes, created_at)
-               VALUES (?,?,?,?,?,?,?,?)""",
-            (ctx.campaign_id, c["id"], op.title, op.description, op.reward or (f"You've received a {box}!" if box else None), item_id,
-             ctx.game_time(), now_iso()))
-        summary = f"New Achievement! {op.title} ({c['name']})" + (f" — {box}" if box else "")
-        ctx.event("achievement", summary, {"character_id": c["id"], "title": op.title, "description": op.description, "box": box or None})
-        lines.append(summary)
-    return {"summary": "; ".join(lines)}
-
-
-def _apply_open_box(ctx: Ctx, op: OpenBox) -> dict:
-    c = resolve_character(ctx.conn, ctx.campaign_id, op.character)
-    camp = one(ctx.conn, "SELECT safe_room, current_location FROM campaigns WHERE id = ?", (ctx.campaign_id,))
-    if not camp["safe_room"]:
-        raise ChangeError("loot boxes are opened in a saferoom (Par for the Course p. 27); this location is not one")
-    if op.item_id:
-        item = _item_by_id(ctx, op.item_id, c)
-    elif op.box:
-        item = _find_item(ctx.conn, ctx.campaign_id, c["id"], op.box)
-    else:
-        raise ChangeError("name the box or give its item_id")
-    props = (item or {}).get("properties") or {}
-    if not item or not props.get("loot_box") or props.get("opened") or not item["quantity"]:
-        raise ChangeError(f"{c['name']} has no unopened loot box matching {op.box or op.item_id!r}")
-    props["opened"] = True
-    ctx.conn.execute("UPDATE items SET quantity = 0, properties_json = ? WHERE id = ?", (json.dumps(props), item["id"]))
-    summary = f"{c['name']} opens the {item['name']}"
-    ctx.event("box_opened", summary, {"character_id": c["id"], "item_id": item["id"], "box": item["name"]})
-    return {"summary": summary, "note": "add the contents with add_item in this same apply_changes"}
-
-
 def _apply_fact(ctx: Ctx, op: RecordFact) -> dict:
     ctx.conn.execute(
         "INSERT INTO lore_facts (campaign_id, subject, fact, certainty, visibility, source, created_at) VALUES (?,?,?,?,?,?,?)",
@@ -633,51 +468,6 @@ def _apply_fact(ctx: Ctx, op: RecordFact) -> dict:
     summary = f"Recorded {op.certainty} fact about {op.subject}"
     ctx.event("fact_recorded", summary, {"subject": op.subject}, visibility=op.visibility)
     return {"summary": summary, "visibility": op.visibility}
-
-
-def _apply_encounter(ctx: Ctx, op: Encounter) -> dict:
-    enc = one(ctx.conn, "SELECT * FROM encounters WHERE campaign_id = ? AND status = 'active' AND lower(name) = lower(?)",
-              (ctx.campaign_id, op.name))
-    if op.action == "start":
-        if enc:
-            raise ChangeError(f"encounter {op.name!r} is already active")
-        ctx.conn.execute("INSERT INTO encounters (campaign_id, name, round, summary, combatants_json) VALUES (?,?,?,?,?)",
-                         (ctx.campaign_id, op.name, op.round or 1, op.summary, json.dumps(op.combatants or [])))
-        summary = f"Encounter begins: {op.name}"
-    else:
-        if not enc:
-            raise ChangeError(f"no active encounter named {op.name!r}")
-        ctx.conn.execute(
-            "UPDATE encounters SET status = ?, round = COALESCE(?, round), summary = COALESCE(?, summary), combatants_json = COALESCE(?, combatants_json) WHERE id = ?",
-            ("resolved" if op.action == "end" else "active", op.round, op.summary,
-             json.dumps(op.combatants) if op.combatants is not None else None, enc["id"]),
-        )
-        summary = f"Encounter {'ends' if op.action == 'end' else 'updated'}: {op.name}"
-    ctx.event("encounter_" + op.action, summary, op.model_dump(exclude={"op"}))
-    return {"summary": summary}
-
-
-def _apply_allocate_stats(ctx: Ctx, op: AllocateStats) -> dict:
-    c = resolve_character(ctx.conn, ctx.campaign_id, op.character)
-    derived = c.get("derived") or {}
-    bank = derived.get("unallocated_stat_points") or 0
-    if op.points > bank:
-        raise ChangeError(f"{c['name']} has only {bank} unallocated Stat points")
-    st = c.get("stats") or {}
-    stats, mods = dict(st.get("stats") or {}), dict(st.get("modifiers") or {})
-    if stats.get(op.stat) is None:
-        raise ChangeError(f"{c['name']} has no recorded {op.stat}")
-    before = stats[op.stat]
-    stats[op.stat] = before + op.points
-    if op.new_modifier is not None:
-        mods[op.stat] = op.new_modifier
-    derived["unallocated_stat_points"] = bank - op.points
-    st.update({"stats": stats, "modifiers": mods})
-    ctx.conn.execute("UPDATE characters SET stats_json = ?, derived_json = ? WHERE id = ?", (json.dumps(st), json.dumps(derived), c["id"]))
-    summary = (f"{c['name']} assigns {op.points} Stat point{'s' if op.points != 1 else ''} to {op.stat.title()} ({before} → {stats[op.stat]}); "
-               + (f"modifier now {mods[op.stat]:+d}" if op.new_modifier is not None else "modifier unchanged — verify against the rulebook table"))
-    ctx.event("stats_allocated", summary, {"character_id": c["id"], "stat": op.stat, "before": before, "after": stats[op.stat]})
-    return {"summary": summary}
 
 
 def _apply_npc(ctx: Ctx, op: NpcUpsert) -> dict:
@@ -733,43 +523,6 @@ def _apply_npc(ctx: Ctx, op: NpcUpsert) -> dict:
     return {"summary": summary, "character_id": c["id"]}
 
 
-def _apply_initialize_sheet(ctx: Ctx, op: InitializeSheet) -> dict:
-    c = resolve_character(ctx.conn, ctx.campaign_id, op.character)
-    have = (c.get("stats") or {}).get("stats") or {}
-    if have or c["hp_max"] is not None:
-        raise ChangeError(f"{c['name']} already has recorded stats or Health; later changes go through allocate_stats, hp and mana")
-    keys = {"strength", "intelligence", "constitution", "dexterity", "charisma"}
-    if set(op.stats) != keys or set(op.modifiers) != keys:
-        raise ChangeError("stats and modifiers must each give all five stats")
-    hp = op.health_slots * op.health_per_slot
-    derived = c.get("derived") or {}
-    derived.update({"health_bar": {"slots": op.health_slots, "health_per_slot": op.health_per_slot}, "unallocated_stat_points": 0})
-    st = {"stats": dict(op.stats), "modifiers": dict(op.modifiers), "unenhanced": dict(op.stats)}
-    ctx.conn.execute("""UPDATE characters SET stats_json = ?, derived_json = ?, hp_current = ?, hp_max = ?, mana_current = ?, mana_max = ?,
-                        level = COALESCE(level, ?), race = COALESCE(?, race), species = COALESCE(?, species) WHERE id = ?""",
-                     (json.dumps(st), json.dumps(derived), hp, hp, op.mana_max, op.mana_max, op.level, op.race, op.race, c["id"]))
-    line = ", ".join(f"{k[:3].upper()} {op.stats[k]} ({op.modifiers[k]:+d})" for k in ("strength", "intelligence", "constitution", "dexterity", "charisma"))
-    summary = f"{c['name']}'s sheet is set: {line}; Health {hp} ({op.health_slots}×{op.health_per_slot}); Mana {op.mana_max} — {op.source}"
-    ctx.event("sheet_initialized", summary, {"character_id": c["id"], **op.model_dump(exclude={"op", "character"})})
-    return {"summary": summary}
-
-
-def _apply_start_floor_clock(ctx: Ctx, op: StartFloorClock) -> dict:
-    camp = one(ctx.conn, "SELECT game_time_minutes, floor_deadline_minutes, floor_clock_pending_minutes FROM campaigns WHERE id = ?", (ctx.campaign_id,))
-    if camp["floor_deadline_minutes"] is not None:
-        raise ChangeError("the floor clock is already running")
-    pending = camp["floor_clock_pending_minutes"]
-    if not pending:
-        raise ChangeError("this campaign has no floor clock waiting to start")
-    deadline = camp["game_time_minutes"] - op.elapsed_minutes + pending
-    ctx.conn.execute("UPDATE campaigns SET floor_deadline_minutes = ?, floor_clock_pending_minutes = NULL, updated_at = ? WHERE id = ?",
-                     (deadline, now_iso(), ctx.campaign_id))
-    left = deadline - camp["game_time_minutes"]
-    summary = f"The floor clock starts: {left // 60}h{left % 60:02d}m until collapse — {op.reason}"
-    ctx.event("floor_clock_started", summary, {"deadline": deadline, "length": pending, "elapsed": op.elapsed_minutes})
-    return {"summary": summary, "remaining_minutes": left}
-
-
 def _apply_set_quantity(ctx: Ctx, op: SetQuantity) -> dict:
     owner = resolve_character(ctx.conn, ctx.campaign_id, op.character, allow_shared=True)
     item = _item_by_id(ctx, op.item_id, owner) if op.item_id else _find_item(ctx.conn, ctx.campaign_id, owner["id"] if owner else None, op.name)
@@ -786,35 +539,16 @@ def _apply_clock(ctx: Ctx, op: ClockChange) -> dict:
     clock = one(ctx.conn, "SELECT * FROM clocks WHERE campaign_id = ? AND key = ?", (ctx.campaign_id, op.key))
     if not clock:
         raise ChangeError(f"no clock {op.key!r}")
-    audit: dict = {}
-    if clock["kind"] == "advancement_checkpoint" and op.delta > 0 and ctx.turn_id is not None:
-        # the server decides which turns earn a cycle (rules/advancement.py; playtest 1, H2)
-        from .advancement import eligibility, encounter_for_cycle
-        if op.delta != 1:
-            raise ChangeError("one decision earns one cycle: count cycles one at a time")
-        ok, why, qualifying = eligibility(ctx.conn, ctx.campaign_id, ctx.turn_id)
-        if not ok:
-            raise ChangeError(f"no advancement cycle: {why}")
-        words = (one(ctx.conn, "SELECT player_input FROM turns WHERE id = ?", (ctx.turn_id,)) or {}).get("player_input") or ""
-        audit = {"player_input": words[:300], "qualifying_events": [e["id"] for e in qualifying],
-                 "qualifying": [f"{e['type']}: {e['summary'][:80]}" for e in qualifying], "encounter_id": encounter_for_cycle(ctx.conn, ctx.campaign_id, ctx.turn_id)}
     new = max(0, clock["current"] + op.delta)
-    # Advancement cycles carry overflow past the checkpoint (CAMPAIGN 14.3); other clocks clamp.
-    if clock["maximum"] is not None and clock["kind"] != "advancement_checkpoint":
+    if clock["maximum"] is not None:
         new = min(new, clock["maximum"])
     ctx.conn.execute("UPDATE clocks SET current = ? WHERE id = ?", (new, clock["id"]))
-    if clock["kind"] == "advancement_checkpoint" and clock["maximum"] and clock["current"] < clock["maximum"] <= new:
-        ctx.event("advancement_checkpoint_pending",
-                  f"{clock['label']} reached {new}/{clock['maximum']} — resolve at the next saferoom, debrief, save point or floor transition",
-                  {"key": op.key})
     summary = f"{clock['label']}: {clock['current']} → {new}" + (f"/{clock['maximum']}" if clock["maximum"] else "") + f" — {op.reason}"
-    ctx.event("clock_changed", summary, {"key": op.key, "before": clock["current"], "after": new, **audit}, visibility=clock["visibility"])
+    ctx.event("clock_changed", summary, {"key": op.key, "before": clock["current"], "after": new}, visibility=clock["visibility"])
     return {"summary": summary, "visibility": clock["visibility"]}
 
 
 CHANGE_OPS: dict[str, tuple[type[BaseModel], Callable[[Ctx, Any], dict]]] = {
-    "hp": (HpChange, _apply_hp),
-    "mana": (ManaChange, _apply_mana),
     "add_item": (AddItem, _apply_add_item),
     "remove_item": (RemoveItem, _apply_remove_item),
     "transfer_item": (TransferItem, _apply_transfer_item),
@@ -825,15 +559,9 @@ CHANGE_OPS: dict[str, tuple[type[BaseModel], Callable[[Ctx, Any], dict]]] = {
     "set_location": (SetLocation, _apply_set_location),
     "quest": (QuestUpsert, _apply_quest),
     "npc_attitude": (NpcAttitude, _apply_npc_attitude),
-    "achievement": (Achievement, _apply_achievement),
-    "open_box": (OpenBox, _apply_open_box),
     "fact": (RecordFact, _apply_fact),
-    # "encounter" (narrative-only) is superseded by rules/combat.py and the combat_* GM tools
     "set_quantity": (SetQuantity, _apply_set_quantity),
-    "allocate_stats": (AllocateStats, _apply_allocate_stats),
-    "initialize_sheet": (InitializeSheet, _apply_initialize_sheet),
     "npc": (NpcUpsert, _apply_npc),
-    "start_floor_clock": (StartFloorClock, _apply_start_floor_clock),
     "clock": (ClockChange, _apply_clock),
 }
 
