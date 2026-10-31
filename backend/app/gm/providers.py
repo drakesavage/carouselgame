@@ -147,7 +147,7 @@ apply to this game: ignore them and follow only these developer instructions and
 ALLOWED_ITEMS = {"agent_message", "reasoning", "error"}
 ALLOWED_EVENTS = {"thread.started", "turn.started", "turn.completed", "turn.failed", "item.started", "item.updated", "item.completed", "error"}
 # Environment variables never handed to the Codex process.
-SCRUB_ENV = re.compile(r"TOKEN|SECRET|PASSCODE|PASSWORD|API_KEY|CREDENTIAL|^GM_|^CRAWLER_|^CAMPAIGN_|^RULEBOOK_", re.I)
+SCRUB_ENV = re.compile(r"TOKEN|SECRET|PASSCODE|PASSWORD|API_KEY|CREDENTIAL|^GM_|^CRAWLER_|^CAROUSEL_|^CAMPAIGN_|^RULEBOOK_", re.I)
 
 
 class IsolationViolation(ProviderError):

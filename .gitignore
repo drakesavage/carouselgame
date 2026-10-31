@@ -16,3 +16,4 @@ story history/
 frontend/*.tsbuildinfo
 # API keys for optional providers
 gemini_api_key.txt
+.superpowers/

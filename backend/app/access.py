@@ -49,13 +49,13 @@ class AccessGate:
 
     # -- secrets
     def passcode(self) -> str:
-        if os.environ.get("CRAWLER_PASSCODE"):
-            return os.environ["CRAWLER_PASSCODE"].strip()
+        if os.environ.get("CAROUSEL_PASSCODE"):
+            return os.environ["CAROUSEL_PASSCODE"].strip()
         return _read_or_create(self.data_dir / "access_passcode.txt", new_passcode)
 
     def regenerate(self) -> str:
-        if os.environ.get("CRAWLER_PASSCODE"):
-            raise ValueError("the passcode is fixed by CRAWLER_PASSCODE in .env; change it there")
+        if os.environ.get("CAROUSEL_PASSCODE"):
+            raise ValueError("the passcode is fixed by CAROUSEL_PASSCODE in .env; change it there")
         (self.data_dir / "access_passcode.txt").write_text(new_passcode(), encoding="utf-8")
         return self.passcode()
 

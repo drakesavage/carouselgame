@@ -1,4 +1,4 @@
-"""Runtime configuration. Everything comes from environment variables (optionally a local .env file).
+"""Carousel runtime configuration. Everything comes from environment variables (optionally a local .env file).
 
 The runtime GM runs through the Codex CLI (`codex exec`, signed in with the user's ChatGPT account),
 so no paid API key is needed. "mock" runs a scripted GM for development and tests.
@@ -51,7 +51,10 @@ def resolve_codex_bin() -> str | None:
 
 @dataclass
 class Settings:
-    data_dir: Path = field(default_factory=lambda: Path(os.environ.get("CRAWLER_DATA_DIR", ROOT_DIR / "data")))
+    data_dir: Path = field(default_factory=lambda: Path(os.environ.get("CAROUSEL_DATA_DIR", ROOT_DIR / "data")))
+    # Carousel source packages (read-only to the game; see carousel/sources.py).
+    source_dir: Path = field(default_factory=lambda: Path(os.environ.get("CAROUSEL_SOURCE_DIR", r"E:\Carousel")))
+    port: int = field(default_factory=lambda: int(os.environ.get("CAROUSEL_PORT", "8797")))
     rulebook_dir: Path | None = field(
         default_factory=lambda: Path(os.environ["RULEBOOK_DIR"]) if os.environ.get("RULEBOOK_DIR") else None
     )
@@ -81,6 +84,11 @@ class Settings:
     @property
     def campaign_db(self) -> Path:
         return self.data_dir / "campaign.db"
+
+    @property
+    def reference_db(self) -> Path:
+        """Carousel reference data imported from source_dir; disposable and rebuildable (carousel/importer.py)."""
+        return self.data_dir / "reference.db"
 
     @property
     def rulebook_db(self) -> Path:

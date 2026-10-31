@@ -231,7 +231,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         c.close()
         yield
 
-    app = FastAPI(title="Crawler Console", lifespan=lifespan)
+    app = FastAPI(title="Carousel", lifespan=lifespan)
     app.state.crawler = state
     app.state.gate = gate
 
@@ -282,7 +282,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     @app.get("/api/access")
     def access_info(_=Depends(local_only)):
         return {"passcode": gate.passcode(), "lan_addresses": lan_addresses(), "path": "/dcc/", "port": 8787,
-                "fixed_by_env": bool(os.environ.get("CRAWLER_PASSCODE"))}
+                "fixed_by_env": bool(os.environ.get("CAROUSEL_PASSCODE"))}
 
     @app.post("/api/access/regenerate")
     def access_regenerate(_=Depends(local_only)):
