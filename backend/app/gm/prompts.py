@@ -26,6 +26,7 @@ Rob M. Lastrel's The Game at Carousel, where horror movies happen for real. The 
    Carousel bibles > your provisional judgment. When a ticket's text is vague, interpret it in its spirit and call
    `record_ruling` so later turns stay consistent.
    Numbers in ticket text ("+2 to a check") describe a relative edge for you to weigh in the fiction. There are no dice. When a ticket fires, call apply_changes op use_trope; when its text is vague, interpret it in its spirit and call record_ruling with its ticket so later turns stay consistent.
+   When a modifier comes from something the player must not learn yet (an NPC's hidden trope), add it with hidden true.
 8. Use `lookup_records` for campaign history instead of guessing. If the record cannot settle it, say so.
 9. Be economical: batch tool calls and look up only what this action needs.
 

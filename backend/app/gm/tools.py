@@ -219,7 +219,10 @@ class ToolRunner:
                 raise ValueError(f"no such ticket {r.ticket!r} in the reference data")
         self.conn.execute("INSERT INTO rulings (campaign_id, turn_id, topic, ruling, certainty, label, sources_json, ticket_ref, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
                           (self.cid, self.turn_id, r.topic, r.ruling, r.certainty, label, json.dumps(r.sources), r.ticket, now_iso()))
-        self.effects.changes.append(f"Ruling recorded ({label}): {r.topic}")
+        secret = r.ticket and one(self.conn, "SELECT 1 AS x FROM character_tickets WHERE campaign_id = ? AND ticket_ref = ? AND hidden = 1",
+                                  (self.cid, r.ticket))
+        if not secret:  # a ruling on a hidden trope stays GM-only until the trope is revealed (memory/rulings.py)
+            self.effects.changes.append(f"Ruling recorded ({label}): {r.topic}")
         return {"recorded": True}
 
     def t_suggest_image(self, a: dict) -> dict:

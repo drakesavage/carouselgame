@@ -11,7 +11,9 @@ REFERENCE_COLUMNS: dict[str, tuple[str, str]] = {"place": ("locations", "ref_id"
 
 def referenced_ids(campaign_conn: sqlite3.Connection) -> dict[str, set[str]]:
     """IDs in live state and in every save point (restoring a save must not bring back an ID the import dropped)."""
-    out = {kind: {r[0] for r in campaign_conn.execute(f"SELECT DISTINCT {col} FROM {table} WHERE {col} IS NOT NULL")}
+    def has(table: str, col: str) -> bool:   # a campaign.db from before a phase lacks that phase's tables (it gains them on next server start)
+        return any(r[1] == col for r in campaign_conn.execute(f"PRAGMA table_info({table})"))
+    out = {kind: {r[0] for r in campaign_conn.execute(f"SELECT DISTINCT {col} FROM {table} WHERE {col} IS NOT NULL")} if has(table, col) else set()
            for kind, (table, col) in REFERENCE_COLUMNS.items()}
     for (snap,) in campaign_conn.execute("SELECT snapshot_json FROM save_points"):
         tables = json.loads(snap)

@@ -53,7 +53,7 @@ def character_card(conn: sqlite3.Connection, c: dict) -> dict:
     c["life"] = life_state(c)
     c["statuses"] = _statuses(conn, c["id"])
     from ..carousel.sheet import sheet
-    c["stats"] = sheet(conn, c["id"])   # Carousel stats and Plot Armor; c["sheet"] is the decoded sheet_json
+    c["stats"] = sheet(conn, c["id"], show_hidden=False)   # Carousel stats and Plot Armor; c["sheet"] is the decoded sheet_json
     c["tickets"] = visible_tickets(conn, c["id"])
     c["equipped"] = rows(conn, "SELECT id, name, slot FROM items WHERE owner_character_id = ? AND equipped = 1 ORDER BY id", (c["id"],))
     return c

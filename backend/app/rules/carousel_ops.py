@@ -33,6 +33,7 @@ class AddModifier(BaseModel):
     value: float
     source: str = Field(min_length=1, max_length=120)
     scope: Literal["scene", "story", "until_removed"]
+    hidden: bool = False   # the source is secret (an NPC's hidden trope): the change shows, the source stays GM-only
 
     @field_validator("value")
     @classmethod
@@ -109,15 +110,18 @@ def _apply_initialize(ctx: Ctx, op: InitializeCharacter) -> dict:
 
 def _apply_add_modifier(ctx: Ctx, op: AddModifier) -> dict:
     c = resolve_character(ctx.conn, ctx.campaign_id, op.character)
+    if op.op_kind == "multiply" and op.target != "plot_armor":
+        raise ChangeError("only Plot Armor takes a multiplier; change a stat with op_kind add")
     if op.op_kind == "multiply" and op.value < 0:
         raise ChangeError("a multiplier must be positive")
-    mid = ctx.conn.execute("INSERT INTO stat_modifiers (campaign_id, character_id, target, op, value, source, scope, turn_id) VALUES (?,?,?,?,?,?,?,?)",
-                           (ctx.campaign_id, c["id"], op.target, op.op_kind, op.value, op.source, op.scope, ctx.turn_id)).lastrowid
+    mid = ctx.conn.execute("INSERT INTO stat_modifiers (campaign_id, character_id, target, op, value, source, scope, hidden, turn_id) VALUES (?,?,?,?,?,?,?,?,?)",
+                           (ctx.campaign_id, c["id"], op.target, op.op_kind, op.value, op.source, op.scope, int(op.hidden), ctx.turn_id)).lastrowid
     pa = sheet(ctx.conn, c["id"])["plot_armor"]
     change = f"×{op.value:g}" if op.op_kind == "multiply" else f"{op.value:+g}"
     summary = f"{c['name']}: {op.target.replace('_', ' ')} {change} from {op.source} ({op.scope.replace('_', ' ')}); Plot Armor now {pa['effective']}"
-    ctx.event("modifier_added", summary, {"character_id": c["id"], "modifier_id": mid})
-    return {"summary": summary, "modifier_id": mid}
+    vis = "gm" if op.hidden else "player"
+    ctx.event("modifier_added", summary, {"character_id": c["id"], "modifier_id": mid}, vis)
+    return {"summary": summary, "modifier_id": mid, "visibility": vis}
 
 
 def _apply_remove_modifier(ctx: Ctx, op: RemoveModifier) -> dict:
@@ -127,8 +131,9 @@ def _apply_remove_modifier(ctx: Ctx, op: RemoveModifier) -> dict:
         raise ChangeError(f"no modifier #{op.modifier_id}")
     ctx.conn.execute("DELETE FROM stat_modifiers WHERE id = ?", (m["id"],))
     summary = f"{m['name']} is no longer affected by {m['source']} ({op.reason})"
-    ctx.event("modifier_removed", summary, {"character_id": m["character_id"], "modifier_id": m["id"]})
-    return {"summary": summary}
+    vis = "gm" if m["hidden"] else "player"
+    ctx.event("modifier_removed", summary, {"character_id": m["character_id"], "modifier_id": m["id"]}, vis)
+    return {"summary": summary, "visibility": vis}
 
 
 def _apply_grant(ctx: Ctx, op: GrantTicket) -> dict:

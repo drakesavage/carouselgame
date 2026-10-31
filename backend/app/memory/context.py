@@ -73,9 +73,10 @@ def _sheet_lines(conn: sqlite3.Connection, c: dict) -> list[str]:
     pa = sh["plot_armor"]
     lines.append("stats: " + ", ".join(f"{s} {sh['stats'][s]}" + (f"->{sh['current'][s]}" if sh["current"][s] != sh["stats"][s] else "") for s in STATS)
                  + f" | Plot Armor {pa['base']}/{pa['current']}/{pa['effective']} (base/current/effective)")
-    if sh["modifiers"]:
+    shown = [m for m in sh["modifiers"] if not m["hidden"]]
+    if shown:
         lines.append("modifiers: " + "; ".join(f"#{m['id']} {m['target']} {'x' if m['op'] == 'multiply' else '+'}{m['value']:g} "
-                                              f"from {m['source']} ({m['scope']})" for m in sh["modifiers"]))
+                                              f"from {m['source']} ({m['scope']})" for m in shown))
     return lines
 
 
@@ -395,6 +396,9 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     hidden_tickets = [f"- {by_id[i]['name']} secretly holds {d['name'] if d else t['ticket_ref']}"
                       + (f" ({'equipped' if t['equipped'] else 'not equipped'}): {d['text']}" if d else "")
                       for i in full_ids for t, d in _tickets(conn, i, hidden=True)]
+    hidden_tickets += [f"- {by_id[i]['name']}: secret modifier #{m['id']} {m['target']} {'x' if m['op'] == 'multiply' else '+'}{m['value']:g} "
+                       f"from {m['source']} ({m['scope']})"
+                       for i in full_ids for m in rows(conn, "SELECT * FROM stat_modifiers WHERE character_id = ? AND hidden = 1", (i,))]
     if hidden_tickets:
         sections["GM-ONLY SECRETS"] = ("Hidden tropes (reveal only through play or a trope such as Trope Master, then op reveal_ticket):\n"
                                        + "\n".join(hidden_tickets))

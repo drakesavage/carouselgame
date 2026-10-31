@@ -91,9 +91,10 @@ def _swap(new: Path, live: Path) -> None:
         try:
             os.replace(new, live)
             return
-        except PermissionError:
+        except PermissionError as exc:
             if attempt == SWAP_TRIES - 1:
-                raise
+                raise RuntimeError(f"reference.db is in use ({exc}): stop the server or wait for the GM turn to finish, "
+                                   "then run import-data.cmd again") from None
             time.sleep(SWAP_WAIT_S)
 
 

@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS stat_modifiers (
   value REAL NOT NULL,
   source TEXT NOT NULL,
   scope TEXT NOT NULL CHECK (scope IN ('scene','story','until_removed')),
+  hidden INTEGER NOT NULL DEFAULT 0,       -- 1 = its source is a secret (e.g. an NPC's hidden trope): GM-only
   turn_id INTEGER
 );
 
@@ -479,6 +480,7 @@ COLUMN_MIGRATIONS = [
     ("locations", "ref_id", "TEXT"),
     ("npc_profiles", "ref_id", "TEXT"),
     ("rulings", "ticket_ref", "TEXT"),
+    ("stat_modifiers", "hidden", "INTEGER NOT NULL DEFAULT 0"),
     *[("characters", c, "INTEGER") for c in ("mettle", "moxie", "hustle", "savvy", "grit")],
     *[("characters", c, "TEXT") for c in ("role_id", "aspect_id", "advanced_role_id", "ruleset_version", "role_reason")],
     ("characters", "assignment", "TEXT"),
