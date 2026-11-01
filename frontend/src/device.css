@@ -1,0 +1,5 @@
+/* Device preferences (Saves & Settings) */
+.device-prefs { display: grid; gap: 10px; }
+.dp-row { display: grid; grid-template-columns: 110px auto 1fr; gap: 10px; align-items: center; font-size: 13px; }
+.dp-row .select { grid-column: 2 / -1; }
+.dp-k { color: var(--muted); font-family: var(--display); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; }

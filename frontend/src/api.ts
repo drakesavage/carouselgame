@@ -113,11 +113,16 @@ export type RuleSuggestion = { kind: "entry" | "house_rule"; label: string; ref?
 export type RuleBrowse = { books?: { id: number; title: string; entry_count: number; chapters: number }[];
   book?: { id: number; title: string; page_offset: number } | null; chapters?: { title: string; page: number; sections: { title: string; page: number }[] }[];
   entries?: { name: string; page: number; chapter: string | null }[] };
-/** The places the party knows (memory/places.py): a nested tree from recorded locations, no invented geography. */
-export type Place = { key: string; name: string; parent: string | null; children: string[]; visited: boolean; saferoom: boolean; current: boolean;
-  floor: number | null; description: string | null; groups: { key: string; label: string; members: number }[]; sources: string[] };
-export type KnownWorld = { floor: number | null; roots: string[]; nodes: Record<string, Place>; routes: { a: string; b: string; times: number; last: number | null }[];
-  unplaced_groups: { key: string; label: string }[] };
+/** The player's map (map_api.py): only known places and sighted Omens. Pixels are on the 12000² panel master. */
+export type MapPlace = { id: string; name: string; category: string | null; px: number; py: number; safe: boolean; image: string | null };
+export type TileLevel = { zoom: number; image_width: number; image_height: number; columns: number; rows: number; master_pixels_per_level_pixel: number };
+export type PlayerMap = {
+  position: { node_id: string; place_id: string | null; px: number; py: number; label: string | null } | null;
+  known: MapPlace[]; omens: { id: string; description: string; px: number; py: number; stage: string }[];
+  last_route: { geometry_px: [number, number][]; interrupted: { omen_id: string; description: string } | null } | null;
+  tiles: { template: string; levels: TileLevel[]; size: number };
+};
+export type TravelResult = { summary: string; arrived: string; interrupted: { omen_id: string; description: string } | null; minutes: number; geometry_px: [number, number][] };
 export type Manifest = { locations: Record<string, string>; characters: Record<string, string> };
 export type DiagnosticsRow = { turn_id: number; status: string; input: string; created_at: string; rounds: number; flags: number; input_tokens: number };
 export type TurnStatus = { turn_id: number; status: "processing" | "completed" | "failed"; replayed: boolean; error: string | null;
@@ -191,7 +196,9 @@ export const api = {
   savePreview: (cid: number, saveId: number) => req<{ save_point: { id: number; label: string; created_at: string }; changes: { what: string; now: string; after_restore: string }[];
     items: string[]; items_total: number; quests: string[]; characters: string[]; messages_hidden: number; note: string }>(`api/campaigns/${cid}/saves/${saveId}/preview`),
   problemReport: (cid: number, turnId: number | null, note: string) => post<{ path: string; markdown: string; turn_id: number | null }>(`api/campaigns/${cid}/reports`, { turn_id: turnId, note }),
-  places: (id: number) => req<KnownWorld>(`api/campaigns/${id}/places`),
+  map: (id: number) => req<PlayerMap>(`api/campaigns/${id}/map`),
+  travel: (id: number, to: { to: string } | { north: number; west: number }, key: string) =>
+    post<{ travel: TravelResult; turn: TurnStatus }>(`api/campaigns/${id}/travel`, { ...to, idempotency_key: key }),
   journal: (id: number) => req<{ kinds: { id: string; label: string }[]; quests: JournalQuest[] }>(`api/campaigns/${id}/journal`),
   loreNotebook: (id: number) => req<LoreFact[]>(`api/campaigns/${id}/lore-notebook`),
   chronology: (id: number) => req<Chronology>(`api/campaigns/${id}/chronology`),

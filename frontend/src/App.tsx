@@ -8,7 +8,7 @@ import { CharacterSheetDialog } from "./views/Sheet";
 import { CharactersView } from "./views/Journals";
 import { ChronicleView, QuestsView } from "./views/Journal";
 import { SearchDialog } from "./views/Search";
-import { WorldView } from "./views/World";
+import { MapView } from "./views/MapView";
 import { Announcement, AnnouncementStage, THEATRICAL } from "./views/Announce";
 import { applyMotion, getPrefs, play } from "./prefs";
 import { InventoryView } from "./views/Inventory";
@@ -23,7 +23,7 @@ const TABS = [
   { id: "quests", label: "Quests", icon: Flag },
   { id: "people", label: "People", icon: Users },
   { id: "timeline", label: "Chronicle", icon: Clock3 },
-  { id: "world", label: "World", icon: MapIcon },
+  { id: "map", label: "Map", icon: MapIcon },
   { id: "rules", label: "Rules", icon: BookOpen },
   { id: "records", label: "Records", icon: FileText },
   { id: "settings", label: "Saves & Settings", icon: Settings2 },
@@ -36,7 +36,9 @@ export default function App() {
   const [campaigns, setCampaigns] = useState<CampaignListItem[] | null>(null);
   const [cid, setCid] = useState<number | null>(null);
   const [campaign, setCampaign] = useState<Campaign | null>(null);
-  const [tab, setTab] = useState<Tab>(() => { try { return (localStorage.getItem("tab") as Tab) || "story"; } catch { return "story"; } });
+  const [tab, setTab] = useState<Tab>(() => {
+    try { const t = localStorage.getItem("tab"); return t === "world" ? "map" : TABS.some((x) => x.id === t) ? (t as Tab) : "story"; } catch { return "story"; }
+  });
   const [version, setVersion] = useState(0);
   const [sheet, setSheet] = useState<number | null>(null);
   const [focusQuest, setFocusQuest] = useState<number | null>(null);
@@ -164,7 +166,7 @@ export default function App() {
               pcAssignment={campaign.roster.find((c) => c.id === campaign.active_character_id)?.assignment}
               pcName={campaign.roster.find((c) => c.id === campaign.active_character_id)?.name} />}
             {tab === "timeline" && <ChronicleView cid={cid} version={version} openCharacter={setSheet} />}
-            {tab === "world" && <WorldView cid={cid} campaign={campaign} version={version} onChanged={refresh} openCharacter={setSheet} />}
+            {tab === "map" && <MapView cid={cid} campaign={campaign} version={version} onChanged={refresh} openCharacter={setSheet} />}
             {tab === "rules" && <RulesView cid={cid} />}
             {tab === "records" && <RecordsView cid={cid} />}
             {tab === "settings" && <SettingsView cid={cid} version={version} onChanged={refresh} onCampaign={chooseCampaign} />}

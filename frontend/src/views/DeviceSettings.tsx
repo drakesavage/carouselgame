@@ -1,5 +1,5 @@
 import { Volume2, VolumeX } from "lucide-react";
-import "../world.css";
+import "../device.css";
 import { Panel } from "../ui";
 import { play, usePrefs } from "../prefs";
 
