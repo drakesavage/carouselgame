@@ -50,11 +50,31 @@ def create(conn: sqlite3.Connection, *, name: str, character: str, location: str
         pc = conn.execute("""INSERT INTO characters (campaign_id, slug, name, kind, roster_category, status, in_party, party_order, sheet_json, provenance)
                              VALUES (?,?,?,?,?,?,?,?,?,?)""", (cid, slug(character), character, "pc", "player_character", "active", 1, 0, "{}", "manual")).lastrowid
         conn.execute("UPDATE campaigns SET active_character_id = ? WHERE id = ?", (pc, cid))
+        _place_on_map(conn, cid, (location or "").strip(), t)
         if (premise or "").strip():
             conn.execute("""INSERT INTO lore_facts (campaign_id, subject, fact, certainty, visibility, source, created_at)
                             VALUES (?,?,?,?,?,?,?)""", (cid, "Campaign premise", premise.strip(), "canonical", "player", "campaign setup", t))
         create_save_point(conn, cid, "Campaign started", kind="manual")
     return cid
+
+
+LODGE = "CAR-047"   # where the new-game flow ends (design §9); Phase 5 replaces this start with the flow itself
+
+
+def _place_on_map(conn: sqlite3.Connection, cid: int, location: str, t: str) -> None:
+    """Start the group at the place its location names, else at Dyer's Lodge; it knows that place and the Lodge."""
+    from .carousel.import_places import place_by_name
+    from .carousel.refdata import has_reference
+    from .rules.travel_ops import SAFE_PLACE_IDS
+    if not has_reference(conn):
+        return
+    named = place_by_name(conn, location) if location else None
+    start = named if named and conn.execute("SELECT 1 FROM ref.graph_nodes WHERE id = ?", (named,)).fetchone() else LODGE
+    label = location or conn.execute("SELECT name FROM ref.places WHERE id = ?", (LODGE,)).fetchone()[0]
+    conn.execute("UPDATE campaigns SET node_id = ?, current_location = ?, safe_room = ? WHERE id = ?",
+                 (start, label, int(start in SAFE_PLACE_IDS), cid))
+    for pid in dict.fromkeys((start, LODGE)):
+        conn.execute("INSERT INTO known_places (campaign_id, place_id, how, known_at_minutes) VALUES (?,?,?,0)", (cid, pid, "start"))
 
 
 def rename(conn: sqlite3.Connection, cid: int, name: str) -> None:

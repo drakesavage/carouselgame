@@ -125,3 +125,17 @@ def test_an_npc_carries_gender_and_pronouns_and_the_gm_is_told_when_they_are_mis
     jamie = [p for p in client.get(f"/api/campaigns/{cid}/npcs").json() if p["name"] == "Jamie Cole"][0]
     assert jamie["identity"] == {"gender": "woman", "pronouns": "she/her", "apparent_age": "early 30s"}
 
+
+
+def test_a_new_campaign_starts_on_the_map(client, conn):
+    """Until the new-game flow (Phase 5), a group starts where that flow ends: Dyer's Lodge, unless its location names a place."""
+    lodge = new(client, name="Lodge Start", location=None)
+    m = client.get(f"/api/campaigns/{lodge}/map").json()
+    assert m["position"]["node_id"] == "CAR-047" and m["position"]["label"] == "Dyer's Lodge"
+    assert {p["id"] for p in m["known"]} == {"CAR-047"}
+    square = new(client, name="Square Start", location="Town Square")
+    m = client.get(f"/api/campaigns/{square}/map").json()
+    assert m["position"]["node_id"] == "CAR-002" and {p["id"] for p in m["known"]} == {"CAR-002", "CAR-047"}
+    vague = new(client, name="Vague Start", location="the abandoned lot")
+    m = client.get(f"/api/campaigns/{vague}/map").json()
+    assert m["position"]["node_id"] == "CAR-047" and m["position"]["label"] == "the abandoned lot"
