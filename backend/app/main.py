@@ -330,7 +330,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     @app.post("/api/campaigns")
     def campaign_create(body: CampaignIn, c=Depends(db), _=Depends(write_lock)):
         try:
-            return {"campaign_id": campaign_admin.create(c, **body.model_dump())}
+            return {"campaign_id": campaign_admin.create(c, **body.model_dump(), opening=True)}
         except ValueError as exc:
             raise HTTPException(422, str(exc))
 

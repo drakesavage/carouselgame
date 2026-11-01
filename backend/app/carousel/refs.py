@@ -9,7 +9,8 @@ REFERENCE_COLUMNS: dict[str, tuple[str, str]] = {"place": ("locations", "ref_id"
                                                   "ticket": ("character_tickets", "ticket_ref"),
                                                   "node": ("campaigns", "node_id"), "group_node": ("party_groups", "node_id"),
                                                   "known_place": ("known_places", "place_id"), "omen": ("omen_states", "omen_id"),
-                                                  "story_omen": ("stories", "omen_id")}
+                                                  "story_omen": ("stories", "omen_id"),
+                                                  "lure_resident": ("campaigns", "lure_resident")}
 
 
 def referenced_ids(campaign_conn: sqlite3.Connection) -> dict[str, set[str]]:
@@ -35,9 +36,12 @@ def unresolved(ref: sqlite3.Connection, ids: dict[str, set[str]]) -> dict[str, l
     def node(i: str) -> bool:
         return ref.execute("SELECT 1 FROM graph_nodes WHERE id = ?", (i,)).fetchone() is not None
 
+    def npc(i: str) -> bool:
+        return ref.execute("SELECT 1 FROM npc_templates WHERE id = ?", (i,)).fetchone() is not None
+
     checks = {
         "place": place,
-        "npc": lambda i: ref.execute("SELECT 1 FROM npc_templates WHERE id = ?", (i,)).fetchone() is not None,
+        "npc": npc, "lure_resident": npc,
         "node": node, "group_node": node, "known_place": place,
         "omen": lambda i: ref.execute("SELECT 1 FROM omens WHERE id = ?", (i,)).fetchone() is not None,
         "story_omen": lambda i: ref.execute("SELECT 1 FROM omens WHERE id = ?", (i,)).fetchone() is not None,

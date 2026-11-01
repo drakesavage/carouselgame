@@ -37,7 +37,9 @@ def summary(conn: sqlite3.Connection) -> list[dict]:
                          FROM campaigns c ORDER BY c.archived, c.id""")
 
 
-def create(conn: sqlite3.Connection, *, name: str, character: str, location: str | None = None, premise: str | None = None) -> int:
+def create(conn: sqlite3.Connection, *, name: str, character: str, location: str | None = None, premise: str | None = None,
+           opening: bool = True) -> int:
+    """opening=True: the new-game flow (carousel/opening.py) starts in the car at the arrival lot and `location` is ignored."""
     name, character = name.strip(), character.strip()
     if not name or not character:
         raise ValueError("a campaign name and a character name are required")
@@ -51,7 +53,10 @@ def create(conn: sqlite3.Connection, *, name: str, character: str, location: str
         pc = conn.execute("""INSERT INTO characters (campaign_id, slug, name, kind, roster_category, status, in_party, party_order, sheet_json, provenance)
                              VALUES (?,?,?,?,?,?,?,?,?,?)""", (cid, slug(character), character, "pc", "player_character", "active", 1, 0, "{}", "manual")).lastrowid
         conn.execute("UPDATE campaigns SET active_character_id = ? WHERE id = ?", (pc, cid))
-        _place_on_map(conn, cid, (location or "").strip(), t)
+        if opening:
+            _start_opening(conn, cid)
+        else:
+            _place_on_map(conn, cid, (location or "").strip(), t)
         if (premise or "").strip():
             conn.execute("""INSERT INTO lore_facts (campaign_id, subject, fact, certainty, visibility, source, created_at)
                             VALUES (?,?,?,?,?,?,?)""", (cid, "Campaign premise", premise.strip(), "canonical", "player", "campaign setup", t))
@@ -59,7 +64,19 @@ def create(conn: sqlite3.Connection, *, name: str, character: str, location: str
     return cid
 
 
-LODGE = "CAR-047"   # where the new-game flow ends (design §9); Phase 5 replaces this start with the flow itself
+LODGE = "CAR-047"   # where the new-game flow ends (design §9)
+
+
+def _start_opening(conn: sqlite3.Connection, cid: int) -> None:
+    """Stage `car`, the group at the arrival lot, knowing only that place (the Lodge is learnt when the escort starts)."""
+    from .carousel.opening import ARRIVAL_LOT
+    from .carousel.refdata import has_reference
+    conn.execute("UPDATE campaigns SET opening_stage = 'car' WHERE id = ?", (cid,))
+    if not has_reference(conn):
+        return
+    label = conn.execute("SELECT name FROM ref.places WHERE id = ?", (ARRIVAL_LOT,)).fetchone()
+    conn.execute("UPDATE campaigns SET node_id = ?, current_location = ?, safe_room = 0 WHERE id = ?", (ARRIVAL_LOT, label[0] if label else None, cid))
+    conn.execute("INSERT INTO known_places (campaign_id, place_id, how, known_at_minutes) VALUES (?,?,?,0)", (cid, ARRIVAL_LOT, "start"))
 
 
 def _place_on_map(conn: sqlite3.Connection, cid: int, location: str, t: str) -> None:

@@ -609,7 +609,9 @@ COLUMN_MIGRATIONS = [
     ("campaigns", "travel_seq", "INTEGER NOT NULL DEFAULT 0"),
     ("party_groups", "node_id", "TEXT"),
     *[("characters", c, "INTEGER NOT NULL DEFAULT 0") for c in ("stars", "pending_stat_points", "starless_streak")],
-    ("turns", "kind", "TEXT"),             # NULL = the player's own words; arrival | arrival_omen (map_api.py travel)  # ordered quest ids that make up the immediate objective  # {cx, cy, k, ar}: square crop of the portrait image (null = default)  # comfy | codex (art/codex_image.py)  # staged tool calls and roll records while a turn is in flight
+    ("turns", "kind", "TEXT"),
+    *[("campaigns", c, "TEXT") for c in ("opening_stage", "lure_kind", "lure_belief", "lure_resident", "lure_paid_off")],  # carousel/opening.py
+    ("characters", "role_evidence_json", "TEXT"),   # {"quotes": [...], "contextual_reason": str} from silas_assigns             # NULL = the player's own words; arrival | arrival_omen (map_api.py travel)  # ordered quest ids that make up the immediate objective  # {cx, cy, k, ar}: square crop of the portrait image (null = default)  # comfy | codex (art/codex_image.py)  # staged tool calls and roll records while a turn is in flight
 ]
 
 

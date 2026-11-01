@@ -1,5 +1,5 @@
 """Smallest synthetic source packages that keep the real files' shapes: a small town graph (lodge, junction, square, diner,
-farm, a flagged spoiler place, an old diner with an alias, one directed flagged shortcut), three playable Omens and a hub, a fully specified story dossier (OM-001), two starting roles, an aspect, an advanced role, a story-altering ticket with its ticket and profile, one trope, one resident."""
+farm, a flagged spoiler place, an old diner with an alias, one directed flagged shortcut), three playable Omens and a hub, a fully specified story dossier (OM-001), two starting roles, an aspect, an advanced role, a story-altering ticket with its ticket and profile, one trope, two residents, the arrival lot."""
 
 
 def _place(pid, name, north, west, status="active", category="Landmark", requires=(), spoiler=False):
@@ -19,13 +19,14 @@ def _edge(eid, a, b, cost, kind="road", directed=False, requires=()):
 
 
 COORDS = {"CAR-047": [620, 440], "J-1": [560, 440], "CAR-002": [500, 440], "CAR-006": [480, 460], "CAR-086": [560, 520],
-          "CAR-099": [580, 560], "CAR-016": [495, 445]}
+          "CAR-099": [580, 560], "CAR-016": [495, 445], "CAR-082": [470, 400]}
 PLACES = [_place("CAR-047", "Dyer's Lodge", *COORDS["CAR-047"], category="Lodge"),
           _place("CAR-002", "Town Square", *COORDS["CAR-002"]),
           _place("CAR-006", "Diner", *COORDS["CAR-006"], category="Restaurant"),
           _place("CAR-086", "Farm", *COORDS["CAR-086"], category="Farm"),
           _place("CAR-099", "UNKNOWNPLACE-HOTEL-8", *COORDS["CAR-099"], requires=["akers_story"], spoiler=True),
-          _place("CAR-016", "Old diner", *COORDS["CAR-016"], category="Restaurant")]
+          _place("CAR-016", "Old diner", *COORDS["CAR-016"], category="Restaurant"),
+          _place("CAR-082", "Eastern arrival parking lot", *COORDS["CAR-082"], category="Parking")]
 FIXED = "Visible as an inspectable anomaly at its parent venue."
 ROAMING = "Spawn as a visible moving encounter near its anchor."
 
@@ -63,7 +64,7 @@ MINI = {
                                _edge("EDGE-3", "CAR-002", "CAR-006", 4), _edge("EDGE-4", "J-1", "CAR-086", 12),
                                _edge("EDGE-5", "CAR-002", "CAR-016", 1),
                                _edge("EDGE-6", "CAR-002", "CAR-086", 2, kind="scenario_path", directed=True, requires=["shortcut_story"]),
-                               _edge("EDGE-7", "CAR-086", "CAR-099", 3)],
+                               _edge("EDGE-7", "CAR-086", "CAR-099", 3), _edge("EDGE-8", "CAR-082", "CAR-002", 6)],
                      "aliases": {"CAR-017": "CAR-016"}},
     "pixel_anchors": {"locations": []},
     "regions": {"type": "FeatureCollection", "features": []},
@@ -112,5 +113,9 @@ MINI = {
         {"location_id": "PROV-LOC-001", "name": "Unrecorded place", "relative_image_path": "assets/identity_images/PROV-LOC-001_identity_v001.png"}]},
     "npcs": {"residents": [{"id": "CAR-NPC-001", "name": "Adeline Winter", "provenance": "canon_expanded", "canon_appearance": True,
                             "at_start": {"status": "alive"}, "camp_role": "Camp leader", "usual_location": "Dyer's Lodge",
-                            "gm_only": {"canonical_secret": "MINI-NPC-SECRET"}}]},
+                            "gm_only": {"canonical_secret": "MINI-NPC-SECRET"}},
+                           {"id": "CAR-NPC-003", "name": "Valerie Choi", "provenance": "original_adaptation", "canon_appearance": False,
+                            "at_start": {"status": "alive"}, "camp_role": "Scout", "usual_location": "Dyer's Lodge",
+                            "appearance": "Wiry, in a patched field jacket.", "personality": "Dry, watchful, quick to laugh.",
+                            "gm_only": {"canonical_secret": "MINI-NPC-SECRET-2"}}]},
 }

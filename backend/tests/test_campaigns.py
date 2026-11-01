@@ -128,14 +128,15 @@ def test_an_npc_carries_gender_and_pronouns_and_the_gm_is_told_when_they_are_mis
 
 
 def test_a_new_campaign_starts_on_the_map(client, conn):
-    """Until the new-game flow (Phase 5), a group starts where that flow ends: Dyer's Lodge, unless its location names a place."""
-    lodge = new(client, name="Lodge Start", location=None)
+    """A campaign with no opening (opening=False) starts at Dyer's Lodge, unless its location names a place."""
+    from app.campaigns import create
+    lodge = create(conn, name="Lodge Start", character="Donut Jr", opening=False)
     m = client.get(f"/api/campaigns/{lodge}/map").json()
     assert m["position"]["node_id"] == "CAR-047" and m["position"]["label"] == "Dyer's Lodge"
     assert {p["id"] for p in m["known"]} == {"CAR-047"}
-    square = new(client, name="Square Start", location="Town Square")
+    square = create(conn, name="Square Start", character="Donut Jr", location="Town Square", opening=False)
     m = client.get(f"/api/campaigns/{square}/map").json()
     assert m["position"]["node_id"] == "CAR-002" and {p["id"] for p in m["known"]} == {"CAR-002", "CAR-047"}
-    vague = new(client, name="Vague Start", location="the abandoned lot")
+    vague = create(conn, name="Vague Start", character="Donut Jr", location="the abandoned lot", opening=False)
     m = client.get(f"/api/campaigns/{vague}/map").json()
     assert m["position"]["node_id"] == "CAR-047" and m["position"]["label"] == "the abandoned lot"
