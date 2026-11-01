@@ -81,3 +81,18 @@ def visible_zones(conn: sqlite3.Connection, cid: int) -> list[str]:
 def zone_omens(conn: sqlite3.Connection, zone_id: str) -> list[str]:
     """Omens the engine places in this zone (ref.venue_omens.placed)."""
     return [r[0] for r in conn.execute("SELECT omen_id FROM ref.venue_omens WHERE zone_id = ? AND placed = 1 ORDER BY omen_id", (zone_id,))]
+
+
+def enter(conn: sqlite3.Connection, cid: int, node_id: str | None, group_id: int | None = None) -> dict | None:
+    """Put the campaign (and the PC's group) at the entry zone of the venue at this node, or clear the venue if there is
+    none. Returns {venue_id, zone_id, label} or None."""
+    v = venue_at(conn, node_id)
+    vid, zid = (v["id"], v["entry_zone"]) if v else (None, None)
+    conn.execute("UPDATE campaigns SET venue_id = ?, zone_id = ? WHERE id = ?", (vid, zid, cid))
+    if group_id is not None:
+        conn.execute("UPDATE party_groups SET venue_id = ?, zone_id = ? WHERE id = ?", (vid, zid, group_id))
+    if not v:
+        return None
+    conn.execute("""INSERT OR IGNORE INTO zone_visits (campaign_id, zone_id, first_minutes)
+                    SELECT id, ?, game_time_minutes FROM campaigns WHERE id = ?""", (zid, cid))
+    return {"venue_id": vid, "zone_id": zid, "label": label(conn, zid)}

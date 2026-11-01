@@ -85,3 +85,62 @@ def test_reimport_protects_venue_and_zone(tmp_path):
     c.close()
     r = run_import(s)
     assert not r.ok and r.missing == {"zone": [BARN]}
+
+
+# ---- Task 3: entering and leaving with travel ----
+
+from tests.conftest import apply  # noqa: E402
+
+
+def where(conn, cid):
+    return tuple(conn.execute("SELECT node_id, venue_id, zone_id FROM campaigns WHERE id = ?", (cid,)).fetchone())
+
+
+def visits(conn, cid):
+    return [r[0] for r in conn.execute("SELECT zone_id FROM zone_visits WHERE campaign_id = ? ORDER BY zone_id", (cid,))]
+
+
+def test_travel_to_a_venue_place_enters_its_entry_zone(conn, campaign_id):
+    r = apply(conn, campaign_id, {"op": "travel", "to": "CAR-086"})
+    assert where(conn, campaign_id) == ("CAR-086", "SM-T01", GATE)
+    assert visits(conn, campaign_id) == [GATE]
+    assert r["interrupted"]["omen_id"] == "OM-001"   # the farm's own Omen still stops the group as before
+    assert r["venue"] == {"venue_id": "SM-T01", "title": "Farm grounds", "zone_label": "farm gate"}
+    payload = conn.execute("SELECT payload_json FROM events WHERE campaign_id = ? AND type = 'travel'", (campaign_id,)).fetchone()[0]
+    assert '"zone_label": "farm gate"' in payload and "MINI-HIDDEN-ROOM" not in payload
+    assert conn.execute("SELECT 1 FROM omen_states WHERE campaign_id = ? AND omen_id = 'OM-005'", (campaign_id,)).fetchone() is None
+
+
+def test_leaving_only_by_the_entry_or_exit(conn, campaign_id):
+    import pytest
+    from app.rules.engine import ChangeError
+    apply(conn, campaign_id, {"op": "travel", "to": "CAR-086"})
+    with transaction(conn):
+        conn.execute("UPDATE campaigns SET zone_id = ? WHERE id = ?", (CELLAR, campaign_id))
+    with pytest.raises(ChangeError, match="leave by farm gate or barn"):
+        apply(conn, campaign_id, {"op": "travel", "to": "CAR-002"})
+    assert where(conn, campaign_id) == ("CAR-086", "SM-T01", CELLAR)
+    with transaction(conn):
+        conn.execute("UPDATE campaigns SET zone_id = ? WHERE id = ?", (BARN, campaign_id))
+    apply(conn, campaign_id, {"op": "travel", "to": "CAR-002"})
+    assert where(conn, campaign_id) == ("CAR-002", None, None)
+
+
+def test_a_story_instance_venue_is_not_entered(conn, campaign_id):
+    apply(conn, campaign_id, {"op": "travel", "to": "CAR-016"})
+    assert where(conn, campaign_id) == ("CAR-016", None, None)
+
+
+def test_a_campaign_started_at_a_venue_place_is_inside_it(conn):
+    from app import campaigns
+    cid = campaigns.create(conn, name="Farmhands", character="Ada", location="Farm", opening=False)
+    assert where(conn, cid) == ("CAR-086", "SM-T01", GATE)
+
+
+def test_arrival_narration_names_the_entry_zone(conn, campaign_id):
+    from app.map_api import arrival
+    with transaction(conn):
+        conn.execute("INSERT INTO omen_states (campaign_id, omen_id, stage) VALUES (?, 'OM-001', 'visible')", (campaign_id,))
+    r = apply(conn, campaign_id, {"op": "travel", "to": "CAR-086"})
+    text, kind = arrival(conn, campaign_id, r, "CAR-086")
+    assert kind == "arrival" and "farm gate" in text

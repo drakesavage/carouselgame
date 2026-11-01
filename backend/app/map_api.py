@@ -42,7 +42,10 @@ def arrival(conn, cid: int, result: dict, to: str | None) -> tuple[str, str]:
         dest = _place_name(conn, to) or _place_name(conn, result["arrived"]) or "the road"
         return f"[arrival] On the way to {dest}, we stop: {result['interrupted']['description'].rstrip('.')}.", "arrival_omen"
     loc = one(conn, "SELECT current_location FROM campaigns WHERE id = ?", (cid,))["current_location"]
-    return (f"[arrival] We stop {loc}." if loc.startswith("on the road") else f"[arrival] We arrive at {loc}."), "arrival"
+    if loc.startswith("on the road"):
+        return f"[arrival] We stop {loc}.", "arrival"
+    venue = result.get("venue")
+    return (f"[arrival] We arrive at {loc}, at the {venue['zone_label']}." if venue else f"[arrival] We arrive at {loc}."), "arrival"
 
 
 ART_DIR = "Location_Art_Production/assets"

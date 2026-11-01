@@ -69,6 +69,7 @@ LODGE = "CAR-047"   # where the new-game flow ends (design §9)
 
 def _start_opening(conn: sqlite3.Connection, cid: int) -> None:
     """Stage `car`, the group at the arrival lot, knowing only that place (the Lodge is learnt when the escort starts)."""
+    from .carousel import venues
     from .carousel.opening import ARRIVAL_LOT
     from .carousel.refdata import has_reference
     conn.execute("UPDATE campaigns SET opening_stage = 'car' WHERE id = ?", (cid,))
@@ -77,10 +78,12 @@ def _start_opening(conn: sqlite3.Connection, cid: int) -> None:
     label = conn.execute("SELECT name FROM ref.places WHERE id = ?", (ARRIVAL_LOT,)).fetchone()
     conn.execute("UPDATE campaigns SET node_id = ?, current_location = ?, safe_room = 0 WHERE id = ?", (ARRIVAL_LOT, label[0] if label else None, cid))
     conn.execute("INSERT INTO known_places (campaign_id, place_id, how, known_at_minutes) VALUES (?,?,?,0)", (cid, ARRIVAL_LOT, "start"))
+    venues.enter(conn, cid, ARRIVAL_LOT)
 
 
 def _place_on_map(conn: sqlite3.Connection, cid: int, location: str, t: str) -> None:
     """Start the group at the place its location names, else at Dyer's Lodge; it knows that place and the Lodge."""
+    from .carousel import venues
     from .carousel.import_places import place_by_name
     from .carousel.refdata import has_reference
     from .rules.travel_ops import SAFE_PLACE_IDS
@@ -93,6 +96,7 @@ def _place_on_map(conn: sqlite3.Connection, cid: int, location: str, t: str) -> 
                  (start, label, int(start in SAFE_PLACE_IDS), cid))
     for pid in dict.fromkeys((start, LODGE)):
         conn.execute("INSERT INTO known_places (campaign_id, place_id, how, known_at_minutes) VALUES (?,?,?,0)", (cid, pid, "start"))
+    venues.enter(conn, cid, start)
 
 
 def rename(conn: sqlite3.Connection, cid: int, name: str) -> None:

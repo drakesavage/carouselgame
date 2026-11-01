@@ -2,7 +2,8 @@
 
 `travel` is the only way the group moves on the town map: it plans over the travel graph with the campaign's story
 flags, decides any Omen interruption up front (carousel/interruptions.py), then applies position, time, known places
-and sightings in one step. `learn_place` adds a place the group has heard of; `set_flag` / `clear_flag` open and close
+and sightings in one step. Arriving at a venue's place puts the group at its entry zone (carousel/venues.py); a
+group inside a venue leaves only from its entry or exit zone. `learn_place` adds a place the group has heard of; `set_flag` / `clear_flag` open and close
 flagged edges (GM-only)."""
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from pydantic import BaseModel, Field, model_validator
 from ..carousel.import_places import resolve_place
 from ..carousel.interruptions import decide, truncate
 from ..carousel.refdata import require_reference
+from ..carousel import venues
 from ..carousel.travel import missing_flags, nearest_node, plan_route
 from ..db import one, rows
 from .engine import AdvanceTime, ChangeError, Ctx, SetLocation, _apply_advance_time, _apply_set_location
@@ -80,10 +82,15 @@ def _apply_travel(ctx: Ctx, op: Travel) -> dict:
     from ..carousel.opening import stage
     if stage(ctx.conn, ctx.campaign_id) in ("car", "silas"):
         raise ChangeError("you haven't left the car park yet")
-    camp = one(ctx.conn, "SELECT node_id, travel_seq FROM campaigns WHERE id = ?", (ctx.campaign_id,))
+    camp = one(ctx.conn, "SELECT node_id, travel_seq, venue_id, zone_id FROM campaigns WHERE id = ?", (ctx.campaign_id,))
     start = camp["node_id"]
     if not start:
         raise ChangeError("the group has no position on the town map yet")
+    if camp["venue_id"]:
+        v = venues.venue(ctx.conn, camp["venue_id"])
+        if v and camp["zone_id"] not in (v["entry_zone"], v["exit_zone"]):
+            ways = dict.fromkeys(venues.label(ctx.conn, z) for z in (v["entry_zone"], v["exit_zone"]))
+            raise ChangeError(f"leave by {' or '.join(ways)}")
     if op.to:
         goal = resolve_place(ctx.conn, op.to) or op.to
     else:
@@ -109,6 +116,9 @@ def _apply_travel(ctx: Ctx, op: Travel) -> dict:
     g = pc_group(ctx)
     if g:
         ctx.conn.execute("UPDATE party_groups SET node_id = ? WHERE id = ?", (arrived, g["id"]))
+    entered = venues.enter(ctx.conn, ctx.campaign_id, arrived, g["id"] if g else None)
+    venue = {"venue_id": entered["venue_id"], "title": venues.venue(ctx.conn, entered["venue_id"])["title"],
+             "zone_label": entered["label"]} if entered else None
     if route.minutes > 0:
         _apply_advance_time(ctx, AdvanceTime(op="advance_time", minutes=route.minutes, reason=op.reason or f"walking to {where}"))
     if place_id:
@@ -121,10 +131,11 @@ def _apply_travel(ctx: Ctx, op: Travel) -> dict:
         interrupted = {"omen_id": stop.omen_id, "description": o["description"]}
     summary = f"The group walks to {where} ({route.minutes} min)" + (" and stops: something is wrong" if stop else "")
     ctx.event("travel", summary, {"route_nodes": route.nodes, "minutes": route.minutes, "arrived": arrived,
-                                  "interrupted": interrupted, "geometry_px": route.geometry_px})
+                                  "interrupted": interrupted, "geometry_px": route.geometry_px, "venue": venue})
     if stop:
         ctx.event("omen_sighted", f"Seen at {where}: {interrupted['description']}", {**interrupted, "node": arrived, "kind": stop.kind})
-    return {"summary": summary, "arrived": arrived, "interrupted": interrupted, "minutes": route.minutes, "geometry_px": route.geometry_px}
+    return {"summary": summary, "arrived": arrived, "interrupted": interrupted, "minutes": route.minutes, "geometry_px": route.geometry_px,
+            "venue": venue}
 
 
 def _apply_learn_place(ctx: Ctx, op: LearnPlace) -> dict:
