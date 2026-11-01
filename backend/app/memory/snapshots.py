@@ -37,6 +37,8 @@ SNAPSHOT_TABLES: dict[str, str] = {
     "known_places": "SELECT * FROM known_places WHERE campaign_id = ?",
     "campaign_flags": "SELECT * FROM campaign_flags WHERE campaign_id = ?",
     "omen_states": "SELECT * FROM omen_states WHERE campaign_id = ?",
+    "zone_visits": "SELECT * FROM zone_visits WHERE campaign_id = ?",
+    "venue_overlays": "SELECT * FROM venue_overlays WHERE campaign_id = ?",
     "stories": "SELECT * FROM stories WHERE campaign_id = ?",
     "story_packets": "SELECT p.* FROM story_packets p JOIN stories s ON s.id = p.story_id WHERE s.campaign_id = ?",
     "story_cast": "SELECT x.* FROM story_cast x JOIN stories s ON s.id = x.story_id WHERE s.campaign_id = ?",
@@ -51,7 +53,7 @@ _BY_STORY = "story_id IN (SELECT id FROM stories WHERE campaign_id = ?)"
 _SCOPED_DELETE = {"status_effects": _BY_CHARACTER, "npc_profiles": _BY_CHARACTER, "advanced_marks": _BY_CHARACTER, "mark_awards": _BY_CHARACTER,
                   "story_packets": _BY_STORY, "story_cast": _BY_STORY, "story_revisions": _BY_STORY}
 # Delete children before parents.
-_DELETE_ORDER = ["story_revisions", "story_cast", "story_packets", "mark_awards", "advanced_marks", "stories", "story_spoilers", "known_places", "campaign_flags", "omen_states", "character_tickets", "stat_modifiers", "status_effects", "npc_profiles", "relationships", "items", "locations",
+_DELETE_ORDER = ["story_revisions", "story_cast", "story_packets", "mark_awards", "advanced_marks", "stories", "story_spoilers", "known_places", "campaign_flags", "omen_states", "zone_visits", "venue_overlays", "character_tickets", "stat_modifiers", "status_effects", "npc_profiles", "relationships", "items", "locations",
                  "quests", "clocks", "house_rules", "rulings", "lore_facts", "gm_secrets",
                  "memory_summaries", "party_groups", "scenes", "memories", "characters"]
 _LOGS = {"messages": "max_message_id", "events": "max_event_id", "turns": "max_turn_id"}

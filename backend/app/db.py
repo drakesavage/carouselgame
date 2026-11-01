@@ -432,6 +432,27 @@ CREATE TABLE IF NOT EXISTS campaign_flags (
   source TEXT,
   PRIMARY KEY (campaign_id, flag)
 );
+-- Venues (carousel/venues.py): zones the group has stood in, and story overlays on a venue's links. Overlays name their
+-- story and are lifted (never deleted) when it concludes; for add_zone, a is the new zone and b the zone it joins.
+CREATE TABLE IF NOT EXISTS zone_visits (
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  zone_id TEXT NOT NULL,
+  first_minutes INTEGER,
+  PRIMARY KEY (campaign_id, zone_id)
+);
+CREATE TABLE IF NOT EXISTS venue_overlays (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  story_id INTEGER,
+  venue_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('block', 'add_zone')),
+  a TEXT NOT NULL,
+  b TEXT NOT NULL,
+  label TEXT,
+  reason TEXT,
+  lifted INTEGER NOT NULL DEFAULT 0,
+  created_minutes INTEGER
+);
 CREATE TABLE IF NOT EXISTS omen_states (
   campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
   omen_id TEXT NOT NULL,
@@ -608,6 +629,7 @@ COLUMN_MIGRATIONS = [
     ("campaigns", "node_id", "TEXT"),
     ("campaigns", "travel_seq", "INTEGER NOT NULL DEFAULT 0"),
     ("party_groups", "node_id", "TEXT"),
+    *[(t, c, "TEXT") for t in ("campaigns", "party_groups") for c in ("venue_id", "zone_id")],   # carousel/venues.py
     *[("characters", c, "INTEGER NOT NULL DEFAULT 0") for c in ("stars", "pending_stat_points", "starless_streak")],
     ("turns", "kind", "TEXT"),
     *[("campaigns", c, "TEXT") for c in ("opening_stage", "lure_kind", "lure_belief", "lure_resident", "lure_paid_off")],  # carousel/opening.py
