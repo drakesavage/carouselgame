@@ -6,14 +6,22 @@ eligible tickets revise the screenplay as versioned commits; conclude_story pick
 The GM improvises everything between them. Nothing here writes the sealed packet into a player-visible event."""
 from __future__ import annotations
 
+import json
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from ..carousel.refdata import require_reference
-from ..carousel.stories import ENDINGS, PHASES, active_story, canonical, endings_from, seal
+from ..carousel.stories import ENDINGS, PHASES, active_story, canonical, endings_from, seal, ticket_can_revise
 from ..db import one
+from .carousel_ops import UseTrope, _apply_use, _owned
 from .engine import ChangeError, Ctx, resolve_character
+
+EndingName = Literal["full_success", "costly_success", "survive_without_victory", "defeat"]
+# Role Bible dynamic_story_mutation_contract: what a generic story-altering grant may do (spawn_rescue_packet is Phase 6;
+# extraordinary_timeline_branch never comes from a generic grant).
+REVISION_FAMILIES = ("insert_future_scene", "remove_or_delay_future_beat", "recast_npc", "introduce_plausible_support", "shift_pressure",
+                     "reveal_authorized_fact", "create_obstacle", "rewrite_conditional_objective")
 
 PLAYABLE = "Playable Omen"
 HUB = "Hub / generator"
@@ -88,7 +96,7 @@ class BeginStory(BaseModel):
     action: str = Field(min_length=1, max_length=200)
     cast: list[CastEntry] = Field(min_length=1, max_length=12)
     reason: str = Field(min_length=1, max_length=400)
-    endings: dict[Literal["full_success", "costly_success", "survive_without_victory", "defeat"], EndingProfile] | None = None
+    endings: dict[EndingName, EndingProfile] | None = None
 
 
 def _norm(action: str) -> str:
@@ -235,6 +243,73 @@ def _apply_cast(ctx: Ctx, op: CastCharacter) -> dict:
     return {"summary": summary}
 
 
+class RevisionOperation(BaseModel):
+    family: str = Field(min_length=1, max_length=60)
+    detail: str = Field(min_length=1, max_length=600)
+
+
+class ReviseScreenplay(BaseModel):
+    op: Literal["revise_screenplay"]
+    character: str
+    ticket: str
+    base_version: int
+    scope: Literal["scene", "arc", "premise", "ending_conditions"]
+    operations: list[RevisionOperation] = Field(min_length=1, max_length=5)
+    costs: list[str] = Field(default_factory=list, max_length=8)
+    new_dangers: list[str] = Field(default_factory=list, max_length=8)
+    preserved_facts: list[str] = Field(default_factory=list, max_length=12)
+    public_summary: str = Field(min_length=1, max_length=300)
+    reason: str = Field(min_length=1, max_length=600)
+    new_endings: dict[EndingName, EndingProfile] | None = None
+
+
+def _packet(ctx: Ctx, sid: int) -> dict:
+    p = one(ctx.conn, "SELECT screenplay_json, endings_json FROM story_packets WHERE story_id = ?", (sid,))
+    return {"screenplay": p["screenplay"], "endings": p["endings"]}
+
+
+def _apply_revise(ctx: Ctx, op: ReviseScreenplay) -> dict:
+    require_reference(ctx.conn)
+    s = _running(ctx)
+    c = _cast_member(ctx, s, op.character)
+    t, d = _owned(ctx, c, op.ticket)
+    if not t["equipped"]:
+        raise ChangeError(f"{d['name']} is not equipped")
+    if t["uses_left"] is not None and t["uses_left"] <= 0:
+        raise ChangeError(f"{d['name']} has no uses left")
+    if not ticket_can_revise(ctx.conn, ctx.campaign_id, t["ticket_ref"]):
+        raise ChangeError(f"{d['name']} cannot revise a screenplay (it is not a story-altering ticket, and no approved ruling says it may)")
+    bad = [o.family for o in op.operations if o.family not in REVISION_FAMILIES]
+    if bad:
+        raise ChangeError(f"operation family {', '.join(bad)} is not allowed; use one of {', '.join(REVISION_FAMILIES)}")
+    if op.base_version != s["version"]:
+        raise ChangeError(f"the screenplay changed (now version {s['version']}); propose against it")
+    if op.scope == "ending_conditions":
+        missing = [f for f in ("new_endings", "costs", "new_dangers") if not getattr(op, f)]
+        if missing:
+            raise ChangeError(f"changing ending conditions needs {', '.join(missing)}: no revision is an automatic victory")
+    before = _packet(ctx, s["id"])
+    version = s["version"] + 1
+    note = {"version": version, "scope": op.scope, "by": c["name"], "ticket": t["ticket_ref"],
+            "operations": [o.model_dump() for o in op.operations], "costs": op.costs, "new_dangers": op.new_dangers,
+            "preserved_facts": op.preserved_facts}
+    screenplay = {**before["screenplay"], "version": version, "notes": [*(before["screenplay"].get("notes") or []), note]}
+    endings = {**before["endings"], **{k: v.model_dump() for k, v in (op.new_endings or {}).items()}}
+    after = {"screenplay": screenplay, "endings": endings}
+    ctx.conn.execute("UPDATE story_packets SET screenplay_json = ?, endings_json = ? WHERE story_id = ?",
+                     (canonical(screenplay), canonical(endings), s["id"]))
+    ctx.conn.execute("UPDATE stories SET version = ? WHERE id = ?", (version, s["id"]))
+    ctx.conn.execute("""INSERT INTO story_revisions (story_id, version, character_id, ticket_ref, scope, operations_json, before_json, after_json,
+                                                     public_summary, reason, turn_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                     (s["id"], version, c["id"], t["ticket_ref"], op.scope, json.dumps(note["operations"], ensure_ascii=False),
+                      canonical(before), canonical(after), op.public_summary, op.reason, ctx.turn_id))
+    _apply_use(ctx, UseTrope(op="use_trope", character=str(c["id"]), ticket=t["ticket_ref"], effect=f"revises the screenplay: {op.public_summary}"))
+    ctx.event("screenplay_revised", f"The story shifts: {op.public_summary}", {"story_id": s["id"], "public_summary": op.public_summary})
+    ctx.event("screenplay_revised_detail", f"Screenplay v{version} ({op.scope}) by {c['name']}: {op.reason}",
+              {"story_id": s["id"], "version": version, "note": note, "reason": op.reason}, "gm")
+    return {"summary": f"Screenplay revised to version {version}: {op.public_summary}", "version": version}
+
+
 def register(ops: dict) -> None:
     ops.update({
         "sight_omen": (SightOmen, _apply_sight),
@@ -244,4 +319,5 @@ def register(ops: dict) -> None:
         "pressure": (Pressure, _apply_pressure),
         "camera": (Camera, _apply_camera),
         "cast_character": (CastCharacter, _apply_cast),
+        "revise_screenplay": (ReviseScreenplay, _apply_revise),
     })

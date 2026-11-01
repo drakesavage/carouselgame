@@ -184,7 +184,7 @@ def test_advance_phase_forward_and_skip(conn, campaign_id, running):
 
 def test_advance_phase_refusals(conn, campaign_id, running):
     apply(conn, campaign_id, {"op": "advance_phase", "to": "Rebirth", "trigger": "t"})
-    for to, match in (("First Blood", "forward"), ("Rebirth", "forward"), ("The End", "conclude"), ("Intermission", "")):
+    for to, match in (("First Blood", "forward"), ("Rebirth", "forward"), ("The End", "conclude"), ("Intermission", "invalid")):
         with pytest.raises(ChangeError, match=match):
             apply(conn, campaign_id, {"op": "advance_phase", "to": to, "trigger": "t"})
     assert story(conn)["phase"] == "Rebirth"
