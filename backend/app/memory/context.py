@@ -30,6 +30,7 @@ import json
 import re
 import sqlite3
 
+from ..carousel.fate import GONE
 from ..db import one, rows
 
 DEFAULT_BUDGET = {"scene": 3500, "party": 3000, "present_each": 2600, "companion": 3800, "objectives": 3500, "memory": 4500,
@@ -403,7 +404,7 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     here = (camp["current_location"] or "").strip().lower()
     if here and not pc_group:  # an NPC recorded at the PC's location (op npc) is in the room even if no scene lists them
         present += [c["id"] for c in chars if not c["in_party"] and (c.get("location") or "").strip().lower() == here
-                    and c["status"] not in ("deceased", "dead") and c["id"] not in present]
+                    and c["status"] not in GONE and c["id"] not in present]
     named = [i for i in _named(chars, focus_text) if i != (pc or {}).get("id")]
     po = []
     for g in groups:
@@ -411,7 +412,7 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
         tag = " ← PLAYER CHARACTER IS HERE" if g["key"] == pc_group else ""
         po.append(f"- [{g['key']}] {g['label']} @ {g['location'] or 'location not recorded'}{tag}" + (f" — {g['activity']}" if g["activity"] else ""))
         po.append("  members: " + ", ".join(f"{c['name']} (id {c['id']}, {_pa(conn, c)}, {c['status']})" for c in members))
-    loose = [c for c in chars if not c.get("assignment") and c["id"] != (pc or {}).get("id") and c["status"] not in ("deceased", "dead")]
+    loose = [c for c in chars if not c.get("assignment") and c["id"] != (pc or {}).get("id") and c["status"] not in GONE]
     if loose and groups:
         po.append("- Not in a group: " + ", ".join(f"{c['name']} (id {c['id']}, {c['location'] or 'location unknown'})" for c in loose))
     if not groups:
@@ -422,7 +423,7 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     # 4 PRESENT CHARACTERS (+ named elsewhere)
     full_ids = present[:B["max_present_full"]] + [i for i in named if i not in present][:B["max_named_absent"]]
     if B["include_absent_party"]:  # large profile: everyone in the party, labelled NOT PRESENT, so offscreen play stays in character
-        full_ids += [c["id"] for c in chars if c["in_party"] and c["id"] not in full_ids and c["status"] not in ("deceased", "dead")]
+        full_ids += [c["id"] for c in chars if c["in_party"] and c["id"] not in full_ids and c["status"] not in GONE]
     blocks, companions = [], 0
     for i in full_ids:
         c = dict(by_id[i])

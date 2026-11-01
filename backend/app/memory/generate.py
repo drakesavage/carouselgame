@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
+from ..carousel.fate import GONE_SQL
 from ..db import now_iso, one, rows, transaction
 
 GENERATED = "generated"  # gm_secrets.source of a companion sheet this module wrote (and may rewrite)
@@ -113,7 +114,7 @@ def _record(conn: sqlite3.Connection, cid: int, c: dict) -> str:
     old = one(conn, "SELECT content FROM gm_secrets WHERE campaign_id = ? AND kind = 'companion_sheet' AND subject = ?", (cid, c["slug"]))
     if old:
         out.append(f"- previous private sheet (keep what still fits):\n{old['content'][:2500]}")
-    others = rows(conn, """SELECT name, bio, sheet_json FROM characters WHERE campaign_id = ? AND id NOT IN (?, ?) AND status NOT IN ('dead','deceased')
+    others = rows(conn, f"""SELECT name, bio, sheet_json FROM characters WHERE campaign_id = ? AND id NOT IN (?, ?) AND status NOT IN {GONE_SQL}
                            ORDER BY in_party DESC, id LIMIT 12""", (cid, c["id"], camp["active_character_id"] or -1))
     if others:
         def fam(o):  # relatives already named, so a new character's family doesn't reuse them

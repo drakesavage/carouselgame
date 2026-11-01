@@ -515,6 +515,51 @@ CREATE TABLE IF NOT EXISTS story_revisions (   -- GM-only except public_summary
   reason TEXT,
   turn_id INTEGER
 );
+-- Fate (carousel/fate.py, rules/fate_ops.py). death_events is append-only: a later restore or rescue never deletes a row.
+-- missing_posters: one per character left behind by a wipe; the Diner board shows those not held and not found.
+CREATE TABLE IF NOT EXISTS death_events (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  character_id INTEGER NOT NULL REFERENCES characters(id),
+  story_id INTEGER,
+  phase TEXT,
+  cause TEXT,                                  -- GM-only (it can name the antagonist)
+  last_action TEXT,
+  earned_effects_json TEXT NOT NULL DEFAULT '[]',
+  witnesses_json TEXT NOT NULL DEFAULT '[]',
+  node_id TEXT,
+  venue_id TEXT,
+  zone_id TEXT,
+  items_json TEXT NOT NULL DEFAULT '[]',
+  minutes INTEGER,
+  turn_id INTEGER
+);
+CREATE TABLE IF NOT EXISTS missing_posters (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  character_id INTEGER NOT NULL REFERENCES characters(id),
+  group_no INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  plot_armor INTEGER,
+  archetype TEXT,
+  last_seen TEXT,
+  story_id INTEGER,
+  story_lock TEXT,
+  death_event_id INTEGER,
+  posted_minutes INTEGER,
+  held_by_character_id INTEGER,
+  rescued_minutes INTEGER
+);
+CREATE TABLE IF NOT EXISTS danger_warnings (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  story_id INTEGER,
+  character_id INTEGER,                        -- NULL = the whole group
+  rule TEXT NOT NULL,
+  warning TEXT NOT NULL,
+  turn_id INTEGER,
+  minutes INTEGER
+);
 CREATE TABLE IF NOT EXISTS story_spoilers (
   campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
   story_lock TEXT NOT NULL,
@@ -633,6 +678,13 @@ COLUMN_MIGRATIONS = [
     *[("characters", c, "INTEGER NOT NULL DEFAULT 0") for c in ("stars", "pending_stat_points", "starless_streak")],
     ("turns", "kind", "TEXT"),
     *[("campaigns", c, "TEXT") for c in ("opening_stage", "lure_kind", "lure_belief", "lure_resident", "lure_paid_off")],  # carousel/opening.py
+    *[("characters", c, f"TEXT NOT NULL DEFAULT '{d}'") for c, d in (("physical_condition", "alive"), ("wallpaper_status", "active"),
+                                                                    ("participation", "full"), ("persistent_fate", "ongoing"),
+                                                                    ("rescue_eligibility", "not_applicable"))],   # carousel/fate.py
+    ("characters", "rights_basis", "TEXT"),          # the ticket of an open posthumous window
+    *[(t, "group_no", "INTEGER NOT NULL DEFAULT 1") for t in ("campaigns", "stories")],
+    ("stories", "rescue_json", "TEXT"),              # GM-only: {"character_id", "ticket_ref", "poster_ids"}
+    ("stories", "deathwatch_pace", "TEXT NOT NULL DEFAULT 'full'"),
     ("characters", "role_evidence_json", "TEXT"),   # {"quotes": [...], "contextual_reason": str} from silas_assigns             # NULL = the player's own words; arrival | arrival_omen (map_api.py travel)  # ordered quest ids that make up the immediate objective  # {cx, cy, k, ar}: square crop of the portrait image (null = default)  # comfy | codex (art/codex_image.py)  # staged tool calls and roll records while a turn is in flight
 ]
 

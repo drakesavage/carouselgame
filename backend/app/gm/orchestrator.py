@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from ..carousel.fate import GONE_SQL
 from ..carousel.refdata import open_campaign
 from ..config import Settings
 from ..db import connect, now_iso, one, rows, transaction
@@ -391,7 +392,7 @@ def absent_names(conn, cid: int) -> frozenset:
     spot = lambda t: re.split(r"[,—]", t or "")[0].strip().lower()   # people at the same place as the player character are present
     where = spot((one(conn, "SELECT current_location FROM campaigns WHERE id = ?", (cid,)) or {}).get("current_location"))
     out = set()
-    for c in rows(conn, "SELECT name, assignment, location FROM characters WHERE campaign_id = ? AND status NOT IN ('deceased','dead') AND assignment IS NOT NULL", (cid,)):
+    for c in rows(conn, f"SELECT name, assignment, location FROM characters WHERE campaign_id = ? AND status NOT IN {GONE_SQL} AND assignment IS NOT NULL", (cid,)):
         if here and c["assignment"] != here and spot(c["location"]) != where:
             out.update({c["name"], c["name"].split()[0]})
     for g in rows(conn, "SELECT key, label, location FROM party_groups WHERE campaign_id = ? AND status = 'active'", (cid,)):

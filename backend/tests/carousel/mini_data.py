@@ -136,7 +136,13 @@ MINI = {
                   "base.film-buff": {"stats": {"Mettle": 1, "Moxie": 3, "Hustle": 1, "Savvy": 5, "Grit": 1}, "base_pa": 11}}}},
     "tropes": {"tropes": [{"id": "1", "name": "HIDDENTROPE-GOLF-7", "full_player": True, "has_enemy": True, "reference_only": False,
                            "variants": [{"name": "HIDDENTROPE-GOLF-7", "description": "The house always knows where you hid."},
-                                        {"name": "HIDDENTROPE-GOLF-7", "description": "Doors open for it alone."}]}]},
+                                        {"name": "HIDDENTROPE-GOLF-7", "description": "Doors open for it alone."}]},
+                          {"id": "2", "name": "MINI-RESCUE-TICKET", "full_player": True,
+                           "variants": [{"trope_type": "Rescue", "tags": ["Rescue", "Story alteration"],
+                                         "description": "Rescue: enter the storyline holding the missing posters of players who died in it."}]},
+                          {"id": "3", "name": "MINI-LAST-WORDS", "full_player": True,
+                           "variants": [{"trope_type": "Action", "tags": ["Death/sacrifice"],
+                                         "description": "Once, after death, one sentence reaches the living."}]}]},
     "location_art": {"created_at": "2026-10-30", "purpose": "test", "references": [
         *[{"location_id": p, "name": p, "relative_image_path": f"assets/identity_images/{p}_identity_v001.png"}
           for p in ("CAR-016", "CAR-047", "CAR-002", "CAR-006", "CAR-086")],

@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import sqlite3
 
+from .carousel.fate import GONE_SQL
 from .db import one, rows
 
 
@@ -55,8 +56,8 @@ def run(conn: sqlite3.Connection, cid: int) -> list[dict]:
                           _place(g["location"]) == _place(camp["current_location"])))
 
     # Physical positions: a character's own location must agree with its group's (unknown stays unknown)
-    for c in rows(conn, """SELECT name, assignment, location FROM characters WHERE campaign_id = ? AND assignment IS NOT NULL
-                           AND status NOT IN ('deceased','dead') ORDER BY party_order, name""", (cid,)):
+    for c in rows(conn, f"""SELECT name, assignment, location FROM characters WHERE campaign_id = ? AND assignment IS NOT NULL
+                           AND status NOT IN {GONE_SQL} ORDER BY party_order, name""", (cid,)):
         g = groups.get(c["assignment"])
         if not g:
             out.append(_check(f"{c['name']}: group", {"assignment": c["assignment"]}, False, "assigned to a group that does not exist"))

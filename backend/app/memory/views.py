@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import sqlite3
 
+from ..carousel.fate import GONE_SQL
 from ..db import one, rows
 
 PUBLIC_CHAR_COLUMNS = """id, campaign_id, slug, name, kind, roster_category, species, status, location, in_party, party_order,
@@ -80,7 +81,7 @@ def campaign_summary(conn: sqlite3.Connection, cid: int) -> dict | None:
     camp["scene"] = one(conn, """SELECT id, title, location, group_key, situation, conditions, threats, participants_json, started_game_minutes
                                  FROM scenes WHERE campaign_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1""", (cid,))
     groups = rows(conn, "SELECT key, label, location, activity FROM party_groups WHERE campaign_id = ? AND status = 'active' ORDER BY id", (cid,))
-    cards = {c["id"]: c for c in (character_card(conn, x) for x in rows(conn, f"SELECT {PUBLIC_CHAR_COLUMNS} FROM characters WHERE campaign_id = ? AND status NOT IN ('deceased','dead') ORDER BY party_order, name", (cid,)))}
+    cards = {c["id"]: c for c in (character_card(conn, x) for x in rows(conn, f"SELECT {PUBLIC_CHAR_COLUMNS} FROM characters WHERE campaign_id = ? AND status NOT IN {GONE_SQL} ORDER BY party_order, name", (cid,)))}
     for g in groups:
         g["members"] = [c for c in cards.values() if c.get("assignment") == g["key"]]
     camp["groups"] = groups
