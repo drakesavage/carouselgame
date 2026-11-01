@@ -182,12 +182,20 @@ def _apply_use(ctx: Ctx, op: UseTrope) -> dict:
     require_reference(ctx.conn)
     c = resolve_character(ctx.conn, ctx.campaign_id, op.character)
     t, d = _owned(ctx, c, op.ticket)
+    if c["participation"] in ("observer", "none"):
+        raise ChangeError(f"{c['name']} can't act in the story now (participation {c['participation']}); tropes need a living hand")
+    if c["participation"] == "posthumous_limited" and t["ticket_ref"] != c["rights_basis"]:
+        raise ChangeError(f"{c['name']} is dead and may play only {c['rights_basis']} through the posthumous window")
     if not t["equipped"]:
         raise ChangeError(f"{d['name']} is not equipped")
     if t["uses_left"] is not None and t["uses_left"] <= 0:
         raise ChangeError(f"{d['name']} has no uses left" + (f" (recharges per {t['recharge']})" if t["recharge"] else ""))
     left = None if t["uses_left"] is None else t["uses_left"] - 1
     ctx.conn.execute("UPDATE character_tickets SET uses_left = ? WHERE id = ?", (left, t["id"]))
+    if c["participation"] == "posthumous_limited":   # the window closes after its one use
+        from ..carousel.fate import set_rights
+        ctx.conn.execute("UPDATE characters SET rights_basis = NULL WHERE id = ?", (c["id"],))
+        set_rights(ctx.conn, c["id"])
     summary = f"{c['name']} plays {d['name']}: {op.effect}"
     ctx.event("trope_used", summary, {"character_id": c["id"], "ticket": t["ticket_ref"], "effect": op.effect, "uses_left": left}, _vis(t))
     return {"summary": summary, "uses_left": left, "visibility": _vis(t)}
