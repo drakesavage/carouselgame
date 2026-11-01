@@ -131,6 +131,8 @@ export type ActiveStory = { id: number; title: string; premise: string | null; p
   cast: StoryCast[]; revisions: string[] };
 export type StoryHistory = { id: number; title: string; ending: string; started_minutes: number | null; ended_minutes: number | null;
   novelty: number | null; cast: string[] };
+export type PlayerVenue = { venue_id: string; title: string; zone: { id: string; label: string };
+  ways: { id: string; label: string; blocked: string | null }[]; seen: { id: string; label: string }[]; entry: string; exit: string };
 export type TravelResult = { summary: string; arrived: string; interrupted: { omen_id: string; description: string } | null; minutes: number; geometry_px: [number, number][] };
 export type Manifest = { locations: Record<string, string>; characters: Record<string, string> };
 export type DiagnosticsRow = { turn_id: number; status: string; input: string; created_at: string; rounds: number; flags: number; input_tokens: number };
@@ -212,6 +214,9 @@ export const api = {
   spendStatPoint: (id: number, charId: number, stat: string) => post<{ summary: string }>(`api/campaigns/${id}/characters/${charId}/stat-point`, { stat }),
   travel: (id: number, to: { to: string } | { north: number; west: number }, key: string) =>
     post<{ travel: TravelResult; turn: TurnStatus }>(`api/campaigns/${id}/travel`, { ...to, idempotency_key: key }),
+  venue: (id: number) => req<PlayerVenue | null>(`api/campaigns/${id}/venue`),
+  venueMove: (id: number, to: string, key: string) =>
+    post<{ move: { summary: string; zone_id: string; sighted: string[] }; turn: TurnStatus }>(`api/campaigns/${id}/venue/move`, { to, idempotency_key: key }),
   journal: (id: number) => req<{ kinds: { id: string; label: string }[]; quests: JournalQuest[] }>(`api/campaigns/${id}/journal`),
   loreNotebook: (id: number) => req<LoreFact[]>(`api/campaigns/${id}/lore-notebook`),
   chronology: (id: number) => req<Chronology>(`api/campaigns/${id}/chronology`),

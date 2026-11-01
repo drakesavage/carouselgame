@@ -63,7 +63,9 @@ OFFSCREEN = re.compile(r"\b(message|messages|text|ping|radio|chat|contact|check 
 
 SERVER_TURN_ROUTES = {"arrival": ("talk", "a quiet arrival (the move is already applied)"),
                       "arrival_omen": ("action", "an Omen interrupted the walk"),
-                      "opening": ("action", "the opening sets the lure and the cast")}
+                      "opening": ("action", "the opening sets the lure and the cast"),
+                      "zone": ("talk", "a quiet move inside a venue"),
+                      "zone_omen": ("action", "an Omen in this room")}
 
 
 def classify_turn(text: str, story_active: bool, absent: set[str] | frozenset = frozenset(), turn_kind: str | None = None) -> tuple[str, str]:

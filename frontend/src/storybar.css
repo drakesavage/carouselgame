@@ -16,3 +16,11 @@
 .opening-steps { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .opening-steps li svg { vertical-align: -1px; }
 @media (max-width: 640px) { .opening-steps { grid-template-columns: repeat(5, minmax(0, 1fr)); } .opening-steps li { font-size: 9px; } }
+
+/* VenuePanel: the room the group is in and the ways on */
+.venuepanel { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 8px 10px; margin: 0 0 8px; }
+.venuepanel-here { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.venuepanel-ways { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 6px; }
+.venuepanel-ways .btn { display: inline-flex; align-items: center; gap: 4px; }
+.venuepanel-seen, .venuepanel-leave { font-size: 12px; color: var(--muted); }
+.venuepanel-msg { font-size: 12px; color: var(--red); margin-bottom: 4px; }

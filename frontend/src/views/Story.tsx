@@ -5,6 +5,7 @@ import { Chip, Empty, Markdown, Portrait } from "../ui";
 import { play } from "../prefs";
 import { ReportButton } from "./Report";
 import { StoryBar } from "./StoryBar";
+import { VenuePanel } from "./VenuePanel";
 import { OpeningBar } from "./OpeningBar";
 import { startOpening } from "./Campaigns";
 import { CampaignSidebar, CombatPanel, Decision, DiscoveryCards, IMPORTANT_CARDS, portraitSrc, RosterPanel, SceneBanner, splitDecision, StoryText, useManifest } from "./Hud";
@@ -176,6 +177,12 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
         <SceneBanner campaign={campaign} onArt={onState} openCharacter={openCharacter} />
         <OpeningBar campaign={campaign} />
         <StoryBar cid={cid} version={campaign} />
+        <VenuePanel cid={cid} version={campaign} onTurn={(t) => {
+          anchor.current = { kind: "bottom" };
+          if (t.status === "completed") finish(t);
+          else setPending({ key: "", text: "", turnId: t.turn_id, status: t.status === "failed" ? "failed" : "processing", progress: t.progress,
+                            error: t.error ?? undefined });
+        }} />
         <div className="combat-top">{campaign.encounter && <CombatPanel enc={campaign.encounter} campaign={campaign} onArt={onState} />}</div>
         <div className="transcript" ref={scroller} onScroll={onScroll} role="log" aria-label="Story transcript">
           <div className="transcript-inner">

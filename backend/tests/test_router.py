@@ -182,4 +182,4 @@ def test_conversation_mode_cannot_record_canon():
 
 def test_the_opening_turn_routes_to_the_mechanics_gm():
     assert router.classify_turn("hi", False, turn_kind="opening")[0] == "action"
-    assert set(router.SERVER_TURN_ROUTES) == {"arrival", "arrival_omen", "opening"}
+    assert set(router.SERVER_TURN_ROUTES) == {"arrival", "arrival_omen", "opening", "zone", "zone_omen"}

@@ -11,7 +11,8 @@ SECRETS = ["GMSECRET-ALPHA-1", "GMSECRET-BRAVO-2", "GMSECRET-CHARLIE-3", "GMSECR
            "UNKNOWNPLACE-HOTEL-8",   # a spoiler place the group doesn't know (mini CAR-099)
            "MINI-OBLIGATION", "MINI-COUNTERPLAY", "MINI-CLUE",   # the active story's screenplay and sealed house story
            "REVISION-INDIA-9", "ENDING-JULIET-10",   # a revision's private operations/reason and a revised ending predicate
-           "LURE-TRUTH-KILO-11", "MINI-NPC-SECRET-2"]   # a new game's lure truth and its introduced resident's gm_only (mini CAR-NPC-003)
+           "LURE-TRUTH-KILO-11", "MINI-NPC-SECRET-2",   # a new game's lure truth and its introduced resident's gm_only (mini CAR-NPC-003)
+           "MINI-HIDDEN-ROOM", "OM-005", "open:cellar_door"]   # an unreached farm room, and the Omen placed in a room not yet entered
 
 
 def _plant(conn, cid):
@@ -68,7 +69,7 @@ def _player_urls(client, cid):
             f"/api/campaigns/{cid}/journal", f"/api/campaigns/{cid}/lore-notebook", f"/api/campaigns/{cid}/chronology",
             f"/api/campaigns/{cid}/search?q=gmsecret alpha bravo charlie delta echo foxtrot secret plot",
             f"/api/campaigns/{cid}/inventory", f"/api/campaigns/{cid}/map", "/api/reference/status",
-            f"/api/campaigns/{cid}/story", f"/api/campaigns/{cid}/stories"]
+            f"/api/campaigns/{cid}/story", f"/api/campaigns/{cid}/stories", f"/api/campaigns/{cid}/venue"]
     for ch in client.get(f"/api/campaigns/{cid}/characters").json():
         urls.append(f"/api/campaigns/{cid}/characters/{ch['id']}")
         urls.append(f"/api/campaigns/{cid}/characters/{ch['id']}/dossier")
@@ -84,6 +85,9 @@ def test_no_gm_material_in_any_player_response(client, conn, campaign_id):
     client.post(f"/api/campaigns/{cid}/turns", json={"text": "I look around carefully", "idempotency_key": uuid.uuid4().hex})
     # and a walk next door to the spoiler place, with its Omen sighting and arrival turn
     client.post(f"/api/campaigns/{cid}/travel", json={"to": "CAR-086", "idempotency_key": uuid.uuid4().hex})
+    # then into the farm's barn: the cellar door is now one link away, the room past it is not
+    r = client.post(f"/api/campaigns/{cid}/venue/move", json={"to": "SM-T01:n02_barn", "idempotency_key": uuid.uuid4().hex})
+    assert r.status_code == 200, r.text
     assert client.get(f"/api/campaigns/{cid}/story").json()["active"]["revisions"] == ["Jonah has a plan for the barn."]
     other = _plant_opening(conn)
     for url in [*_player_urls(client, cid), *_player_urls(client, other)]:
