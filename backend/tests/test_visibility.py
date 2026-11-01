@@ -8,7 +8,9 @@ from app.db import now_iso, transaction
 SECRETS = ["GMSECRET-ALPHA-1", "GMSECRET-BRAVO-2", "GMSECRET-CHARLIE-3", "GMSECRET-DELTA-4", "GMSECRET-ECHO-5", "GMSECRET-FOXTROT-6",
            "DEMO SECRET", "MINI-SEALED-TRUTH", "MINI-NPC-SECRET",   # Omen sealed truth and NPC gm_only (mini reference.db, conftest)
            "HIDDENTROPE-GOLF-7", "Doors open for it alone.", "trope:1",   # Adeline's hidden trope: name, text, ref
-           "UNKNOWNPLACE-HOTEL-8"]   # a spoiler place the group doesn't know (mini CAR-099)
+           "UNKNOWNPLACE-HOTEL-8",   # a spoiler place the group doesn't know (mini CAR-099)
+           "MINI-OBLIGATION", "MINI-COUNTERPLAY", "MINI-CLUE",   # the active story's screenplay and sealed house story
+           "REVISION-INDIA-9", "ENDING-JULIET-10"]   # a revision's private operations/reason and a revised ending predicate
 
 
 def _plant(conn, cid):
@@ -26,6 +28,23 @@ def _plant(conn, cid):
                      (cid, "npc", "adeline", SECRETS[5], "gm", now_iso()))
     from tests.conftest import apply
     apply(conn, cid, {"op": "use_trope", "character": "Adeline Winter", "ticket": "trope:1", "effect": "she knew where they hid"})
+    _plant_story(conn, cid)
+
+
+def _plant_story(conn, cid):
+    """An active story whose packet, revision and endings hold planted strings (the sealed truth is MINI-SEALED-TRUTH)."""
+    from tests.carousel.test_revisions import COMMANDO
+    from tests.carousel.test_story_ops import begin, seen
+    from tests.conftest import apply
+    seen(conn, cid, "OM-001")
+    begin(conn, cid)
+    apply(conn, cid, {"op": "grant_ticket", "character": "Jonah", "ticket": COMMANDO, "source": "test"})
+    apply(conn, cid, {"op": "equip_ticket", "character": "Jonah", "ticket": COMMANDO})
+    apply(conn, cid, {"op": "revise_screenplay", "character": "Jonah", "ticket": COMMANDO, "base_version": 0, "scope": "ending_conditions",
+                      "operations": [{"family": "rewrite_conditional_objective", "detail": "REVISION-INDIA-9"}],
+                      "costs": ["REVISION-INDIA-9 cost"], "new_dangers": ["REVISION-INDIA-9 danger"], "preserved_facts": [],
+                      "new_endings": {"full_success": {"predicate": "ENDING-JULIET-10"}},
+                      "public_summary": "Jonah has a plan for the barn.", "reason": "REVISION-INDIA-9 reason"})
 
 
 def _player_urls(client, cid):
@@ -36,7 +55,8 @@ def _player_urls(client, cid):
             f"/api/campaigns/{cid}/records?q=secret debt syndicate hidden plans", f"/api/rules/search?q=secret&cid={cid}",
             f"/api/campaigns/{cid}/journal", f"/api/campaigns/{cid}/lore-notebook", f"/api/campaigns/{cid}/chronology",
             f"/api/campaigns/{cid}/search?q=gmsecret alpha bravo charlie delta echo foxtrot secret plot",
-            f"/api/campaigns/{cid}/inventory", f"/api/campaigns/{cid}/map", "/api/reference/status"]
+            f"/api/campaigns/{cid}/inventory", f"/api/campaigns/{cid}/map", "/api/reference/status",
+            f"/api/campaigns/{cid}/story", f"/api/campaigns/{cid}/stories"]
     for ch in client.get(f"/api/campaigns/{cid}/characters").json():
         urls.append(f"/api/campaigns/{cid}/characters/{ch['id']}")
         urls.append(f"/api/campaigns/{cid}/characters/{ch['id']}/dossier")
@@ -52,6 +72,7 @@ def test_no_gm_material_in_any_player_response(client, conn, campaign_id):
     client.post(f"/api/campaigns/{cid}/turns", json={"text": "I look around carefully", "idempotency_key": uuid.uuid4().hex})
     # and a walk next door to the spoiler place, with its Omen sighting and arrival turn
     client.post(f"/api/campaigns/{cid}/travel", json={"to": "CAR-086", "idempotency_key": uuid.uuid4().hex})
+    assert client.get(f"/api/campaigns/{cid}/story").json()["active"]["revisions"] == ["Jonah has a plan for the barn."]
     for url in _player_urls(client, cid):
         r = client.get(url)
         assert r.status_code == 200, url

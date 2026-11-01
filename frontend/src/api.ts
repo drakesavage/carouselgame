@@ -122,6 +122,12 @@ export type PlayerMap = {
   last_route: { geometry_px: [number, number][]; interrupted: { omen_id: string; description: string } | null } | null;
   tiles: { template: string; levels: TileLevel[]; size: number };
 };
+/** Carousel stories (story_api.py): never the sealed packet, pressure, screenplay or ending predicates. */
+export type StoryCast = { id: number; name: string; casting: string; screen_moments: number };
+export type ActiveStory = { id: number; title: string; premise: string | null; phase: string; phases: string[]; camera: "on" | "off";
+  cast: StoryCast[]; revisions: string[] };
+export type StoryHistory = { id: number; title: string; ending: string; started_minutes: number | null; ended_minutes: number | null;
+  novelty: number | null; cast: string[] };
 export type TravelResult = { summary: string; arrived: string; interrupted: { omen_id: string; description: string } | null; minutes: number; geometry_px: [number, number][] };
 export type Manifest = { locations: Record<string, string>; characters: Record<string, string> };
 export type DiagnosticsRow = { turn_id: number; status: string; input: string; created_at: string; rounds: number; flags: number; input_tokens: number };
@@ -197,6 +203,9 @@ export const api = {
     items: string[]; items_total: number; quests: string[]; characters: string[]; messages_hidden: number; note: string }>(`api/campaigns/${cid}/saves/${saveId}/preview`),
   problemReport: (cid: number, turnId: number | null, note: string) => post<{ path: string; markdown: string; turn_id: number | null }>(`api/campaigns/${cid}/reports`, { turn_id: turnId, note }),
   map: (id: number) => req<PlayerMap>(`api/campaigns/${id}/map`),
+  story: (id: number) => req<{ active: ActiveStory | null }>(`api/campaigns/${id}/story`),
+  stories: (id: number) => req<StoryHistory[]>(`api/campaigns/${id}/stories`),
+  spendStatPoint: (id: number, charId: number, stat: string) => post<{ summary: string }>(`api/campaigns/${id}/characters/${charId}/stat-point`, { stat }),
   travel: (id: number, to: { to: string } | { north: number; west: number }, key: string) =>
     post<{ travel: TravelResult; turn: TurnStatus }>(`api/campaigns/${id}/travel`, { ...to, idempotency_key: key }),
   journal: (id: number) => req<{ kinds: { id: string; label: string }[]; quests: JournalQuest[] }>(`api/campaigns/${id}/journal`),

@@ -3,7 +3,7 @@ import {
   Award, Backpack, BookOpen, Bookmark, CalendarDays, ChevronDown, ChevronRight, Clock3, Flag, Footprints, Hammer, Handshake, Heart, MapPin,
   Scroll, Sparkles, Swords, Users, Wrench, Zap,
 } from "lucide-react";
-import { api, Chronology, fmtMinutes, JournalQuest, LoreFact } from "../api";
+import { api, Chronology, fmtMinutes, JournalQuest, LoreFact, StoryHistory } from "../api";
 import { Chip, Empty, humanize } from "../ui";
 import "../journal.css";
 
@@ -94,16 +94,19 @@ const EVENT_ICON: Record<string, typeof Clock3> = {
   quest_added: Flag, quest_updated: Flag, quest_completed: Flag, achievement: Award, location_changed: Footprints, encounter_start: Swords,
   encounter_end: Swords, advancement_checkpoint: Sparkles, fact_recorded: Scroll, scene_started: MapPin, group_moved: Footprints,
 };
-const TABS = [{ id: "timeline", label: "Timeline", icon: CalendarDays }, { id: "lore", label: "Lore notebook", icon: BookOpen },
+const TABS = [{ id: "timeline", label: "Timeline", icon: CalendarDays }, { id: "stories", label: "Stories", icon: Award },
+  { id: "lore", label: "Lore notebook", icon: BookOpen },
   { id: "before", label: "Before the console", icon: Scroll }] as const;
 
 export function ChronicleView({ cid, version, openCharacter }: { cid: number; version: number; openCharacter: (id: number) => void }) {
   const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("timeline");
   const [chron, setChron] = useState<Chronology | null>(null);
   const [lore, setLore] = useState<LoreFact[] | null>(null);
+  const [stories, setStories] = useState<StoryHistory[] | null>(null);
   const [bookkeeping, setBookkeeping] = useState(false);
   const [cat, setCat] = useState<string | null>(null);
-  useEffect(() => { api.chronology(cid).then(setChron).catch(() => {}); api.loreNotebook(cid).then(setLore).catch(() => setLore([])); }, [cid, version]);
+  useEffect(() => { api.chronology(cid).then(setChron).catch(() => {}); api.loreNotebook(cid).then(setLore).catch(() => setLore([]));
+    api.stories(cid).then(setStories).catch(() => setStories([])); }, [cid, version]);
   const cats = useMemo(() => Array.from(new Set((lore ?? []).map((f) => f.category))).sort(), [lore]);
   return (
     <div className="view-inner chronicle">
@@ -133,6 +136,16 @@ export function ChronicleView({ cid, version, openCharacter }: { cid: number; ve
             );
           })}
         </>
+      ))}
+      {tab === "stories" && (!stories ? <div className="muted">Loading…</div> : !stories.length ? <Empty>No story has ended yet.</Empty> : (
+        <ol className="tl story-history">{stories.map((s) => (
+          <li key={s.id}>
+            <span className="mono muted tl-time">{s.ended_minutes != null ? `T+${fmtMinutes(s.ended_minutes)}` : "—"}</span>
+            <Award size={13} className="tl-icon" />
+            <span><b>{s.title}</b> <Chip tone={s.ending === "full_success" ? "green" : s.ending === "defeat" ? "red" : "amber"}>{humanize(s.ending)}</Chip>
+              {s.cast.length > 0 && <span className="sub"> {s.cast.join(", ")}</span>}</span>
+          </li>))}
+        </ol>
       ))}
       {tab === "lore" && (!lore ? <div className="muted">Loading…</div> : (
         <>

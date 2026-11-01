@@ -4,6 +4,7 @@ import { api, ApiError, Campaign, CharacterCard, Message, newKey, RollCard, Turn
 import { Chip, Empty, Markdown, Portrait } from "../ui";
 import { play } from "../prefs";
 import { ReportButton } from "./Report";
+import { StoryBar } from "./StoryBar";
 import { CampaignSidebar, CombatPanel, Decision, DiscoveryCards, IMPORTANT_CARDS, portraitSrc, RosterPanel, SceneBanner, splitDecision, StoryText, useManifest } from "./Hud";
 
 const QUIPS = [
@@ -161,6 +162,7 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
       </aside>
       <div className="story-col">
         <SceneBanner campaign={campaign} onArt={onState} openCharacter={openCharacter} />
+        <StoryBar cid={cid} version={campaign} />
         <div className="combat-top">{campaign.encounter && <CombatPanel enc={campaign.encounter} campaign={campaign} onArt={onState} />}</div>
         <div className="transcript" ref={scroller} onScroll={onScroll} role="log" aria-label="Story transcript">
           <div className="transcript-inner">

@@ -19,7 +19,7 @@ type Dossier = {
   id: number; slug: string; name: string; kind: string; is_player: boolean; status: string; life: Life; in_party: boolean; roster_category: string | null;
   portrait_path: string | null; portrait_crop: PortraitCrop | null;
   role: { id: string | null; reason: string | null; aspect_id: string | null; advanced_role_id: string | null };
-  stats: CarouselStats; statuses: { id: number; name: string; polarity: string | null; description: string | null }[]; tickets?: Ticket[];
+  stats: CarouselStats; rewards?: { stars: number; pending_stat_points: number }; statuses: { id: number; name: string; polarity: string | null; description: string | null }[]; tickets?: Ticket[];
   group: { key: string; label: string; location: string | null; activity: string | null } | null; location: string | null;
   equipment: { equipped: Item[]; carried: Item[]; linked_shared: Item[]; commitments: Record<string, any>[]; slot_labels: Record<string, string> };
   story: Record<string, any>; history: HistoryEntry[];
@@ -73,7 +73,7 @@ export function CharacterDossierDialog({ cid, charId, onClose, onChanged }: { ci
                 ))}
               </nav>
               <div className="dossier-body" role="tabpanel" ref={body}>
-                {tab === "overview" && <Overview d={d} openTab={setTab} />}
+                {tab === "overview" && <Overview cid={cid} d={d} openTab={setTab} onChanged={changed} />}
                 {tab === "equipment" && <EquipmentTab d={d} />}
                 {tab === "story" && <StoryTab d={d} />}
                 {tab === "history" && <HistoryTab d={d} raw={raw} />}
@@ -184,7 +184,31 @@ function StatusChip({ s }: { s: { name: string; polarity: string | null; descrip
 // ------------------------------------------------------------------ overview
 const STATS = ["Mettle", "Moxie", "Hustle", "Savvy", "Grit"] as const;
 
-function Overview({ d, openTab }: { d: Dossier; openTab: (t: TabId) => void }) {
+/** Reward stars (every five make a stat point) and spending a pending stat point on a base stat. */
+function Rewards({ cid, d, onChanged }: { cid: number; d: Dossier; onChanged: () => void }) {
+  const [stat, setStat] = useState<string>("mettle");
+  const [err, setErr] = useState<string | null>(null);
+  const r = d.rewards;
+  if (!r || d.stats.stats.Mettle == null) return null;
+  const spend = async () => { setErr(null); try { await api.spendStatPoint(cid, d.id, stat); onChanged(); } catch (e) { setErr(String((e as Error).message ?? e)); } };
+  return (
+    <div className="rewards">
+      <span className="sub">Stars {r.stars}/5</span>
+      {r.pending_stat_points > 0 && (
+        <span className="row">
+          <Chip tone="gold">{r.pending_stat_points} stat point{r.pending_stat_points > 1 ? "s" : ""}</Chip>
+          <select className="select" value={stat} onChange={(e) => setStat(e.target.value)} aria-label="Stat to raise">
+            {STATS.map((k) => <option key={k} value={k.toLowerCase()}>{k}</option>)}
+          </select>
+          <button className="btn small" onClick={spend}>Spend stat point</button>
+        </span>
+      )}
+      {err && <div className="error-box">{err}</div>}
+    </div>
+  );
+}
+
+function Overview({ cid, d, openTab, onChanged }: { cid: number; d: Dossier; openTab: (t: TabId) => void; onChanged: () => void }) {
   const st = d.stats;
   return (
     <div className="ov-grid">
@@ -205,6 +229,7 @@ function Overview({ d, openTab }: { d: Dossier; openTab: (t: TabId) => void }) {
             <div className="chips">{st.modifiers.map((m) => <Chip key={m.id} tone={m.op === "multiply" && m.value < 1 ? "red" : "green"} title={`${m.scope}`}>
               {m.target} {m.op === "multiply" ? `×${m.value}` : `${m.value >= 0 ? "+" : ""}${m.value}`} · {m.source}</Chip>)}</div>
           )}
+          <Rewards cid={cid} d={d} onChanged={onChanged} />
         </section>
         <section className="dpanel ov-effects">
           <h3>Tickets</h3>

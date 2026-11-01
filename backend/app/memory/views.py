@@ -12,7 +12,7 @@ import sqlite3
 from ..db import one, rows
 
 PUBLIC_CHAR_COLUMNS = """id, campaign_id, slug, name, kind, roster_category, species, status, location, in_party, party_order,
-    role_id, aspect_id, advanced_role_id, role_reason, portrait_path, portrait_crop_json, provenance, assignment"""
+    role_id, aspect_id, advanced_role_id, role_reason, portrait_path, portrait_crop_json, provenance, assignment, stars, pending_stat_points"""
 
 
 def _statuses(conn: sqlite3.Connection, char_id: int) -> list[dict]:

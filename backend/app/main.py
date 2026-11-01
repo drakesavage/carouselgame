@@ -950,6 +950,8 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     register_reference(app, settings, gm_auth)
     from .map_api import register as register_map
     register_map(app, settings, state)
+    from .story_api import register as register_story
+    register_story(app, state, write_lock)
 
     # ------------------------------------------------------------------ frontend
     if FRONTEND_DIST.exists():

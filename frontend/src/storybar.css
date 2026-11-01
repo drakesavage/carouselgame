@@ -1,0 +1,14 @@
+/* The Plot Cycle strip above the story transcript (Phase 8 restyles it). */
+.storybar { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 8px 10px; margin: 0 0 8px; }
+.storybar-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.storybar-title { font-family: var(--display); font-weight: 600; color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.storybar-camera { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
+  padding: 2px 6px; border-radius: var(--radius); border: 1px solid var(--line-2); color: var(--muted); }
+.storybar-camera.on { color: var(--red); border-color: var(--red); }
+.plot-cycle { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 3px; list-style: none; margin: 0; padding: 0; }
+.plot-cycle li { font-size: 10px; text-align: center; padding: 4px 2px; border-radius: 2px; background: var(--panel-2); color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plot-cycle li.past { color: var(--text-2); background: var(--panel-3); }
+.plot-cycle li.now { color: var(--bg); background: var(--amber); font-weight: 700; }
+.storybar-cast { margin-top: 6px; font-size: 11px; color: var(--text-2); }
+@media (max-width: 640px) { .plot-cycle { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
