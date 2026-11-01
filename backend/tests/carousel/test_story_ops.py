@@ -157,3 +157,70 @@ def test_dossier_endings_cannot_be_overridden(conn, campaign_id):
     four = {e: {"predicate": "easy"} for e in ("full_success", "costly_success", "survive_without_victory", "defeat")}
     with pytest.raises(ChangeError, match="sealed"):
         begin(conn, campaign_id, endings=four)
+
+
+# ---------------------------------------------------------------- Task 4: Plot Cycle, pressure, camera, casting
+
+def story(conn):
+    return dict(conn.execute("SELECT * FROM stories WHERE status = 'active'").fetchone())
+
+
+@pytest.fixture
+def running(conn, campaign_id):
+    seen(conn, campaign_id, "OM-001")
+    return begin(conn, campaign_id)["story_id"]
+
+
+def test_advance_phase_forward_and_skip(conn, campaign_id, running):
+    apply(conn, campaign_id, {"op": "advance_phase", "to": "First Blood", "trigger": "the first scarecrow moves"})
+    assert (story(conn)["phase"], story(conn)["pressure"]) == ("First Blood", 2)
+    apply(conn, campaign_id, {"op": "advance_phase", "to": "Finale", "trigger": "the barn burns: everything at once"})
+    s = story(conn)
+    assert s["phase"] == "Finale" and s["pressure"] >= 5
+    evs = events(conn, campaign_id, "story_phase")
+    assert evs[-1]["visibility"] == "player" and evs[-1]["summary"] == "Plot Cycle: First Blood → Finale"
+    assert "barn burns" not in json.dumps(evs)
+
+
+def test_advance_phase_refusals(conn, campaign_id, running):
+    apply(conn, campaign_id, {"op": "advance_phase", "to": "Rebirth", "trigger": "t"})
+    for to, match in (("First Blood", "forward"), ("Rebirth", "forward"), ("The End", "conclude"), ("Intermission", "")):
+        with pytest.raises(ChangeError, match=match):
+            apply(conn, campaign_id, {"op": "advance_phase", "to": to, "trigger": "t"})
+    assert story(conn)["phase"] == "Rebirth"
+
+
+def test_pressure_is_clamped_and_gm_only(conn, campaign_id, running):
+    apply(conn, campaign_id, {"op": "pressure", "delta": 9, "reason": "the radio dies"})
+    assert story(conn)["pressure"] == 6
+    apply(conn, campaign_id, {"op": "pressure", "delta": -20, "reason": "dawn"})
+    assert story(conn)["pressure"] == 0
+    assert {e["visibility"] for e in events(conn, campaign_id, "story_pressure")} == {"gm"}
+
+
+def test_camera_counts_screen_moments(conn, campaign_id, running, pc, companion):
+    apply(conn, campaign_id, {"op": "camera", "on": True, "focus": ["Mara Vance"], "reason": "her move"})
+    apply(conn, campaign_id, {"op": "camera", "on": True, "focus": ["Mara Vance", "Jonah"], "reason": "both"})
+    moments = dict(conn.execute("SELECT character_id, screen_moments FROM story_cast").fetchall())
+    assert moments == {pc: 2, companion: 1}
+    apply(conn, campaign_id, {"op": "camera", "on": False, "focus": [], "reason": "cut away"})
+    assert story(conn)["camera"] == "off"
+    evs = events(conn, campaign_id, "story_camera")
+    assert evs[0]["visibility"] == "player" and "Mara" in evs[0]["summary"]
+    with pytest.raises(ChangeError, match="not in the cast"):
+        apply(conn, campaign_id, {"op": "camera", "on": True, "focus": ["Adeline"], "reason": "x"})
+
+
+def test_cast_character_mid_story(conn, campaign_id, running, npc, companion):
+    apply(conn, campaign_id, {"op": "advance_phase", "to": "First Blood", "trigger": "t"})
+    apply(conn, campaign_id, {"op": "cast_character", "character": "Adeline", "casting": "witness"})
+    assert tuple(conn.execute("SELECT casting, joined_phase FROM story_cast WHERE character_id = ?", (npc,)).fetchone()) == ("witness", "First Blood")
+    apply(conn, campaign_id, {"op": "cast_character", "character": "Jonah", "casting": "sacrifice"})
+    assert tuple(conn.execute("SELECT casting, joined_phase FROM story_cast WHERE character_id = ?", (companion,)).fetchone()) == ("sacrifice", "Party")
+
+
+def test_story_ops_need_an_active_story(conn, campaign_id):
+    for change in ({"op": "advance_phase", "to": "Finale", "trigger": "t"}, {"op": "pressure", "delta": 1, "reason": "r"},
+                   {"op": "camera", "on": True, "focus": [], "reason": "r"}, {"op": "cast_character", "character": "Adeline", "casting": "witness"}):
+        with pytest.raises(ChangeError, match="no story is active"):
+            apply(conn, campaign_id, change)
