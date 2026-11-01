@@ -152,3 +152,24 @@ def test_reimport_protects_story_omens(tmp_path):
     c.close()
     r = run_import(s)
     assert not r.ok and r.missing == {"story_omen": ["OM-404"]}
+
+
+def test_deleting_a_campaign_removes_its_stories_and_marks(conn, settings, campaign_id, pc):
+    from app.campaigns import delete
+    from tests.carousel.test_rewards import AWARDS
+    from tests.carousel.test_revisions import COMMANDO, revision
+    from tests.carousel.test_story_ops import begin, seen
+    from tests.conftest import apply
+    seen(conn, campaign_id, "OM-001")
+    begin(conn, campaign_id)
+    apply(conn, campaign_id, {"op": "grant_ticket", "character": "Jonah", "ticket": COMMANDO, "source": "test"})
+    apply(conn, campaign_id, {"op": "equip_ticket", "character": "Jonah", "ticket": COMMANDO})
+    apply(conn, campaign_id, revision())
+    apply(conn, campaign_id, {"op": "award_mark", "character": "Mara", "track": "advanced.adventurer", "feat": "f"})
+    apply(conn, campaign_id, {"op": "conclude_story", "ending": "defeat", "reason": "r", "awards": AWARDS})
+    apply(conn, campaign_id, {"op": "confirm_spoiler", "story_lock": "MINI-OM-001", "element": "e", "source": "s"})
+    with transaction(conn):
+        conn.execute("UPDATE turns SET status = 'completed'")
+    delete(conn, settings, campaign_id, "Test Town")
+    for t in ("stories", "story_packets", "story_cast", "story_revisions", "story_spoilers", "advanced_marks", "mark_awards"):
+        assert conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] == 0, t

@@ -19,7 +19,8 @@ from .db import next_campaign_id, now_iso, one, remember_campaign_id, rows, tran
 from .memory.snapshots import create_save_point
 
 # tables that hang off characters instead of carrying campaign_id
-CHARACTER_CHILDREN = ("status_effects", "npc_profiles")
+CHARACTER_CHILDREN = ("status_effects", "npc_profiles", "advanced_marks", "mark_awards")
+STORY_CHILDREN = ("story_revisions", "story_cast", "story_packets")   # no campaign_id: they hang off stories
 
 
 def slug(name: str) -> str:
@@ -127,6 +128,8 @@ def delete(conn: sqlite3.Connection, settings: Settings, cid: int, confirm_name:
                         SELECT 'delete', id, document_path || ' ' || section, content FROM source_sections WHERE campaign_id = ?""", (cid,))
         for t in CHARACTER_CHILDREN:
             counts[t] = conn.execute(f"DELETE FROM {t} WHERE character_id IN (SELECT id FROM characters WHERE campaign_id = ?)", (cid,)).rowcount
+        for t in STORY_CHILDREN:
+            counts[t] = conn.execute(f"DELETE FROM {t} WHERE story_id IN (SELECT id FROM stories WHERE campaign_id = ?)", (cid,)).rowcount
         for t in _campaign_tables(conn):
             counts[t] = conn.execute(f"DELETE FROM {t} WHERE campaign_id = ?", (cid,)).rowcount
         counts["characters"] = conn.execute("DELETE FROM characters WHERE campaign_id = ?", (cid,)).rowcount
