@@ -51,7 +51,7 @@ PROFILES: dict[str, dict] = {
 },
 }
 CATEGORIES = {"CAMPAIGN": "state", "PARTY": "state", "PRESENT": "state", "OBJECTIVES": "state", "SHARED STASH": "state",
-              "ACTIVE COMBAT": "state", "STORY": "state", "OMENS HERE": "state", "VENUE": "state", "OPENING": "state", "LEDGER RECORDS": "ledger", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
+              "ACTIVE COMBAT": "state", "STORY": "state", "OMENS HERE": "state", "VENUE": "state", "OPENING": "state", "FATE": "state", "DEATHWATCH": "state", "LEDGER RECORDS": "ledger", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
               "RULEBOOK": "rulebook", "RECENT TRANSCRIPT": "narrative", "RECENT ROLLS": "state", "GM-ONLY SECRETS": "gm_private"}
 STOP = set("the a an and or of to in on for with by is are be as at it this that from what how does do can when which who i we my our me us "
            "you your he she they them his her their then than into onto about there here just also will would should could".split())
@@ -299,6 +299,70 @@ def _opening_section(conn: sqlite3.Connection, cid: int) -> str | None:
     return "\n".join(out)
 
 
+FATE_DEFAULTS = (("physical_condition", "body", "alive"), ("wallpaper_status", "wallpaper", "active"),
+                 ("participation", "participation", "full"), ("persistent_fate", "fate", "ongoing"))
+DEATHWATCH_COPY = ("The player's character can't act. The player is watching. Treat what they type as requests for a cut, a pace or a summary, "
+                   "never as orders to the survivors. Survivors act on their own knowledge, goals and fear. No convenient rescue, no forced tragedy; "
+                   "the story runs to a real ending. Pace: {pace} (narration length only).")
+
+
+def _board(conn: sqlite3.Connection, cid: int) -> list[dict]:
+    return rows(conn, """SELECT p.*, c.rescue_eligibility FROM missing_posters p JOIN characters c ON c.id = p.character_id
+                         WHERE p.campaign_id = ? AND p.held_by_character_id IS NULL AND p.rescued_minutes IS NULL ORDER BY p.id""", (cid,))
+
+
+def _fate_section(conn: sqlite3.Connection, cid: int, story: dict | None) -> str | None:
+    """Changed fate axes of the running story's cast, the warnings given in it, and the missing-poster board.
+    Causes and rescue eligibility are GM-only and go to _fate_secrets instead."""
+    board = _board(conn, cid)
+    if not story and not board:
+        return None
+    out = []
+    if story:
+        for c in rows(conn, "SELECT c.* FROM story_cast x JOIN characters c ON c.id = x.character_id WHERE x.story_id = ? ORDER BY c.party_order, c.id",
+                      (story["id"],)):
+            off = [f"{label} {c[col].replace('_', ' ')}" for col, label, default in FATE_DEFAULTS if c[col] != default]
+            if off:
+                out.append(f"{c['name']}: {' · '.join(off)}")
+        warned = rows(conn, "SELECT rule, warning FROM danger_warnings WHERE story_id = ? ORDER BY id", (story["id"],))
+        if warned:
+            out.append("Warnings given: " + "; ".join(f"{w['rule']}: {w['warning']}" for w in warned))
+        if not out:
+            out.append("Everyone in the cast is alive and on screen.")
+    if board:
+        out.append(f"Board outside the Diner: {len(board)} poster{'' if len(board) == 1 else 's'} ({', '.join(p['name'] for p in board)})")
+    return "\n".join(out)
+
+
+def _fate_secrets(conn: sqlite3.Connection, cid: int, story: dict | None) -> str:
+    out = []
+    if story:
+        out += [f"- Death cause: {d['name']} ({d['phase']}): {d['cause']}" for d in rows(
+            conn, "SELECT d.phase, d.cause, c.name FROM death_events d JOIN characters c ON c.id = d.character_id WHERE d.story_id = ? ORDER BY d.id",
+            (story["id"],))]
+        if story.get("rescue"):
+            ids = story["rescue"]["poster_ids"]
+            names = [r["name"] for r in rows(conn, f"SELECT name FROM missing_posters WHERE id IN ({','.join('?' * len(ids))}) ORDER BY id", ids)]
+            out += [f"- This story is a Rescue for: {', '.join(names)}", "- Takeover: only the rescue ticket may revise this story"]
+    out += [f"- Rescue eligibility: {p['name']} {p['rescue_eligibility']}" for p in _board(conn, cid)]
+    return "Fate (never tell the players):\n" + "\n".join(out) if out else ""
+
+
+def _firewall_line(conn: sqlite3.Connection, pc: dict | None) -> str | None:
+    """A restored player character died in the last story: they know nothing of what came after their death."""
+    if not pc or pc["persistent_fate"] != "restored":
+        return None
+    d = one(conn, """SELECT d.phase, s.title FROM death_events d JOIN stories s ON s.id = d.story_id WHERE d.character_id = ?
+                     AND s.id = (SELECT MAX(id) FROM stories WHERE campaign_id = s.campaign_id AND status = 'concluded') ORDER BY d.id DESC LIMIT 1""",
+            (pc["id"],))
+    if not d:
+        return None
+    ident = (pc.get("sheet") or {}).get("identity")
+    pronoun = str((ident or {}).get("pronouns") or "they").split("/")[0].strip().lower() if isinstance(ident, dict) else "they"
+    verb = "don't" if pronoun in ("they", "") else "doesn't"
+    return f"{pc['name']} died at {d['phase']} in {d['title']}; {pronoun or 'they'} {verb} know what happened after that unless told"
+
+
 def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_window: int = 12, rule_conn: sqlite3.Connection | None = None,
                   budgets: dict | None = None) -> dict:
     B = {**DEFAULT_BUDGET, **(budgets or {})}
@@ -341,6 +405,9 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
         ident.append("Immediate objective: " + camp["active_objective"])
     for k in rows(conn, "SELECT key, label, current, maximum, visibility FROM clocks WHERE campaign_id = ?", (cid,)):
         ident.append(f"Clock {k['key']} ({k['label']}): {k['current']}/{k['maximum'] or '-'}{' [GM-ONLY]' if k['visibility'] == 'gm' else ''}")
+    firewall = _firewall_line(conn, pc)
+    if firewall:
+        ident.append(firewall)
     sections["CAMPAIGN"] = "\n".join(ident)
 
     # 2 CURRENT SCENE
@@ -386,6 +453,14 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     opening_text = _opening_section(conn, cid)
     if opening_text:
         sections["OPENING"] = opening_text
+
+    from ..carousel.fate import deathwatch
+    fate_text = _fate_section(conn, cid, story)
+    if fate_text:
+        sections["FATE"] = fate_text
+    watching = deathwatch(conn, cid)
+    if watching:
+        sections["DEATHWATCH"] = DEATHWATCH_COPY.format(pace=watching["pace"])
 
     # 3 PARTY ORGANIZATION
     pc_group = pc.get("assignment") if pc else None
@@ -551,6 +626,9 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     if chosen:
         sections["GM-ONLY SECRETS"] = (sections["GM-ONLY SECRETS"] + "\n" if sealed or hidden_tickets else "") + cut("GM-ONLY SECRETS", "Never reveal directly; reveal only through play, then reveal_secret.\n"
                                           + "\n".join(f"- #{s['id']} [{s['kind']}] {s['subject']}: {s['content'][:500]}" for s in chosen), B["secrets"])
+    fate_secrets = _fate_secrets(conn, cid, story)
+    if fate_secrets:
+        sections["GM-ONLY SECRETS"] = (sections["GM-ONLY SECRETS"] + "\n" if "GM-ONLY SECRETS" in sections else "") + fate_secrets
 
     # transcript
     if recent:
