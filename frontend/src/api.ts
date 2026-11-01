@@ -66,7 +66,10 @@ export type Campaign = {
   scene: Scene | null; groups: Group[]; roster: CharacterCard[]; day?: DayInfo;
   recent_events: { id: number; type: string; summary: string; game_time_minutes: number | null }[];
   art?: ArtMap;
+  /** The new-game flow (null: this campaign has no opening). `belief` is why the group thinks it came. */
+  opening?: { stage: OpeningStage; belief: string | null; paid_off: string | null } | null;
 };
+export type OpeningStage = "car" | "silas" | "opening_omen" | "escort" | "done";
 export type ArtKind = "character" | "item" | "mob" | "scene" | "location";
 /** Current picture URL per subject: ids as keys, except mobs (lower-case name). */
 export type ArtMap = Record<ArtKind, Record<string, string>>;
@@ -182,8 +185,9 @@ export const api = {
   health: () => req<{ provider: string; codex_cli: string | null; rulebook_index: boolean }>("api/health"),
   campaigns: () => req<CampaignListItem[]>("api/campaigns"),
   manageCampaigns: () => req<ManagedCampaign[]>("api/campaigns-manage"),
-  createCampaign: (body: { name: string; character: string; location: string | null; premise: string | null }) =>
+  createCampaign: (body: { name: string; character: string; premise: string | null }) =>
     post<{ campaign_id: number }>("api/campaigns", body),
+  startOpening: (id: number, key: string) => post<{ turn: TurnStatus }>(`api/campaigns/${id}/opening/start`, { idempotency_key: key }),
   editCampaign: (id: number, body: { name?: string; archived?: boolean }) => req<{ ok: boolean }>(`api/campaigns/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteCampaign: (id: number, confirmName: string) => post<{ deleted: string; backup: string; pictures_moved: number }>(`api/campaigns/${id}/delete`, { confirm_name: confirmName }),
   campaign: (id: number) => req<Campaign>(`api/campaigns/${id}`),

@@ -10,7 +10,8 @@ SECRETS = ["GMSECRET-ALPHA-1", "GMSECRET-BRAVO-2", "GMSECRET-CHARLIE-3", "GMSECR
            "HIDDENTROPE-GOLF-7", "Doors open for it alone.", "trope:1",   # Adeline's hidden trope: name, text, ref
            "UNKNOWNPLACE-HOTEL-8",   # a spoiler place the group doesn't know (mini CAR-099)
            "MINI-OBLIGATION", "MINI-COUNTERPLAY", "MINI-CLUE",   # the active story's screenplay and sealed house story
-           "REVISION-INDIA-9", "ENDING-JULIET-10"]   # a revision's private operations/reason and a revised ending predicate
+           "REVISION-INDIA-9", "ENDING-JULIET-10",   # a revision's private operations/reason and a revised ending predicate
+           "LURE-TRUTH-KILO-11", "MINI-NPC-SECRET-2"]   # a new game's lure truth and its introduced resident's gm_only (mini CAR-NPC-003)
 
 
 def _plant(conn, cid):
@@ -47,6 +48,17 @@ def _plant_story(conn, cid):
                       "public_summary": "Jonah has a plan for the barn.", "reason": "REVISION-INDIA-9 reason"})
 
 
+def _plant_opening(conn):
+    """A second campaign in its opening: a person lure whose truth is planted, and that resident introduced."""
+    from app.campaigns import create
+    from tests.conftest import apply
+    cid = create(conn, name="Opening crawl", character="Mara")
+    apply(conn, cid, {"op": "set_lure", "kind": "person", "resident": "CAR-NPC-003", "belief": "Valerie wrote to say she'd found work here",
+                      "truth": "LURE-TRUTH-KILO-11"})
+    apply(conn, cid, {"op": "introduce_resident", "resident": "CAR-NPC-003"})
+    return cid
+
+
 def _player_urls(client, cid):
     urls = ["/api/health", "/api/settings", "/api/campaigns", f"/api/campaigns/{cid}", f"/api/campaigns/{cid}/characters",
             f"/api/campaigns/{cid}/inventory", f"/api/campaigns/{cid}/quests", f"/api/campaigns/{cid}/npcs", f"/api/campaigns/{cid}/timeline",
@@ -73,7 +85,8 @@ def test_no_gm_material_in_any_player_response(client, conn, campaign_id):
     # and a walk next door to the spoiler place, with its Omen sighting and arrival turn
     client.post(f"/api/campaigns/{cid}/travel", json={"to": "CAR-086", "idempotency_key": uuid.uuid4().hex})
     assert client.get(f"/api/campaigns/{cid}/story").json()["active"]["revisions"] == ["Jonah has a plan for the barn."]
-    for url in _player_urls(client, cid):
+    other = _plant_opening(conn)
+    for url in [*_player_urls(client, cid), *_player_urls(client, other)]:
         r = client.get(url)
         assert r.status_code == 200, url
         text = r.text

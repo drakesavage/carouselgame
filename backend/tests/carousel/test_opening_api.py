@@ -43,3 +43,15 @@ def test_silas_turns_go_to_the_mechanics_gm(conn):
     conn.execute("UPDATE campaigns SET opening_stage = 'opening_omen' WHERE id = ?", (cid,))
     assert not needs_mechanics(conn, cid)
     assert opening.stage(conn, cid) == "opening_omen"
+
+
+# ---------------------------------------------------------------- Task 7: what the player sees
+
+def test_the_campaign_payload_shows_the_opening(client, conn, campaign_id):
+    from tests.carousel.test_opening_ops import LURE
+    from tests.conftest import apply
+    cid = new_campaign(client)
+    apply(conn, cid, LURE)
+    o = client.get(f"/api/campaigns/{cid}").json()["opening"]
+    assert o == {"stage": "car", "belief": LURE["belief"], "paid_off": None}
+    assert client.get(f"/api/campaigns/{campaign_id}").json()["opening"] is None   # a seeded campaign has no opening

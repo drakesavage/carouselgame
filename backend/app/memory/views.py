@@ -96,6 +96,9 @@ def campaign_summary(conn: sqlite3.Connection, cid: int) -> dict | None:
         q["immediate"] = q["id"] in order and q["status"] == "active"
     # the immediate objective is its linked quests, first and in order; a finished quest drops out by itself
     camp["quests"] = sorted(quests, key=lambda q: (0, order[q["id"]]) if q["immediate"] else (1, 0))
+    # the new-game flow: stage, the lure as the players believe it, its payoff (never the truth or the resident's ID)
+    op = one(conn, "SELECT opening_stage, lure_belief, lure_paid_off FROM campaigns WHERE id = ?", (cid,))
+    camp["opening"] = {"stage": op["opening_stage"], "belief": op["lure_belief"], "paid_off": op["lure_paid_off"]} if op["opening_stage"] else None
     return camp
 
 

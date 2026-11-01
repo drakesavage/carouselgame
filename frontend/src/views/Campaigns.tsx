@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Archive, ArchiveRestore, FolderOpen, Loader2, Pencil, Plus, Swords, Trash2 } from "lucide-react";
-import { api, ManagedCampaign } from "../api";
+import { api, ManagedCampaign, newKey } from "../api";
 import { Chip, Empty, Panel } from "../ui";
 
 const when = (s: string | null) => (s ? new Date(s.endsWith("Z") || s.includes("+") ? s : s + "Z").toLocaleDateString() : "never");
@@ -85,8 +85,15 @@ export function CampaignsPanel({ cid, onCampaign }: { cid: number; onCampaign: (
   );
 }
 
+/** Start the opening turn (the car scene). The key is kept per tab, so a reload or a second click returns the same turn. */
+export async function startOpening(cid: number): Promise<void> {
+  let key = newKey();
+  try { key = sessionStorage.getItem(`opening-${cid}`) ?? key; sessionStorage.setItem(`opening-${cid}`, key); } catch { /* storage unavailable */ }
+  try { await api.startOpening(cid, key); } catch { /* already started, or the GM is busy: the story view shows the turn */ }
+}
+
 function NewCampaign({ open, onClose, onMade }: { open: boolean; onClose: () => void; onMade: (id: number) => void }) {
-  const blank = { name: "", character: "", location: "", premise: "" };
+  const blank = { name: "", character: "", premise: "" };
   const [f, setF] = useState(blank);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -96,8 +103,9 @@ function NewCampaign({ open, onClose, onMade }: { open: boolean; onClose: () => 
     setBusy(true); setErr(null);
     try {
       const r = await api.createCampaign({
-        name: f.name.trim(), character: f.character.trim(), location: f.location.trim() || null, premise: f.premise.trim() || null,
+        name: f.name.trim(), character: f.character.trim(), premise: f.premise.trim() || null,
       });
+      await startOpening(r.campaign_id);
       onMade(r.campaign_id);
     } catch (e) { setErr(String(e instanceof Error ? e.message : e)); } finally { setBusy(false); }
   };
@@ -110,10 +118,9 @@ function NewCampaign({ open, onClose, onMade }: { open: boolean; onClose: () => 
           <form className="camp-form" onSubmit={(e) => { e.preventDefault(); submit(); }}>
             <label>Campaign name<input className="input" required maxLength={80} value={f.name} onChange={set("name")} placeholder="e.g. The Long Drive In" /></label>
             <label>Your character's name<input className="input" required maxLength={60} value={f.character} onChange={set("character")} /></label>
-            <label>Starting location <span className="sub">(optional)</span><input className="input" maxLength={120} value={f.location} onChange={set("location")} /></label>
-            <label>Premise <span className="sub">(optional: what the GM should know going in; the party knows it too)</span>
+            <label>What kind of lure or opening would you like? <span className="sub">(optional)</span>
               <textarea className="input" rows={3} maxLength={2000} value={f.premise} onChange={set("premise")} /></label>
-            <div className="sub">Stats, Archetype and tickets start empty: Carousel assigns them in play. Nothing is made up for you.</div>
+            <div className="sub">The game opens in the car with three friends. Silas the Showman deals your Archetype and tickets from how you play; you never pick from a menu.</div>
             {err && <div className="sub" style={{ color: "var(--red)" }}>{err}</div>}
             <div className="row" style={{ justifyContent: "flex-end" }}>
               <Dialog.Close type="button" className="btn ghost">Cancel</Dialog.Close>

@@ -12,3 +12,7 @@
 .plot-cycle li.now { color: var(--bg); background: var(--amber); font-weight: 700; }
 .storybar-cast { margin-top: 6px; font-size: 11px; color: var(--text-2); }
 @media (max-width: 640px) { .plot-cycle { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+/* The new game's five-step opening bar (OpeningBar.tsx) reuses the Plot Cycle strip. */
+.opening-steps { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.opening-steps li svg { vertical-align: -1px; }
+@media (max-width: 640px) { .opening-steps { grid-template-columns: repeat(5, minmax(0, 1fr)); } .opening-steps li { font-size: 9px; } }

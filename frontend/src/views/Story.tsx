@@ -5,6 +5,8 @@ import { Chip, Empty, Markdown, Portrait } from "../ui";
 import { play } from "../prefs";
 import { ReportButton } from "./Report";
 import { StoryBar } from "./StoryBar";
+import { OpeningBar } from "./OpeningBar";
+import { startOpening } from "./Campaigns";
 import { CampaignSidebar, CombatPanel, Decision, DiscoveryCards, IMPORTANT_CARDS, portraitSrc, RosterPanel, SceneBanner, splitDecision, StoryText, useManifest } from "./Hud";
 
 const QUIPS = [
@@ -97,6 +99,16 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
     api.activeTurn(cid).then((t) => { if (t) setPending({ key: "", text: "", turnId: t.turn_id, status: "processing", progress: t.progress }); }).catch(() => {});
   }, [cid]);
 
+  // A new game whose opening turn never started (the create call was cut off): start it, with the same per-tab key.
+  const opening = campaign.opening?.stage === "car" && messages?.length === 0 && !pending;
+  useEffect(() => {
+    if (!opening) return;
+    startOpening(cid).then(() => api.activeTurn(cid)).then((t) => {
+      if (t) setPending({ key: "", text: "", turnId: t.turn_id, status: "processing", progress: t.progress });
+      else loadMessages();
+    }).catch(() => {});
+  }, [opening, cid]);  // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (pending?.status !== "processing") return;
     const q = setInterval(() => setQuip(QUIPS[Math.floor(Math.random() * QUIPS.length)]), 3500);
@@ -162,6 +174,7 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
       </aside>
       <div className="story-col">
         <SceneBanner campaign={campaign} onArt={onState} openCharacter={openCharacter} />
+        <OpeningBar campaign={campaign} />
         <StoryBar cid={cid} version={campaign} />
         <div className="combat-top">{campaign.encounter && <CombatPanel enc={campaign.encounter} campaign={campaign} onArt={onState} />}</div>
         <div className="transcript" ref={scroller} onScroll={onScroll} role="log" aria-label="Story transcript">
