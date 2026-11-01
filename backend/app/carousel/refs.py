@@ -8,7 +8,8 @@ import sqlite3
 REFERENCE_COLUMNS: dict[str, tuple[str, str]] = {"place": ("locations", "ref_id"), "npc": ("npc_profiles", "ref_id"),
                                                   "ticket": ("character_tickets", "ticket_ref"),
                                                   "node": ("campaigns", "node_id"), "group_node": ("party_groups", "node_id"),
-                                                  "known_place": ("known_places", "place_id"), "omen": ("omen_states", "omen_id")}
+                                                  "known_place": ("known_places", "place_id"), "omen": ("omen_states", "omen_id"),
+                                                  "story_omen": ("stories", "omen_id")}
 
 
 def referenced_ids(campaign_conn: sqlite3.Connection) -> dict[str, set[str]]:
@@ -39,6 +40,7 @@ def unresolved(ref: sqlite3.Connection, ids: dict[str, set[str]]) -> dict[str, l
         "npc": lambda i: ref.execute("SELECT 1 FROM npc_templates WHERE id = ?", (i,)).fetchone() is not None,
         "node": node, "group_node": node, "known_place": place,
         "omen": lambda i: ref.execute("SELECT 1 FROM omens WHERE id = ?", (i,)).fetchone() is not None,
+        "story_omen": lambda i: ref.execute("SELECT 1 FROM omens WHERE id = ?", (i,)).fetchone() is not None,
         "ticket": lambda i: ref.execute("SELECT 1 FROM tropes WHERE id = ?", (i[len("trope:"):],)).fetchone() is not None if i.startswith("trope:")
         else ref.execute("SELECT 1 FROM tickets WHERE id = ?", (i,)).fetchone() is not None,
     }

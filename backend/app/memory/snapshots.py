@@ -37,9 +37,21 @@ SNAPSHOT_TABLES: dict[str, str] = {
     "known_places": "SELECT * FROM known_places WHERE campaign_id = ?",
     "campaign_flags": "SELECT * FROM campaign_flags WHERE campaign_id = ?",
     "omen_states": "SELECT * FROM omen_states WHERE campaign_id = ?",
+    "stories": "SELECT * FROM stories WHERE campaign_id = ?",
+    "story_packets": "SELECT p.* FROM story_packets p JOIN stories s ON s.id = p.story_id WHERE s.campaign_id = ?",
+    "story_cast": "SELECT x.* FROM story_cast x JOIN stories s ON s.id = x.story_id WHERE s.campaign_id = ?",
+    "story_revisions": "SELECT r.* FROM story_revisions r JOIN stories s ON s.id = r.story_id WHERE s.campaign_id = ?",
+    "story_spoilers": "SELECT * FROM story_spoilers WHERE campaign_id = ?",
+    "advanced_marks": "SELECT m.* FROM advanced_marks m JOIN characters c ON c.id = m.character_id WHERE c.campaign_id = ?",
+    "mark_awards": "SELECT a.* FROM mark_awards a JOIN characters c ON c.id = a.character_id WHERE c.campaign_id = ?",
 }
+# Tables without a campaign_id column: which rows belong to the campaign (param: campaign_id).
+_BY_CHARACTER = "character_id IN (SELECT id FROM characters WHERE campaign_id = ?)"
+_BY_STORY = "story_id IN (SELECT id FROM stories WHERE campaign_id = ?)"
+_SCOPED_DELETE = {"status_effects": _BY_CHARACTER, "npc_profiles": _BY_CHARACTER, "advanced_marks": _BY_CHARACTER, "mark_awards": _BY_CHARACTER,
+                  "story_packets": _BY_STORY, "story_cast": _BY_STORY, "story_revisions": _BY_STORY}
 # Delete children before parents.
-_DELETE_ORDER = ["known_places", "campaign_flags", "omen_states", "character_tickets", "stat_modifiers", "status_effects", "npc_profiles", "relationships", "items", "locations",
+_DELETE_ORDER = ["story_revisions", "story_cast", "story_packets", "mark_awards", "advanced_marks", "stories", "story_spoilers", "known_places", "campaign_flags", "omen_states", "character_tickets", "stat_modifiers", "status_effects", "npc_profiles", "relationships", "items", "locations",
                  "quests", "clocks", "house_rules", "rulings", "lore_facts", "gm_secrets",
                  "memory_summaries", "party_groups", "scenes", "memories", "characters"]
 _LOGS = {"messages": "max_message_id", "events": "max_event_id", "turns": "max_turn_id"}
@@ -100,16 +112,9 @@ def restore_save_point(conn: sqlite3.Connection, cid: int, save_point_id: int) -
     with transaction(conn):
         backup_id = create_save_point(conn, cid, f"Before restoring “{sp['label']}”", kind="pre_restore")
         conn.execute("PRAGMA defer_foreign_keys = ON")
-        char_ids = [r[0] for r in conn.execute("SELECT id FROM characters WHERE campaign_id = ?", (cid,))]
-        marks = ",".join("?" * len(char_ids)) or "NULL"
         # Tables a save point predates (added in a later schema) are left as they are.
         for table in [t for t in _DELETE_ORDER if t in snapshot]:
-            if table == "status_effects":
-                conn.execute(f"DELETE FROM {table} WHERE character_id IN ({marks})", char_ids)
-            elif table == "npc_profiles":
-                conn.execute(f"DELETE FROM npc_profiles WHERE character_id IN ({marks})", char_ids)
-            else:
-                conn.execute(f"DELETE FROM {table} WHERE campaign_id = ?", (cid,))
+            conn.execute(f"DELETE FROM {table} WHERE {_SCOPED_DELETE.get(table, 'campaign_id = ?')}", (cid,))
         camp = snapshot["campaigns"][0]
         conn.execute(f"UPDATE campaigns SET {', '.join(f'{k} = ?' for k in camp if k != 'id')} WHERE id = ?",
                      (*[v for k, v in camp.items() if k != "id"], cid))

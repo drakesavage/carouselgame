@@ -63,6 +63,9 @@ CREATE TABLE IF NOT EXISTS characters (
   advanced_role_id TEXT,
   ruleset_version TEXT,                    -- e.g. SB-0.4.1/role-0.4.2, pinned when stats are initialized
   role_reason TEXT,                        -- why Carousel assigned the role (player-visible)
+  stars INTEGER NOT NULL DEFAULT 0,        -- unspent reward stars (5 = 1 stat point; rules/story_ops.py)
+  pending_stat_points INTEGER NOT NULL DEFAULT 0,
+  starless_streak INTEGER NOT NULL DEFAULT 0,  -- concluded stories in a row with no stars gained
   UNIQUE (campaign_id, slug)
 );
 
@@ -438,6 +441,81 @@ CREATE TABLE IF NOT EXISTS omen_states (
   PRIMARY KEY (campaign_id, omen_id)
 );
 
+-- Carousel stories (rules/story_ops.py). One row per story instance; story_packets is GM-only (the sealed truth copied
+-- from the beat dossier at Choice, its hash, the current screenplay and ending profiles); revisions append, never edit.
+CREATE TABLE IF NOT EXISTS stories (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  omen_id TEXT NOT NULL,
+  story_lock TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'concluded')),
+  phase TEXT NOT NULL,
+  pressure INTEGER NOT NULL DEFAULT 0,         -- 0-6, GM-only
+  camera TEXT NOT NULL DEFAULT 'off' CHECK (camera IN ('on', 'off')),
+  version INTEGER NOT NULL DEFAULT 0,          -- screenplay version (optimistic concurrency for revisions)
+  choice_action TEXT,
+  started_minutes INTEGER,
+  ended_minutes INTEGER,
+  ending TEXT,
+  ending_reason TEXT,
+  novelty INTEGER,
+  started_turn_id INTEGER,
+  ended_turn_id INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_stories_active ON stories(campaign_id) WHERE status = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS ux_stories_active_lock ON stories(campaign_id, story_lock) WHERE status = 'active';
+CREATE TABLE IF NOT EXISTS story_packets (
+  story_id INTEGER PRIMARY KEY REFERENCES stories(id),
+  sealed_json TEXT NOT NULL,
+  sealed_sha256 TEXT NOT NULL,
+  screenplay_json TEXT NOT NULL,               -- {version, phase_plan, notes}
+  endings_json TEXT NOT NULL                   -- {ending: {predicate, ...}}
+);
+CREATE TABLE IF NOT EXISTS story_cast (
+  story_id INTEGER NOT NULL REFERENCES stories(id),
+  character_id INTEGER NOT NULL REFERENCES characters(id),
+  casting TEXT NOT NULL CHECK (casting IN ('lead', 'support', 'witness', 'sacrifice', 'outsider')),
+  joined_phase TEXT,
+  screen_moments INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (story_id, character_id)
+);
+CREATE TABLE IF NOT EXISTS story_revisions (   -- GM-only except public_summary
+  id INTEGER PRIMARY KEY,
+  story_id INTEGER NOT NULL REFERENCES stories(id),
+  version INTEGER NOT NULL,
+  character_id INTEGER,
+  ticket_ref TEXT,
+  scope TEXT NOT NULL,
+  operations_json TEXT NOT NULL,
+  before_json TEXT NOT NULL,
+  after_json TEXT NOT NULL,
+  public_summary TEXT NOT NULL,
+  reason TEXT,
+  turn_id INTEGER
+);
+CREATE TABLE IF NOT EXISTS story_spoilers (
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  story_lock TEXT NOT NULL,
+  element TEXT NOT NULL,
+  source TEXT,
+  PRIMARY KEY (campaign_id, story_lock, element)
+);
+CREATE TABLE IF NOT EXISTS advanced_marks (
+  character_id INTEGER NOT NULL REFERENCES characters(id),
+  track_role_id TEXT NOT NULL,
+  marks INTEGER NOT NULL DEFAULT 0,
+  unlocked INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (character_id, track_role_id)
+);
+CREATE TABLE IF NOT EXISTS mark_awards (       -- one mark per track per story
+  story_id INTEGER NOT NULL REFERENCES stories(id),
+  character_id INTEGER NOT NULL REFERENCES characters(id),
+  track_role_id TEXT NOT NULL,
+  feat TEXT,
+  PRIMARY KEY (story_id, character_id, track_role_id)
+);
+
 -- The current scene the GM is running (one active per campaign) and closed scenes with their summaries.
 CREATE TABLE IF NOT EXISTS scenes (
   id INTEGER PRIMARY KEY,
@@ -530,6 +608,7 @@ COLUMN_MIGRATIONS = [
     ("campaigns", "node_id", "TEXT"),
     ("campaigns", "travel_seq", "INTEGER NOT NULL DEFAULT 0"),
     ("party_groups", "node_id", "TEXT"),
+    *[("characters", c, "INTEGER NOT NULL DEFAULT 0") for c in ("stars", "pending_stat_points", "starless_streak")],
     ("turns", "kind", "TEXT"),             # NULL = the player's own words; arrival | arrival_omen (map_api.py travel)  # ordered quest ids that make up the immediate objective  # {cx, cy, k, ar}: square crop of the portrait image (null = default)  # comfy | codex (art/codex_image.py)  # staged tool calls and roll records while a turn is in flight
 ]
 

@@ -372,8 +372,9 @@ def _kind(turn: dict) -> dict:
 
 
 def story_active(conn, cid: int) -> bool:
-    """Whether a story is in progress (every such turn goes to the mechanics GM). Stories arrive with the Omen runner."""
-    return False
+    """Whether a story is in progress (every such turn goes to the mechanics GM)."""
+    from ..carousel.stories import active_story
+    return active_story(conn, cid) is not None
 
 
 def absent_names(conn, cid: int) -> frozenset:

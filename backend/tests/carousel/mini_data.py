@@ -1,5 +1,5 @@
 """Smallest synthetic source packages that keep the real files' shapes: a small town graph (lodge, junction, square, diner,
-farm, a flagged spoiler place, an old diner with an alias, one directed flagged shortcut), three playable Omens, one starting role with its ticket and profile, one trope, one resident."""
+farm, a flagged spoiler place, an old diner with an alias, one directed flagged shortcut), three playable Omens and a hub, a fully specified story dossier (OM-001), two starting roles, an aspect, an advanced role, a story-altering ticket with its ticket and profile, one trope, one resident."""
 
 
 def _place(pid, name, north, west, status="active", category="Landmark", requires=(), spoiler=False):
@@ -41,6 +41,19 @@ def _dossier(oid, premise, truth):
             "house_story": {"secret_truth": truth}}
 
 
+PHASE_NAMES = ("Omen", "Choice", "Party", "First Blood", "Rebirth", "Second Blood", "Finale", "The End")
+FULL_DOSSIER = {   # OM-001: everything a story needs (commitment, 8 phases, 4 outcomes, the sealed house story)
+    **_dossier("OM-001", "Something is wrong at the farm.", "MINI-SEALED-TRUTH"),
+    "commitment": {"implementation_event": "enter:farm", "trigger_operator": "enter", "trigger_target": "farm"},
+    "phase_plan": [{"phase": p, "obligation": f"MINI-OBLIGATION {p}"} for p in PHASE_NAMES],
+    "outcomes": {"full_success": {"predicate": "The scarecrow is burned."}, "costly_success": {"predicate": "Burned, but someone is lost."},
+                 "survival_only": {"predicate": "Someone escapes the farm."}, "failure": {"predicate": "The farm keeps everyone."}},
+    "house_story": {"secret_truth": "MINI-SEALED-TRUTH", "actionable_counterplay": "MINI-COUNTERPLAY",
+                    "antagonist_behavior": {"policy": "MINI-ANTAGONIST"}, "clue_routes": [{"id": "c1", "evidence": "MINI-CLUE"}]},
+    "continuity": {"shared_story_lock": "MINI-OM-001"},
+}
+
+
 MINI = {
     "locations": PLACES,
     "gazetteer": [*PLACES, _place("CAR-017", "The Diner (old name)", *COORDS["CAR-016"], status="alias")],
@@ -58,14 +71,16 @@ MINI = {
     "tile_manifest": {"levels": []},
     "omens": {"registry": [_omen("OM-001", "A scarecrow facing the wrong way", "CAR-086", "Farm", FIXED),
                            _omen("OM-002", "A figure keeps pace behind the hedges", "CAR-002", "Town Square", ROAMING),
-                           _omen("OM-003", "A chair knocked over", "CAR-006", "Diner", FIXED)],
+                           _omen("OM-003", "A chair knocked over", "CAR-006", "Diner", FIXED),
+                           {**_omen("OM-009", "Flyers for every attraction in town", "CAR-002", "Town Square", FIXED),
+                            "Record Type": "Hub / generator"}],
               "hub_seed_pools": []},
-    "beats": {"dossiers": [_dossier("OM-001", "Something is wrong at the farm.", "MINI-SEALED-TRUTH"),
+    "beats": {"dossiers": [FULL_DOSSIER,
                            _dossier("OM-002", "Someone is following.", "MINI-SEALED-TRUTH-2"),
                            _dossier("OM-003", "Something is wrong at the diner.", "MINI-SEALED-TRUTH-3")]},
     "roles": {"v04_playable_overlay": {"base_roles": [{"id": "base.final-girl", "name": "Final Girl"}, {"id": "base.film-buff", "name": "Film Buff"}],
                                        "aspects": [{"id": "aspect.final-girl.screamer", "name": "Screamer", "base_archetype": "Final Girl"}],
-                                       "advanced_roles": [],
+                                       "advanced_roles": [{"id": "advanced.adventurer", "name": "Adventurer"}],
                                        "shared_starting_trope_pool": [{"id": "hb.ticket.starter.shared.quick-thinker", "name": "[HB] Think on Your Feet",
                                                                        "rule": "Once per scene, improvise with an object already in the scene.",
                                                                        "uses": 1, "recharge": "scene"}]},
@@ -76,6 +91,13 @@ MINI = {
                   {"trope_id": "hb.ticket.base.film-buff", "trope_name": "[HB] Seen This One", "source_role_id": "base.film-buff",
                    "relationship": "starting_signature",
                    "original_ticket_definition": {"rule": "Once per storyline, name the rule the movie is following.", "uses": 1, "recharge": None}},
+                  {"trope_id": "hb.ticket.aspect.soldier.commando", "trope_name": "[HB] Change of Plan", "source_role_id": None,
+                   "relationship": "aspect_signature",
+                   "original_ticket_definition": {"rule": "Once per storyline, rewrite one future scene of the plan.", "uses": 1,
+                                                  "scope": "storyline", "supports_story_mutation": True}},
+                  {"trope_id": "hb.ticket.advanced.adventurer", "trope_name": "[HB] Expedition Leader", "source_role_id": "advanced.adventurer",
+                   "relationship": "advanced_signature",
+                   "original_ticket_definition": {"rule": "Once per story, find the supplies the party needs.", "uses": 1}},
                   {"trope_id": "hb.ticket.starter.shared.quick-thinker", "trope_name": "[HB] Think on Your Feet", "source_role_id": None,
                    "relationship": "contextual_shared_starter", "original_ticket_definition": None}]},
               "v042_audit_resolution": {"starting_stat_profiles_by_role_id": {
