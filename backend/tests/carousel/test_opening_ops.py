@@ -109,3 +109,81 @@ def test_a_person_lure_pays_off_once_the_resident_is_met(conn, cid):
         apply(conn, cid, {"op": "pay_off_lure", "how": "She was here all along."})
     apply(conn, cid, {"op": "introduce_resident", "resident": "CAR-NPC-003"})
     apply(conn, cid, {"op": "pay_off_lure", "how": "She was here all along."})
+
+
+# ---------------------------------------------------------------- Task 4: moving through the opening
+
+def advance(conn, cid, to, **kw):
+    return apply(conn, cid, {"op": "advance_opening", "to": to, **kw})
+
+
+def deal(conn, cid, who, role="base.final-girl"):
+    apply(conn, cid, {"op": "silas_assigns", "character": who, "role": role, "reason": "how they talked in the car",
+                      "evidence": ["Are we there yet, seriously?"], "contextual_ticket": "hb.ticket.starter.shared.quick-thinker",
+                      "contextual_reason": "quick on the uptake"})
+
+
+def to_silas(conn, cid):
+    from tests.carousel.test_silas import say
+    apply(conn, cid, LURE)
+    for n in ("Jonah", "Priya", "Theo"):
+        friend(conn, cid, n)
+    say(conn, cid, "player", "Are we there yet, seriously?")
+    advance(conn, cid, "silas")
+
+
+def test_full_opening_walkthrough(conn, cid):
+    from app.carousel.stories import active_story
+    from tests.carousel.test_story_ops import on_turn, turn
+    to_silas(conn, cid)
+    for who in ("Mara", "Jonah", "Priya", "Theo"):
+        deal(conn, cid, who)
+    advance(conn, cid, "opening_omen")
+    apply(conn, cid, {"op": "sight_omen", "omen": "OM-001", "how": "a scarecrow across the lot"})
+    on_turn(conn, cid, turn(conn, cid), {"op": "begin_story", "omen": "OM-001", "action": "enter:farm", "reason": "Mara goes in",
+                                         "cast": [{"character": "Mara", "casting": "lead"}]})
+    apply(conn, cid, {"op": "conclude_story", "ending": "survive_without_victory", "reason": "they ran",
+                      "awards": [{"character": "Mara", "performance": 1, "difficulty": 1}]})
+    assert active_story(conn, cid) is None
+    advance(conn, cid, "escort")
+    assert "CAR-047" in {r[0] for r in conn.execute("SELECT place_id FROM known_places WHERE campaign_id = ?", (cid,))}
+    apply(conn, cid, {"op": "introduce_resident", "resident": "CAR-NPC-003", "in_party": True})
+    for _ in range(3):
+        r = apply(conn, cid, {"op": "travel", "to": "CAR-047"})
+        if r["arrived"] == "CAR-047":
+            break
+    assert r["arrived"] == "CAR-047"
+    apply(conn, cid, {"op": "pay_off_lure", "how": "The fair was a flyer Silas printed."})
+    advance(conn, cid, "done")
+    assert opening.stage(conn, cid) == "done"
+    assert conn.execute("SELECT label FROM save_points WHERE campaign_id = ? ORDER BY id DESC", (cid,)).fetchone()[0] == "Arrived at Dyer's Lodge"
+    labels = [r[0] for r in conn.execute("SELECT summary FROM events WHERE campaign_id = ? AND type = 'opening_stage' ORDER BY id", (cid,))]
+    assert [l.split(" is over")[0] for l in labels] == ["The drive in", "Silas the Showman", "The first Omen", "Dyer's Lodge"]
+
+
+def test_advance_refusals_name_blockers(conn, cid):
+    with pytest.raises(ChangeError, match="can't move to opening_omen: the next stage is silas"):
+        advance(conn, cid, "opening_omen")
+    apply(conn, cid, LURE)
+    friend(conn, cid, "Jonah")
+    friend(conn, cid, "Priya")
+    with pytest.raises(ChangeError, match="2 friends; the car holds 3"):
+        advance(conn, cid, "silas")
+    friend(conn, cid, "Theo")
+    from tests.carousel.test_silas import say
+    say(conn, cid, "player", "Are we there yet, seriously?")
+    advance(conn, cid, "silas")
+    for who in ("Mara", "Priya", "Theo"):
+        deal(conn, cid, who)
+    with pytest.raises(ChangeError, match="Jonah has no Archetype yet"):
+        advance(conn, cid, "opening_omen")
+    deal(conn, cid, "Jonah")
+    advance(conn, cid, "opening_omen")
+    with pytest.raises(ChangeError, match="no story has started"):
+        advance(conn, cid, "escort")
+    advance(conn, cid, "escort", reason="the player walked past every Omen")
+    [skip] = conn.execute("SELECT visibility FROM events WHERE campaign_id = ? AND type = 'opening_skip_reason'", (cid,)).fetchall()
+    assert skip[0] == "gm"
+    with pytest.raises(ChangeError, match="isn't at Dyer's Lodge"):
+        advance(conn, cid, "done")
+    assert opening.stage(conn, cid) == "escort"

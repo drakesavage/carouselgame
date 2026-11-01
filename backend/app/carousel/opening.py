@@ -40,6 +40,45 @@ def quote_found(conn: sqlite3.Connection, cid: int, quote: str) -> bool:
         (cid,)))
 
 
-def blockers(conn: sqlite3.Connection, cid: int) -> list[str]:
-    """What stops the next stage, one plain line per problem (empty: ready)."""
-    return []
+def next_stage(current: str | None) -> str | None:
+    if current not in STAGES or current == STAGES[-1]:
+        return None
+    return STAGES[STAGES.index(current) + 1]
+
+
+def blockers(conn: sqlite3.Connection, cid: int, reason: str | None = None) -> list[str]:
+    """What stops the next stage, one plain line per problem (empty: ready). `reason` is the GM's word that the player
+    refused every Omen, which lets the opening Omen pass without a story."""
+    s = stage(conn, cid)
+    if s is None:
+        return ["this campaign has no opening"]
+    camp = one(conn, "SELECT * FROM campaigns WHERE id = ?", (cid,))
+    out: list[str] = []
+    if s == "car":
+        if not camp["lure_kind"]:
+            out.append("the lure isn't set (set_lure)")
+        n = len(friends(conn, cid))
+        if n != 3:
+            out.append(f"{n} friend{'' if n == 1 else 's'}; the car holds 3")
+    elif s == "silas":
+        group = [one(conn, "SELECT * FROM characters WHERE id = ?", (camp["active_character_id"],)), *friends(conn, cid)]
+        out += [f"{c['name']} has no Archetype yet" for c in group if c and not c["role_id"]]
+    elif s == "opening_omen":
+        from .stories import active_story
+        running = active_story(conn, cid)
+        if running:
+            out.append(f"a story is still running: {running['title']}")
+        elif not one(conn, "SELECT id FROM stories WHERE campaign_id = ?", (cid,)) and not (reason or "").strip():
+            # begin_story is refused before this stage, so any story in the campaign started during the opening
+            out.append("no story has started; give a reason if the player refused every Omen")
+    elif s == "escort":
+        if camp["node_id"] != LODGE:
+            out.append("the group isn't at Dyer's Lodge yet")
+        if not camp["lure_paid_off"]:
+            out.append("the lure isn't paid off (pay_off_lure)")
+        if not one(conn, """SELECT c.id FROM characters c JOIN npc_profiles p ON p.character_id = c.id
+                            WHERE c.campaign_id = ? AND c.in_party = 1 AND c.status = 'active' AND p.ref_id IS NOT NULL""", (cid,)):
+            out.append("no veteran walks with the group (introduce_resident, in_party)")
+    else:
+        out.append("nothing comes after done")
+    return out

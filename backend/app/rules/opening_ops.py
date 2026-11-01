@@ -3,7 +3,7 @@
 `set_lure` records why the group came (the belief is the players', the truth is GM-only), `drop_friend` is the player's
 veto on a GM-made friend in the car, `introduce_resident` brings a Camp Dyer resident template into the campaign (Phase 7
 reuses it), `silas_assigns` is Silas dealing a character's Archetype and two starter tickets from quoted evidence,
-`pay_off_lure` closes the lure at the Lodge."""
+`pay_off_lure` closes the lure at the Lodge, `advance_opening` moves the stage forward once blockers() is empty."""
 from __future__ import annotations
 
 import json
@@ -58,6 +58,16 @@ class SilasAssigns(BaseModel):
 class PayOffLure(BaseModel):
     op: Literal["pay_off_lure"]
     how: str = Field(min_length=1, max_length=600)
+
+
+class AdvanceOpening(BaseModel):
+    op: Literal["advance_opening"]
+    to: Literal["car", "silas", "opening_omen", "escort", "done"]
+    reason: str | None = Field(default=None, max_length=400)
+
+
+# the player's step that a move to each stage completes (the opening bar's labels)
+FINISHED = {"silas": "The drive in", "opening_omen": "Silas the Showman", "escort": "The first Omen", "done": "Dyer's Lodge"}
 
 
 def _at(ctx: Ctx, *stages: str) -> str:
@@ -182,6 +192,31 @@ def _apply_pay_off_lure(ctx: Ctx, op: PayOffLure) -> dict:
     return {"summary": summary}
 
 
+def _apply_advance_opening(ctx: Ctx, op: AdvanceOpening) -> dict:
+    current = opening.stage(ctx.conn, ctx.campaign_id)
+    nxt = opening.next_stage(current)
+    if current is None:
+        raise ChangeError("this campaign has no opening")
+    if op.to != nxt:
+        raise ChangeError(f"can't move to {op.to}: the next stage is {nxt or 'none (the opening is over)'}")
+    blocked = opening.blockers(ctx.conn, ctx.campaign_id, op.reason)
+    if blocked:
+        raise ChangeError(f"can't move to {op.to}: {'; '.join(blocked)}")
+    skipped = current == "opening_omen" and not one(ctx.conn, "SELECT id FROM stories WHERE campaign_id = ?", (ctx.campaign_id,))
+    ctx.conn.execute("UPDATE campaigns SET opening_stage = ? WHERE id = ?", (op.to, ctx.campaign_id))
+    if op.to == "escort":
+        ctx.conn.execute("INSERT OR IGNORE INTO known_places (campaign_id, place_id, how, known_at_minutes) VALUES (?,?,?,?)",
+                         (ctx.campaign_id, opening.LODGE, "escort", ctx.game_time()))
+    if skipped:
+        ctx.event("opening_skip_reason", f"No opening story: {op.reason}", {"reason": op.reason}, visibility="gm")
+    summary = f"{FINISHED[op.to]} is over"
+    ctx.event("opening_stage", summary, {"stage": op.to, "finished": FINISHED[op.to]})
+    if op.to == "done":
+        from ..memory.snapshots import create_save_point
+        create_save_point(ctx.conn, ctx.campaign_id, "Arrived at Dyer's Lodge", kind="manual", turn_id=ctx.turn_id)
+    return {"summary": summary, "stage": op.to}
+
+
 def register(ops: dict) -> None:
     ops.update({
         "set_lure": (SetLure, _apply_set_lure),
@@ -189,4 +224,5 @@ def register(ops: dict) -> None:
         "introduce_resident": (IntroduceResident, _apply_introduce_resident),
         "silas_assigns": (SilasAssigns, _apply_silas_assigns),
         "pay_off_lure": (PayOffLure, _apply_pay_off_lure),
+        "advance_opening": (AdvanceOpening, _apply_advance_opening),
     })
