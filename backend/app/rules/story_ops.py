@@ -20,8 +20,9 @@ from .engine import ChangeError, Ctx, resolve_character
 from .venue_ops import lift_overlays
 
 EndingName = Literal["full_success", "costly_success", "survive_without_victory", "defeat"]
-# Role Bible dynamic_story_mutation_contract: what a generic story-altering grant may do (spawn_rescue_packet is Phase 6;
-# extraordinary_timeline_branch never comes from a generic grant).
+# Role Bible dynamic_story_mutation_contract: what a generic story-altering grant may do (spawn_rescue_packet, the Damsel's
+# ticket, is not built: Phase 6 rescues come from Rescue tickets via begin_story `rescue`; extraordinary_timeline_branch never
+# comes from a generic grant).
 REVISION_FAMILIES = ("insert_future_scene", "remove_or_delay_future_beat", "recast_npc", "introduce_plausible_support", "shift_pressure",
                      "reveal_authorized_fact", "create_obstacle", "rewrite_conditional_objective")
 
@@ -92,6 +93,13 @@ class EndingProfile(BaseModel):
     predicate: str = Field(min_length=1, max_length=600)
 
 
+class RescueEntry(BaseModel):
+    """A Rescue: the rescuer, their Rescue ticket and the missing posters they carry in (rules/fate_ops.py start_rescue)."""
+    character: str
+    ticket: str
+    posters: list[int] = Field(min_length=1, max_length=12)
+
+
 class BeginStory(BaseModel):
     op: Literal["begin_story"]
     omen: str
@@ -99,6 +107,7 @@ class BeginStory(BaseModel):
     cast: list[CastEntry] = Field(min_length=1, max_length=12)
     reason: str = Field(min_length=1, max_length=400)
     endings: dict[EndingName, EndingProfile] | None = None
+    rescue: RescueEntry | None = None
 
 
 def _norm(action: str) -> str:
@@ -153,6 +162,9 @@ def _apply_begin(ctx: Ctx, op: BeginStory) -> dict:
     ctx.event("story_choice", f"Choice: {op.action}. {title} begins.", {"story_id": sid, "action": op.action, "title": title,
                                                                         "cast": [c["id"] for c, _ in cast]})
     ctx.event("story_phase", "Plot Cycle: Choice → Party", {"story_id": sid, "from": "Choice", "to": "Party"})
+    if op.rescue:
+        from .fate_ops import start_rescue
+        start_rescue(ctx, sid, lock, {c["id"] for c, _ in cast}, op.rescue)
     return {"summary": f"{title} begins with {names}", "story_id": sid, "phase": "Party"}
 
 
@@ -278,6 +290,8 @@ def _apply_revise(ctx: Ctx, op: ReviseScreenplay) -> dict:
     s = _running(ctx)
     c = _cast_member(ctx, s, op.character)
     t, d = _owned(ctx, c, op.ticket)
+    if s["rescue"] and t["ticket_ref"] != s["rescue"]["ticket_ref"]:
+        raise ChangeError("Takeover: in a Rescue, only the rescue ticket may revise this story")
     if not t["equipped"]:
         raise ChangeError(f"{d['name']} is not equipped")
     if t["uses_left"] is not None and t["uses_left"] <= 0:
@@ -380,7 +394,7 @@ def _pay_stars(ctx: Ctx, c: dict, gain: int) -> None:
 
 def _apply_conclude(ctx: Ctx, op: ConcludeStory) -> dict:
     """System Bible order: objective (the ending), fates (restoration or posters), rescue, rewards; then overlays lift."""
-    from .fate_ops import resolve_fates
+    from .fate_ops import resolve_fates, resolve_rescue
     s = _running(ctx)
     if op.ending in ("full_success", "costly_success") and s["phase"] != "Finale":
         raise ChangeError(f"{op.ending} is reached only from the Finale (the story is at {s['phase']}); "
@@ -412,6 +426,7 @@ def _apply_conclude(ctx: Ctx, op: ConcludeStory) -> dict:
     ctx.event("story_phase", f"Plot Cycle: {s['phase']} → The End", {"story_id": s["id"], "from": s["phase"], "to": "The End"})
     ctx.event("story_concluded", f"{s['title']} ends: {ending}", {"story_id": s["id"], "ending": op.ending, "cast": list(by_id), "stars": stars})
     fates = resolve_fates(ctx, s, cast)
+    resolve_rescue(ctx, s, op.ending)
     for cid_ in awards:   # re-read: resolve_fates changed the rows; a dead PC still earns its award
         _pay_stars(ctx, one(ctx.conn, "SELECT * FROM characters WHERE id = ?", (cid_,)), stars[str(cid_)])
     lift_overlays(ctx, s["id"])

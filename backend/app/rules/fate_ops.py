@@ -14,7 +14,7 @@ from ..carousel import fate
 from ..db import one, rows
 from .carousel_ops import _owned
 from .engine import ChangeError, Ctx, resolve_character
-from .story_ops import _cast_member, _running
+from .story_ops import RescueEntry, _cast_member, _running
 
 Physical = Literal["alive", "injured", "dying", "dead", "uncertain"]
 Wallpaper = Literal["active", "off_screen", "dead", "written_off", "unknown"]
@@ -159,6 +159,83 @@ def _apply_window(ctx: Ctx, op: PosthumousWindow) -> dict:
     return {"summary": summary, "visibility": vis}
 
 
+class TakePoster(BaseModel):
+    op: Literal["take_poster"]
+    poster: int
+    character: str
+
+
+def _apply_take_poster(ctx: Ctx, op: TakePoster) -> dict:
+    c = resolve_character(ctx.conn, ctx.campaign_id, op.character)
+    if c["status"] in fate.GONE:
+        raise ChangeError(f"{c['name']} can't take a poster ({c['status']})")
+    if where(ctx, c)["node_id"] != fate.DINER:
+        raise ChangeError("the missing-poster board is outside the Diner; go there first")
+    p = one(ctx.conn, "SELECT * FROM missing_posters WHERE id = ? AND campaign_id = ?", (op.poster, ctx.campaign_id))
+    if not p:
+        raise ChangeError(f"no missing poster #{op.poster}")
+    if p["held_by_character_id"] is not None or p["rescued_minutes"] is not None:
+        raise ChangeError(f"{p['name']}'s poster is not on the board")
+    ctx.conn.execute("UPDATE missing_posters SET held_by_character_id = ? WHERE id = ?", (c["id"], p["id"]))
+    summary = f"{c['name']} takes down {p['name']}'s poster"
+    ctx.event("poster_taken", summary, {"character_id": c["id"], "poster_id": p["id"]})
+    return {"summary": summary}
+
+
+def start_rescue(ctx: Ctx, story_id: int, story_lock: str, cast_ids: set[int], entry: RescueEntry) -> None:
+    """begin_story with `rescue`: the rescuer carries posters of this story's lost group in on a Rescue ticket (one use)."""
+    from .carousel_ops import UseTrope, _apply_use
+    c = resolve_character(ctx.conn, ctx.campaign_id, entry.character)
+    if c["id"] not in cast_ids:
+        raise ChangeError(f"{c['name']} must be in the cast to lead a rescue")
+    t, d = _owned(ctx, c, entry.ticket)
+    if "Rescue" not in fate.ticket_kinds(ctx.conn, t["ticket_ref"]):
+        raise ChangeError(f"{d['name']} is not a Rescue ticket")
+    names = []
+    for pid in dict.fromkeys(entry.posters):
+        p = one(ctx.conn, "SELECT p.*, c.rescue_eligibility FROM missing_posters p JOIN characters c ON c.id = p.character_id "
+                          "WHERE p.id = ? AND p.campaign_id = ?", (pid, ctx.campaign_id))
+        if not p or p["held_by_character_id"] != c["id"]:
+            raise ChangeError(f"{c['name']} isn't holding poster #{pid}; take it from the board at the Diner")
+        if p["story_lock"] != story_lock:
+            raise ChangeError(f"{p['name']} was lost in another story; a rescue enters the story that took them")
+        if p["rescue_eligibility"] != "possible":
+            raise ChangeError(f"{p['name']} can't be rescued (rescue {p['rescue_eligibility']})")
+        names.append(p["name"])
+    _apply_use(ctx, UseTrope(op="use_trope", character=str(c["id"]), ticket=t["ticket_ref"], effect="enters the story to bring the lost back"))
+    ids = list(dict.fromkeys(entry.posters))
+    ctx.conn.execute("UPDATE stories SET rescue_json = ? WHERE id = ?",
+                     (json.dumps({"character_id": c["id"], "ticket_ref": t["ticket_ref"], "poster_ids": ids}), story_id))
+    ctx.conn.execute(f"UPDATE characters SET rescue_eligibility = 'active' WHERE id IN "
+                     f"(SELECT character_id FROM missing_posters WHERE id IN ({','.join('?' * len(ids))}))", ids)
+    ctx.event("story_rescue", "This story is a Rescue", {"story_id": story_id})
+    ctx.event("story_rescue_detail", f"{c['name']} carries the posters of {', '.join(names)}", {"story_id": story_id, "poster_ids": ids,
+                                                                                               "ticket": t["ticket_ref"]}, "gm")
+
+
+def resolve_rescue(ctx: Ctx, story: dict, ending: str) -> dict | None:
+    """After the fates: a victory brings every carried poster's character back; anything else fails them for good."""
+    r = story.get("rescue")   # stories.rescue_json, decoded by row_to_dict
+    if not r:
+        return None
+    won = ending in ("full_success", "costly_success")
+    found = []
+    for pid in r["poster_ids"]:
+        p = one(ctx.conn, "SELECT * FROM missing_posters WHERE id = ?", (pid,))
+        if won:
+            ctx.conn.execute("""UPDATE characters SET rescue_eligibility = 'completed', persistent_fate = 'restored', physical_condition = 'alive',
+                                wallpaper_status = 'active', rights_basis = NULL, status = 'active' WHERE id = ?""", (p["character_id"],))
+            fate.set_rights(ctx.conn, p["character_id"])
+            ctx.conn.execute("UPDATE missing_posters SET held_by_character_id = NULL, rescued_minutes = ? WHERE id = ?", (ctx.game_time(), pid))
+            ctx.event("character_found", f"{p['name']} is found", {"character_id": p["character_id"], "poster_id": pid, "story_id": story["id"]})
+            found.append(p["character_id"])
+        else:
+            ctx.conn.execute("UPDATE characters SET rescue_eligibility = 'failed' WHERE id = ?", (p["character_id"],))
+            ctx.conn.execute("UPDATE missing_posters SET held_by_character_id = NULL WHERE id = ?", (pid,))
+            ctx.event("rescue_failed", f"The rescue of {p['name']} failed", {"poster_id": pid, "story_id": story["id"]}, "gm")
+    return {"found": found, "failed": [] if won else r["poster_ids"]}
+
+
 def _last_seen(ctx: Ctx, pos: dict) -> str | None:
     from ..carousel.venues import label
     place = one(ctx.conn, "SELECT name FROM ref.places WHERE id = ?", (pos.get("node_id"),)) if pos.get("node_id") else None
@@ -209,4 +286,5 @@ def register(ops: dict) -> None:
         "warn_irreversible": (WarnIrreversible, _apply_warn),
         "permanent_loss": (PermanentLoss, _apply_permanent_loss),
         "posthumous_window": (PosthumousWindow, _apply_window),
+        "take_poster": (TakePoster, _apply_take_poster),
     })
