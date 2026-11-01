@@ -32,16 +32,30 @@ The audits will keep changing place data and some panels. The game is built so t
 | 2 | Characters and tickets | Five stats + Plot Armor; 13 starting profiles; ticket ownership/equip/uses ops; `use_trope` op; the per-turn trope briefing (full ticket text for everyone present); rulings for vague tickets. | 1 |
 | 3 | Maps and travel | World map + Leaflet panel tile map; knowledge-gated pins; Dijkstra over `travel_graph` with every `requires` flag; clock advance by distance; interruptions decided at route time; arrival establishing shot with GM call started on click. | 1, 2 (party position) |
 | 4 | Omen and story runner | Omen lifecycle, story locks, Plot Cycle phases as engine events, On/Off Screen, sealed truth GM-only, ending profiles, ticket-driven screenplay revisions, rewards and story history. | 2, 3 |
-| 5 | New-game flow | Lure, car conversation, Silas assigning Archetypes from that conversation, opening Omen, escort, Lodge payoff. | 3, 4 |
-| 6 | Death and fate | Five separate fate tracks, survivor-restores-all, missing-poster board, Death Spectator, rescue eligibility, new group in the same town. Camp-only save points. | 4 |
-| 7 | Camp Dyer and residents | 70 residents imported per campaign, hangout schedules around the safer places, recruitment into stories, reactive colour on return. | 3, 4 |
-| 8 | Interface pass | All screens from design §12 in the oxblood/gilt direction. | all |
+| 5 | New-game flow. [Detailed plan](2026-10-31-carousel-plan-5-new-game.md) | Lure, car conversation, Silas assigning Archetypes from that conversation, opening Omen, escort, Lodge payoff. | 3, 4 |
+| 5.5 | Venues (sub-maps) | Import the 108 venue maps from `E:\Carousel\sublocations` (zones, zone links, which zone each Omen sits in) into `reference.db`, read-only. The group has a current zone inside a venue and moves between zones only along the venue's links. Omens are sighted per zone. Entering a place on the town map puts the group at its venue's entry zone. Venues are shown as text (zone list, exits, what's visible) until approved art exists. Story overlays (locked doors, added rooms) are logged events on top of a clean copy of the venue. Rules: Addendum SM-01 v0.1, where it agrees with the design. | 3, 4 |
+| 6 | Death and fate | Five separate fate tracks, survivor-restores-all, missing-poster board, Death Spectator, rescue eligibility, new group in the same town. Death records the zone (Addendum SM-01 §10). Camp-only save points. | 4, 5.5 |
+| 7 | Camp Dyer and residents | 70 residents imported per campaign, hangout schedules around the safer places (zone-level where a venue exists), recruitment into stories, reactive colour on return. | 3, 4, 5.5 |
+| 8 | Interface pass | All screens from design §12 in the oxblood/gilt direction, including venue art where approved. | all |
 
-Phases 6 and 7 are independent of each other once 4 lands, and can run in parallel.
+Phases 6 and 7 are independent of each other once 5.5 lands, and can run in parallel. Plan 5 does not depend on 5.5: the opening works at the place level, and zones layer on top of it later.
+
+### Phase 5.5 inputs (surveyed 2026-11-01)
+
+- **Source:** `sublocations/Carousel_Codex_Submap_Package_v1.1/Carousel_Codex_Submap_Spec_v1.json`: 108 venues, 718 zones, 648 zone links. 61 are `persistent`, 40 `conditional`, 5 `story_instance` and 2 `extradimensional`. The venues cover 142 places and 103 Omens. Rules: `Carousel_Submap_Mechanics_Rules_Addendum_v0.1.md` and `Carousel_Submap_Runtime_Rules_Contract_v0.1.json`, whose 20 SMR test cases are pinned as tests where they apply.
+- **Fit with the reference data:** all 142 member place IDs resolve. 119 of 120 Omen placements use the same Choice action as the Omen data; the exception is OM-110, which has a Choice action in the sub-maps and none in the Omen data. The Omen data stays the authority.
+- **Not ready yet:**
+  - All 216 entries and exits are `requires_parent_map_matching`.
+  - 50 Omen placements are `NEEDS_MANUAL_NODE_REVIEW`; 70 are design recommendations only.
+  - 13 venues have no member place, including the bowling alley (SM-086), Look Back alley (SM-094) and Turnpike gate (SM-108).
+  - Art exists for 53 of 108 venues, as unapproved studies.
+  - `release_ready: false`; no runtime tests run. Production is ongoing (Codex), so the plan is written against the files as they stand when the phase starts.
+- **Binding rule:** a venue with member places gets its entry and exit at those places' town-map nodes, which the import derives. A venue with no member place stays unreachable until Track B gives it a place. An Omen marked for manual review is placed at the venue's entry zone, never at its suggested zone.
+- **Smaller option kept in reserve:** list each venue's zones in the GM's briefing as description only, with nothing enforced by the engine.
 
 ## Track B: map data fixes (outside the game repo)
 
-These are edits to `E:\Carousel` source data. The game picks them up by re-importing. None blocks Phases 1–3. Phase 7 needs the bowling alley.
+These are edits to `E:\Carousel` source data. The game picks them up by re-importing. None blocks Phases 1–3. Phase 7 needs the bowling alley, and Phase 5.5 can only reach the 13 venues that have no place (SM-086–097, SM-108) once they get one.
 
 1. **Install the Cold Case repair.** The candidate gazetteer and travel-graph JSON are already built and validated (7 structural + 5 routing checks). This is a data edit, not new art, so Claude can do it without Codex. Do it before Phase 3 so routing to the museum goes through City Hall.
 2. **Bowling alley:** gazetteer record + authored position near the flea market (CAR-035, [425, 570]). The painted building and the location image need image generation, which is Codex's job when credits allow. Until then the record can exist with a placeholder image and no painted building.
