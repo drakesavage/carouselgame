@@ -4,6 +4,7 @@ Sections, in order:
   1 CAMPAIGN        identity, state version, floor, location, game time, dungeon day, collapse clock, cycles
   2 CURRENT SCENE   the active scene record + recent significant events
     STORY           the active story: phase, pressure, camera, cast, obligations, revisions, endings (or OMENS HERE when none)
+    OPENING         during the new-game flow: the stage, its job, what blocks the next stage, the lure, the friends, Silas's options
   3 PARTY           every group: location, activity, members (who is present vs elsewhere)
   4 PRESENT         full sheets for the player character and everyone present (scene participants, the PC's group,
                     anyone named); GM-ONLY companion sheets and memories for them
@@ -47,7 +48,7 @@ PROFILES: dict[str, dict] = {
 },
 }
 CATEGORIES = {"CAMPAIGN": "state", "PARTY": "state", "PRESENT": "state", "OBJECTIVES": "state", "SHARED STASH": "state",
-              "ACTIVE COMBAT": "state", "STORY": "state", "OMENS HERE": "state", "LEDGER RECORDS": "ledger", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
+              "ACTIVE COMBAT": "state", "STORY": "state", "OMENS HERE": "state", "OPENING": "state", "LEDGER RECORDS": "ledger", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
               "RULEBOOK": "rulebook", "RECENT TRANSCRIPT": "narrative", "RECENT ROLLS": "state", "GM-ONLY SECRETS": "gm_private"}
 STOP = set("the a an and or of to in on for with by is are be as at it this that from what how does do can when which who i we my our me us "
            "you your he she they them his her their then than into onto about there here just also will would should could".split())
@@ -227,6 +228,45 @@ def _sealed_truth(story: dict, packet: dict) -> str:
     return "\n".join(lines)
 
 
+OPENING_JOBS = {
+    "car": "Choose the lure (set_lure), create the three friends to fit it (npc, in_party), and open on the drive with everyone talking. "
+           "Let the player adjust or cut a friend (drop_friend) before the conversation gets going. Give each person natural moments to show who they are.",
+    "silas": "Signal and radio die, the road ends in the abandoned lot, everyone walks. Silas deals each character three tickets with "
+             "silas_assigns, quoting what they said or did in the car.",
+    "opening_omen": "The group is pulled toward a story almost at once: sight an Omen near them. Only the player's own Choice starts it.",
+    "escort": "Veterans (introduce_resident, in_party) walk the group across town to Dyer's Lodge, dodging Omens. At the Lodge, pay off "
+              "the lure (pay_off_lure).",
+}
+
+
+def _opening_section(conn: sqlite3.Connection, cid: int) -> str | None:
+    """The new-game flow's stage and job, its blockers, the lure belief, the friends, and (in the car and at Silas) the
+    starting Archetypes and contextual tickets Silas can deal, read from the reference data."""
+    from ..carousel import opening
+    from ..carousel.refdata import has_reference
+    stage = opening.stage(conn, cid)
+    if stage is None or stage == "done":
+        return None
+    camp = one(conn, "SELECT lure_belief FROM campaigns WHERE id = ?", (cid,))
+    blocked = opening.blockers(conn, cid)
+    out = [f"Stage: {stage} — {OPENING_JOBS[stage]}",
+           "Next stage blocked by: " + "; ".join(blocked) if blocked else f"Next stage: ready: advance_opening to {opening.next_stage(stage)}",
+           f"Why we came (the players' belief): {camp['lure_belief'] or 'not set yet'}"]
+    fr = opening.friends(conn, cid)
+    out.append("Friends: " + (", ".join(f"{f['name']}: {f['role_id'] or 'unassigned'}" for f in fr) if fr else "none yet"))
+    if stage in ("car", "silas") and has_reference(conn):
+        out.append("Silas's starting Archetypes (role id, name: play identity; stats):")
+        for r in rows(conn, """SELECT r.id, r.name, r.raw_json, p.mettle, p.moxie, p.hustle, p.savvy, p.grit FROM ref.roles r
+                               JOIN ref.start_profiles p ON p.role_id = r.id WHERE r.kind = 'base' ORDER BY r.id"""):
+            ident = (r["raw"] or {}).get("play_identity") or ""
+            out.append(f"- {r['id']}, {r['name']}: {ident}; Mettle {r['mettle']}, Moxie {r['moxie']}, Hustle {r['hustle']}, "
+                       f"Savvy {r['savvy']}, Grit {r['grit']}")
+        out.append("Contextual starter tickets (deal exactly one each; the Archetype's signature ticket comes with it):")
+        out += [f"- {t['id']}, {t['name']}: {t['text']}" for t in rows(
+            conn, "SELECT id, name, text FROM ref.tickets WHERE relationship = 'contextual_shared_starter' ORDER BY id")]
+    return "\n".join(out)
+
+
 def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_window: int = 12, rule_conn: sqlite3.Connection | None = None,
                   budgets: dict | None = None) -> dict:
     B = {**DEFAULT_BUDGET, **(budgets or {})}
@@ -306,6 +346,10 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
                                                   + ("a hub: it never starts a story itself" if o["record_type"] != "Playable Omen"
                                                      else f"Choice action: {o['choice_trigger'] or 'not recorded (record the action with begin_story reason)'}")
                                                   for o in here_omens))
+
+    opening_text = _opening_section(conn, cid)
+    if opening_text:
+        sections["OPENING"] = opening_text
 
     # 3 PARTY ORGANIZATION
     pc_group = pc.get("assignment") if pc else None
