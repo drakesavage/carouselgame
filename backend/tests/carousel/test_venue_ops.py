@@ -89,3 +89,84 @@ def test_a_block_keeps_the_group_where_it_is(conn, campaign_id):
     with pytest.raises(ChangeError, match="cellar door is blocked: the door has swollen shut"):
         apply(conn, campaign_id, {"op": "move_zone", "to": CELLAR})
     assert zone_of(conn, campaign_id) == BARN
+
+
+# ---- Task 5: story overlays ----
+
+from tests.carousel.test_story_ops import begin  # noqa: E402
+
+ENDINGS = {e: {"predicate": f"MINI {e}"} for e in ("full_success", "costly_success", "survive_without_victory", "defeat")}
+
+
+def story_at_cellar(conn, cid):
+    """The group at the cellar door with OM-005's story begun on a typed turn."""
+    at_farm(conn, cid)
+    for z in (BARN, CELLAR):
+        apply(conn, cid, {"op": "move_zone", "to": z})
+    return begin(conn, cid, omen="OM-005", action="open:cellar_door", endings=ENDINGS)["story_id"]
+
+
+def conclude(conn, cid):
+    return apply(conn, cid, {"op": "conclude_story", "ending": "defeat", "reason": "the cellar keeps them",
+                             "awards": [{"character": c, "performance": 0, "difficulty": 0} for c in ("Mara Vance", "Jonah Reyes")]})
+
+
+def test_block_and_reopen_a_passage(conn, campaign_id):
+    sid = story_at_cellar(conn, campaign_id)
+    apply(conn, campaign_id, {"op": "move_zone", "to": BARN})
+    apply(conn, campaign_id, {"op": "block_passage", "a": BARN, "b": CELLAR, "reason": "the cellar door slams and holds"})
+    row = conn.execute("SELECT story_id, kind FROM venue_overlays WHERE campaign_id = ?", (campaign_id,)).fetchone()
+    assert tuple(row) == (sid, "block")
+    with pytest.raises(ChangeError, match="blocked: the cellar door slams and holds"):
+        apply(conn, campaign_id, {"op": "move_zone", "to": CELLAR})
+    with pytest.raises(ChangeError, match="already blocked"):
+        apply(conn, campaign_id, {"op": "block_passage", "a": CELLAR, "b": BARN, "reason": "again"})
+    apply(conn, campaign_id, {"op": "open_passage", "a": CELLAR, "b": BARN, "reason": "the latch gives"})
+    apply(conn, campaign_id, {"op": "move_zone", "to": CELLAR})
+    assert zone_of(conn, campaign_id) == CELLAR
+    ev = conn.execute("SELECT summary, visibility FROM events WHERE campaign_id = ? AND type = 'passage_blocked'", (campaign_id,)).fetchone()
+    assert ev["visibility"] == "player" and "barn" in ev["summary"] and "cellar door" in ev["summary"]
+
+
+def test_passage_ops_need_a_real_link(conn, campaign_id):
+    story_at_cellar(conn, campaign_id)
+    with pytest.raises(ChangeError, match="no passage"):
+        apply(conn, campaign_id, {"op": "block_passage", "a": GATE, "b": CELLAR, "reason": "x"})
+    with pytest.raises(ChangeError, match="not blocked"):
+        apply(conn, campaign_id, {"op": "open_passage", "a": BARN, "b": CELLAR, "reason": "x"})
+
+
+def test_add_zone_is_reachable(conn, campaign_id):
+    sid = story_at_cellar(conn, campaign_id)
+    r = apply(conn, campaign_id, {"op": "add_zone", "label": "A second cellar", "connect_to": CELLAR, "reason": "the stairs go on"})
+    assert r["zone_id"] == f"SM-T01:story-{sid}-1"
+    apply(conn, campaign_id, {"op": "move_zone", "to": "A second cellar"})
+    assert zone_of(conn, campaign_id) == r["zone_id"]
+    ev = conn.execute("SELECT summary FROM events WHERE campaign_id = ? AND type = 'zone_appeared'", (campaign_id,)).fetchone()
+    assert "A second cellar" in ev["summary"]
+
+
+def test_overlays_need_an_active_story(conn, campaign_id):
+    at_farm(conn, campaign_id)
+    for change in ({"op": "block_passage", "a": GATE, "b": BARN, "reason": "x"},
+                   {"op": "open_passage", "a": GATE, "b": BARN, "reason": "x"},
+                   {"op": "add_zone", "label": "Pit", "connect_to": GATE, "reason": "x"}):
+        with pytest.raises(ChangeError, match="a venue changes only inside a story"):
+            apply(conn, campaign_id, change)
+    assert conn.execute("SELECT COUNT(*) FROM venue_overlays").fetchone()[0] == 0
+
+
+def test_lifting_overlays_returns_the_group(conn, campaign_id):
+    story_at_cellar(conn, campaign_id)
+    baseline = conn.execute("SELECT * FROM ref.venue_links ORDER BY a, b").fetchall()
+    added = apply(conn, campaign_id, {"op": "add_zone", "label": "A second cellar", "connect_to": CELLAR, "reason": "the stairs go on"})
+    apply(conn, campaign_id, {"op": "block_passage", "a": BARN, "b": CELLAR, "reason": "the door holds"})
+    apply(conn, campaign_id, {"op": "move_zone", "to": added["zone_id"]})
+    conclude(conn, campaign_id)
+    assert zone_of(conn, campaign_id) == CELLAR
+    assert conn.execute("SELECT COUNT(*) FROM venue_overlays WHERE campaign_id = ? AND lifted = 0", (campaign_id,)).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM venue_overlays WHERE campaign_id = ? AND lifted = 1", (campaign_id,)).fetchone()[0] == 2
+    ev = conn.execute("SELECT summary FROM events WHERE campaign_id = ? AND type = 'zone_vanished'", (campaign_id,)).fetchone()
+    assert ev["summary"] == "A second cellar is gone; the group is back in cellar door"
+    assert conn.execute("SELECT * FROM ref.venue_links ORDER BY a, b").fetchall() == baseline
+    apply(conn, campaign_id, {"op": "move_zone", "to": BARN})   # the block went with the story

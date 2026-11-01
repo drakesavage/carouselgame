@@ -2,15 +2,19 @@
 
 `move_zone` is the only way a group moves inside a venue: one link at a time along the venue's graph as the live
 overlays leave it (carousel/venues.py). It costs no game time (the GM uses advance_time for searching or waiting) and
-entering a zone only sights the Omens placed there: a story still begins only on the player's typed Choice."""
+entering a zone only sights the Omens placed there: a story still begins only on the player's typed Choice.
+
+A running story may change the place through `block_passage`, `open_passage` and `add_zone`. Each is an overlay that
+names the story and is lifted when it concludes (lift_overlays); the reference data is never changed."""
 from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..carousel import venues
 from ..carousel.refdata import require_reference
+from ..carousel.stories import active_story
 from ..db import one
 from .engine import ChangeError, Ctx
 
@@ -19,6 +23,20 @@ class MoveZone(BaseModel):
     op: Literal["move_zone"]
     to: str
     group: str | None = None
+
+
+class Passage(BaseModel):
+    op: Literal["block_passage", "open_passage"]
+    a: str
+    b: str
+    reason: str = Field(min_length=1, max_length=300)
+
+
+class AddZone(BaseModel):
+    op: Literal["add_zone"]
+    label: str = Field(min_length=1, max_length=80)
+    connect_to: str
+    reason: str = Field(min_length=1, max_length=300)
 
 
 def _target(ctx: Ctx, venue_id: str, to: str) -> dict:
@@ -84,7 +102,94 @@ def _apply_move_zone(ctx: Ctx, op: MoveZone) -> dict:
     return {"summary": summary, "zone_id": there["id"], "sighted": sighted}
 
 
+def _story(ctx: Ctx) -> dict:
+    require_reference(ctx.conn)
+    s = active_story(ctx.conn, ctx.campaign_id)
+    if not s:
+        raise ChangeError("a venue changes only inside a story")
+    return s
+
+
+def _here_venue(ctx: Ctx) -> str:
+    venue_id, _ = venues.position(ctx.conn, ctx.campaign_id)
+    if not venue_id:
+        raise ChangeError("the group is not in a venue")
+    return venue_id
+
+
+def _block(ctx: Ctx, a: str, b: str) -> dict | None:
+    return one(ctx.conn, """SELECT * FROM venue_overlays WHERE campaign_id = ? AND kind = 'block' AND lifted = 0
+                            AND ((a = ? AND b = ?) OR (a = ? AND b = ?))""", (ctx.campaign_id, a, b, b, a))
+
+
+def _apply_passage(ctx: Ctx, op: Passage) -> dict:
+    s = _story(ctx)
+    venue_id = _here_venue(ctx)
+    a, b = _target(ctx, venue_id, op.a), _target(ctx, venue_id, op.b)
+    if b["id"] not in {n["zone_id"] for n in venues.neighbours(ctx.conn, ctx.campaign_id, a["id"])}:
+        raise ChangeError(f"no passage between {a['label']} and {b['label']}; a new way in is add_zone")
+    held = _block(ctx, a["id"], b["id"])
+    if op.op == "block_passage":
+        if held:
+            raise ChangeError(f"the way between {a['label']} and {b['label']} is already blocked: {held['reason']}")
+        ctx.conn.execute("""INSERT INTO venue_overlays (campaign_id, story_id, venue_id, kind, a, b, reason, created_minutes)
+                            VALUES (?,?,?, 'block', ?,?,?,?)""", (ctx.campaign_id, s["id"], venue_id, a["id"], b["id"], op.reason, ctx.game_time()))
+        summary = f"The way between {a['label']} and {b['label']} is blocked: {op.reason}"
+        ctx.event("passage_blocked", summary, {"venue_id": venue_id, "a": a["label"], "b": b["label"], "reason": op.reason})
+    else:
+        if not held or held["story_id"] != s["id"]:
+            raise ChangeError(f"the way between {a['label']} and {b['label']} is not blocked by this story")
+        ctx.conn.execute("UPDATE venue_overlays SET lifted = 1 WHERE id = ?", (held["id"],))
+        summary = f"The way between {a['label']} and {b['label']} opens: {op.reason}"
+        ctx.event("passage_opened", summary, {"venue_id": venue_id, "a": a["label"], "b": b["label"], "reason": op.reason})
+    return {"summary": summary}
+
+
+def _apply_add_zone(ctx: Ctx, op: AddZone) -> dict:
+    s = _story(ctx)
+    venue_id = _here_venue(ctx)
+    joined = _target(ctx, venue_id, op.connect_to)
+    n = ctx.conn.execute("SELECT COUNT(*) FROM venue_overlays WHERE story_id = ? AND kind = 'add_zone'", (s["id"],)).fetchone()[0] + 1
+    zid = f"{venue_id}:story-{s['id']}-{n}"
+    ctx.conn.execute("""INSERT INTO venue_overlays (campaign_id, story_id, venue_id, kind, a, b, label, reason, created_minutes)
+                        VALUES (?,?,?, 'add_zone', ?,?,?,?,?)""",
+                     (ctx.campaign_id, s["id"], venue_id, zid, joined["id"], op.label, op.reason, ctx.game_time()))
+    summary = f"A way opens from {joined['label']}: {op.label}"
+    ctx.event("zone_appeared", summary, {"venue_id": venue_id, "zone": op.label, "from": joined["label"]})
+    return {"summary": summary, "zone_id": zid}
+
+
+def lift_overlays(ctx: Ctx, story_id: int) -> int:
+    """Lift every overlay the story made. A group standing in a room that goes with it is put back in the zone that room
+    joined (following story rooms back to a reference zone), with a logged event."""
+    added = {r["a"]: r for r in ctx.conn.execute("SELECT a, b, label FROM venue_overlays WHERE story_id = ? AND kind = 'add_zone' AND lifted = 0",
+                                                 (story_id,))}
+    n = ctx.conn.execute("UPDATE venue_overlays SET lifted = 1 WHERE story_id = ? AND lifted = 0", (story_id,)).rowcount
+
+    def back(zid: str) -> str:
+        while zid in added:
+            zid = added[zid]["b"]
+        return zid
+
+    stranded = [("campaigns", r["id"], r["zone_id"]) for r in ctx.conn.execute("SELECT id, zone_id FROM campaigns WHERE id = ?", (ctx.campaign_id,))
+                if r["zone_id"] in added]
+    stranded += [("party_groups", r["id"], r["zone_id"]) for r in ctx.conn.execute("SELECT id, zone_id FROM party_groups WHERE campaign_id = ?",
+                                                                                    (ctx.campaign_id,)) if r["zone_id"] in added]
+    for table, row_id, zid in stranded:
+        to = back(zid)
+        ctx.conn.execute(f"UPDATE {table} SET zone_id = ? WHERE id = ?", (to, row_id))
+        if table == "campaigns":
+            ctx.conn.execute("INSERT OR IGNORE INTO zone_visits (campaign_id, zone_id, first_minutes) VALUES (?,?,?)",
+                             (ctx.campaign_id, to, ctx.game_time()))
+            ctx.event("zone_vanished", f"{added[zid]['label']} is gone; the group is back in {venues.label(ctx.conn, to)}",
+                      {"zone": added[zid]["label"], "to": venues.label(ctx.conn, to), "story_id": story_id})
+    return n
+
+
 def register(ops: dict) -> None:
     ops.update({
         "move_zone": (MoveZone, _apply_move_zone),
+        "block_passage": (Passage, _apply_passage),
+        "open_passage": (Passage, _apply_passage),
+        "add_zone": (AddZone, _apply_add_zone),
     })

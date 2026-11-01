@@ -17,6 +17,7 @@ from ..carousel.stories import ENDINGS, PHASES, active_story, canonical, endings
 from ..db import one, rows
 from .carousel_ops import UseTrope, _apply_use, _owned, recharge
 from .engine import ChangeError, Ctx, resolve_character
+from .venue_ops import lift_overlays
 
 EndingName = Literal["full_success", "costly_success", "survive_without_victory", "defeat"]
 # Role Bible dynamic_story_mutation_contract: what a generic story-altering grant may do (spawn_rescue_packet is Phase 6;
@@ -408,6 +409,7 @@ def _apply_conclude(ctx: Ctx, op: ConcludeStory) -> dict:
     ending = op.ending.replace("_", " ")
     ctx.event("story_phase", f"Plot Cycle: {s['phase']} → The End", {"story_id": s["id"], "from": s["phase"], "to": "The End"})
     ctx.event("story_concluded", f"{s['title']} ends: {ending}", {"story_id": s["id"], "ending": op.ending, "cast": list(by_id), "stars": stars})
+    lift_overlays(ctx, s["id"])
     return {"summary": f"{s['title']} ends: {ending}", "ending": op.ending, "stars": stars, "novelty": nov}
 
 
