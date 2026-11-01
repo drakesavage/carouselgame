@@ -21,6 +21,7 @@ SOURCE_FILES: dict[str, str] = {
     "roles": "roles/Carousel_Role_Bible_v0_4_2_Implementation.json",
     "tropes": "tropes/Carousel_Trope_Bible_Data_v0.1.1.json",
     "location_art": "Location_Art_Production/data/review_reference_index.json",
+    "venues": "sublocations/Carousel_Codex_Submap_Package_v1.1/Carousel_Codex_Submap_Spec_v1.json",
     "npcs": "npcs/Carousel_Camp_NPC_Package_v1/Carousel_Camp_NPC_Database_v1.json",
 }
 

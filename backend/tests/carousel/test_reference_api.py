@@ -45,7 +45,7 @@ def test_gm_reference_requires_token(client_ref, ref_settings):
     assert client_ref.get("/api/gm/reference/omens").status_code == 403
     assert client_ref.get("/api/gm/reference/omens", headers={"X-GM-Token": "wrong"}).status_code == 403
     omens = client_ref.get("/api/gm/reference/omens", headers=gm(ref_settings)).json()
-    assert [o["id"] for o in omens] == ["OM-001", "OM-002", "OM-003", "OM-009"]   # every record type, hubs included
+    assert [o["id"] for o in omens] == ["OM-001", "OM-002", "OM-003", "OM-005", "OM-009"]   # every record type, hubs included
 
 
 def test_gm_reference_one_record_includes_gm_material(client_ref, ref_settings):

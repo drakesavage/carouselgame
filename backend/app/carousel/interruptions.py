@@ -1,7 +1,8 @@
 """Omen interruptions, decided when a route is planned, never during the walk and never by a roll for an outcome.
 The decision depends only on campaign state and the travel sequence number, which restores with a save, so the same
 trip from the same save point is interrupted the same way. Seeing an Omen is always safe: a story starts only on its
-Choice action (Phase 4). District-wide (area) Omens don't interrupt yet."""
+Choice action (Phase 4). District-wide (area) Omens don't interrupt yet, and an
+Omen placed in a venue zone is sighted only by entering that zone (rules/venue_ops.py), never from the street."""
 from __future__ import annotations
 
 import hashlib
@@ -34,7 +35,8 @@ def _draw(cid: int, seq: int) -> float:
 def _unseen(conn: sqlite3.Connection, cid: int, spawn: str, placement: str | None = None) -> list[sqlite3.Row]:
     sql = """SELECT o.id, o.place_id, p.north, p.west FROM ref.omens o JOIN ref.places p ON p.id = o.place_id
              WHERE o.record_type = 'Playable Omen' AND o.spawn_mode = ?
-               AND NOT EXISTS (SELECT 1 FROM omen_states s WHERE s.campaign_id = ? AND s.omen_id = o.id)"""
+               AND NOT EXISTS (SELECT 1 FROM omen_states s WHERE s.campaign_id = ? AND s.omen_id = o.id)
+               AND NOT EXISTS (SELECT 1 FROM ref.venue_omens v WHERE v.omen_id = o.id AND v.placed = 1)"""
     args: list = [spawn, cid]
     if placement:
         sql += " AND o.placement = ?"

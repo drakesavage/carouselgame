@@ -66,3 +66,9 @@ def test_interruption_is_reproducible_after_restore(conn, campaign_id):
     first = [walk() for _ in range(5)]
     restore_save_point(conn, campaign_id, sp)
     assert [walk() for _ in range(5)] == first
+
+
+def test_a_zone_placed_omen_is_never_sighted_from_the_street(conn, campaign_id):
+    seen(conn, campaign_id, "OM-001", "OM-002")   # OM-005 is fixed at the farm too, but it sits in the cellar-door zone
+    r = plan_route(conn, "CAR-047", "CAR-086", set())
+    assert all(decide(conn, campaign_id, r, s) is None for s in range(50))

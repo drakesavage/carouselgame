@@ -55,6 +55,33 @@ FULL_DOSSIER = {   # OM-001: everything a story needs (commitment, 8 phases, 4 o
 }
 
 
+def _venue(vid, title, layer, members, zones=(), links=(), omens=()):
+    """A venue in the sub-map spec's shape: zones are (node id, label, area type); the first is the entry, the second the exit."""
+    nodes = [{"id": n, "label": label, "floor_hint": 0, "area_type": area} for n, label, area in zones]
+    edges = [{"from": a, "to": b, "mode": mode, "two_way": True, "lock": "off_by_default" if mode == "proposed_optional_shortcut" else None}
+             for a, b, mode in links]
+    portals = [{"id": f"{vid}-ENTRY", "arrive_at_node": zones[0][0]}, {"id": f"{vid}-EXIT", "depart_from_node": zones[1][0]}] if zones else []
+    return {"id": vid, "title": title, "layer": layer, "members": list(members), "graph": {"nodes": nodes, "edges": edges}, "portals": portals,
+            "omens": [{"omen_id": o, "recommended_node": n, "placement_status": st, "choice_action": ch} for o, n, st, ch in omens]}
+
+
+VENUES = {"maps": [
+    _venue("SM-T01", "Farm grounds", "persistent", ["CAR-086"],
+           zones=[("n01_farm_gate", "farm gate", "exterior"), ("n02_barn", "barn", "interior"),
+                  ("n03_cellar_door", "cellar door", "interior"), ("n04_MINI-HIDDEN-ROOM", "MINI-HIDDEN-ROOM", "interior")],
+           links=[("n01_farm_gate", "n02_barn", "walk"), ("n02_barn", "n03_cellar_door", "walk"),
+                  ("n03_cellar_door", "n04_MINI-HIDDEN-ROOM", "vertical_transition"),
+                  ("n01_farm_gate", "n04_MINI-HIDDEN-ROOM", "proposed_optional_shortcut")],
+           omens=[("OM-005", "n03_cellar_door", "DESIGN_RECOMMENDATION_NOT_CANON_COORD", "open:cellar_door"),
+                  ("OM-001", "n01_farm_gate", "NEEDS_MANUAL_NODE_REVIEW", "enter:farm")]),
+    _venue("SM-T02", "A train that isn't there", "story_instance", ["CAR-016"],
+           zones=[("n01_platform", "platform", "exterior"), ("n02_carriage", "carriage", "interior")],
+           links=[("n01_platform", "n02_carriage", "walk")]),
+    _venue("SM-T03", "Unplaced alley", "persistent", [],
+           zones=[("n01_mouth", "alley mouth", "exterior"), ("n02_end", "dead end", "exterior")],
+           links=[("n01_mouth", "n02_end", "walk")]),
+]}
+
 MINI = {
     "locations": PLACES,
     "gazetteer": [*PLACES, _place("CAR-017", "The Diner (old name)", *COORDS["CAR-016"], status="alias")],
@@ -73,12 +100,15 @@ MINI = {
     "omens": {"registry": [_omen("OM-001", "A scarecrow facing the wrong way", "CAR-086", "Farm", FIXED),
                            _omen("OM-002", "A figure keeps pace behind the hedges", "CAR-002", "Town Square", ROAMING),
                            _omen("OM-003", "A chair knocked over", "CAR-006", "Diner", FIXED),
+                           {**_omen("OM-005", "A cellar door breathing", "CAR-086", "Farm", FIXED),
+                            "Trigger Operator": "open", "Trigger Target": "cellar_door"},
                            {**_omen("OM-009", "Flyers for every attraction in town", "CAR-002", "Town Square", FIXED),
                             "Record Type": "Hub / generator"}],
               "hub_seed_pools": []},
     "beats": {"dossiers": [FULL_DOSSIER,
                            _dossier("OM-002", "Someone is following.", "MINI-SEALED-TRUTH-2"),
-                           _dossier("OM-003", "Something is wrong at the diner.", "MINI-SEALED-TRUTH-3")]},
+                           _dossier("OM-003", "Something is wrong at the diner.", "MINI-SEALED-TRUTH-3"),
+                           _dossier("OM-005", "The cellar door is breathing.", "MINI-SEALED-TRUTH-5")]},
     "roles": {"v04_playable_overlay": {"base_roles": [{"id": "base.final-girl", "name": "Final Girl"}, {"id": "base.film-buff", "name": "Film Buff"}],
                                        "aspects": [{"id": "aspect.final-girl.screamer", "name": "Screamer", "base_archetype": "Final Girl"}],
                                        "advanced_roles": [{"id": "advanced.adventurer", "name": "Adventurer"}],
@@ -111,6 +141,7 @@ MINI = {
         *[{"location_id": p, "name": p, "relative_image_path": f"assets/identity_images/{p}_identity_v001.png"}
           for p in ("CAR-016", "CAR-047", "CAR-002", "CAR-006", "CAR-086")],
         {"location_id": "PROV-LOC-001", "name": "Unrecorded place", "relative_image_path": "assets/identity_images/PROV-LOC-001_identity_v001.png"}]},
+    "venues": VENUES,
     "npcs": {"residents": [{"id": "CAR-NPC-001", "name": "Adeline Winter", "provenance": "canon_expanded", "canon_appearance": True,
                             "at_start": {"status": "alive"}, "camp_role": "Camp leader", "usual_location": "Dyer's Lodge",
                             "gm_only": {"canonical_secret": "MINI-NPC-SECRET"}},
