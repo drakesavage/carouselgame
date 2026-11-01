@@ -28,7 +28,7 @@ from .gm.orchestrator import WRITE_LOCK, BusyError, TurnService, recover_interru
 from .art import service as art
 from .art.service import ArtWorker
 from .gm.providers import make_provider, prune_jobs, secure_dir
-from .memory import journal, places, snapshots, views
+from .memory import journal, snapshots, views
 from .memory import rulings as ruling_review
 from .reference import rulebooks
 from . import campaigns as campaign_admin
@@ -688,8 +688,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
 
     for route, fn in {"inventory": views.inventory, "quests": views.quests, "npcs": views.npcs, "timeline": views.timeline,
                       "house-rules": views.house_rules, "rulings": ruling_review.rulings, "lore": views.lore,
-                      "journal": journal.journal, "lore-notebook": journal.lore_notebook, "chronology": journal.chronology,
-                      "places": places.known_world}.items():
+                      "journal": journal.journal, "lore-notebook": journal.lore_notebook, "chronology": journal.chronology}.items():
         def make(fn=fn):
             def handler(cid: int, c=Depends(db)):
                 campaign_or_404(c, cid)
@@ -958,7 +957,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
 
         @app.get("/{path:path}", include_in_schema=False)
         def spa(path: str):
-            if path.startswith(("api/", "media/", "tiles/")):
+            if path.startswith(("api/", "media/", "tiles/", "location-art/")):
                 raise HTTPException(404)
             f = (FRONTEND_DIST / path).resolve()
             if path and f.is_file() and FRONTEND_DIST.resolve() in f.parents:

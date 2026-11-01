@@ -7,7 +7,8 @@ from app.db import now_iso, transaction
 
 SECRETS = ["GMSECRET-ALPHA-1", "GMSECRET-BRAVO-2", "GMSECRET-CHARLIE-3", "GMSECRET-DELTA-4", "GMSECRET-ECHO-5", "GMSECRET-FOXTROT-6",
            "DEMO SECRET", "MINI-SEALED-TRUTH", "MINI-NPC-SECRET",   # Omen sealed truth and NPC gm_only (mini reference.db, conftest)
-           "HIDDENTROPE-GOLF-7", "Doors open for it alone.", "trope:1"]   # Adeline's hidden trope: name, text, ref
+           "HIDDENTROPE-GOLF-7", "Doors open for it alone.", "trope:1",   # Adeline's hidden trope: name, text, ref
+           "UNKNOWNPLACE-HOTEL-8"]   # a spoiler place the group doesn't know (mini CAR-099)
 
 
 def _plant(conn, cid):
@@ -35,7 +36,7 @@ def _player_urls(client, cid):
             f"/api/campaigns/{cid}/records?q=secret debt syndicate hidden plans", f"/api/rules/search?q=secret&cid={cid}",
             f"/api/campaigns/{cid}/journal", f"/api/campaigns/{cid}/lore-notebook", f"/api/campaigns/{cid}/chronology",
             f"/api/campaigns/{cid}/search?q=gmsecret alpha bravo charlie delta echo foxtrot secret plot",
-            f"/api/campaigns/{cid}/inventory", f"/api/campaigns/{cid}/places", "/api/reference/status"]
+            f"/api/campaigns/{cid}/inventory", f"/api/campaigns/{cid}/map", "/api/reference/status"]
     for ch in client.get(f"/api/campaigns/{cid}/characters").json():
         urls.append(f"/api/campaigns/{cid}/characters/{ch['id']}")
         urls.append(f"/api/campaigns/{cid}/characters/{ch['id']}/dossier")
@@ -49,6 +50,8 @@ def test_no_gm_material_in_any_player_response(client, conn, campaign_id):
     _plant(conn, cid)
     # a turn so that the GM context (which DOES contain secrets) is exercised
     client.post(f"/api/campaigns/{cid}/turns", json={"text": "I look around carefully", "idempotency_key": uuid.uuid4().hex})
+    # and a walk next door to the spoiler place, with its Omen sighting and arrival turn
+    client.post(f"/api/campaigns/{cid}/travel", json={"to": "CAR-086", "idempotency_key": uuid.uuid4().hex})
     for url in _player_urls(client, cid):
         r = client.get(url)
         assert r.status_code == 200, url

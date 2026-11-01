@@ -76,3 +76,41 @@ def test_arrival_kinds_route_by_kind():
     assert classify_turn("[arrival] We arrive at Dyer's Lodge.", False, frozenset(), "arrival")[0] == "talk"
     assert classify_turn("[arrival] On the way, we stop: blood.", False, frozenset(), "arrival_omen")[0] == "action"
     assert classify_turn("[arrival] We arrive at Dyer's Lodge.", True, frozenset(), "arrival")[0] == "action"   # a story is active
+
+
+def get_map(client, cid):
+    r = client.get(f"/api/campaigns/{cid}/map")
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_map_shows_only_known_places(client, conn, campaign_id):
+    m = get_map(client, campaign_id)
+    assert {p["id"] for p in m["known"]} == {"CAR-047", "CAR-002", "CAR-006"}
+    square = next(p for p in m["known"] if p["id"] == "CAR-002")
+    assert square["safe"] is True and square["image"] == "/location-art/identity_images/CAR-002_identity_v001.png"
+    assert m["position"]["node_id"] == "CAR-002" and m["position"]["place_id"] == "CAR-002" and m["position"]["label"] == "Town Square"
+    assert m["omens"] == [] and m["last_route"] is None
+    assert m["tiles"]["template"] == "/tiles/{z}/{x}/{y}.webp" and m["tiles"]["size"] == 12000
+    assert "UNKNOWNPLACE-HOTEL-8" not in client.get(f"/api/campaigns/{campaign_id}/map").text
+
+
+def test_travel_reveals_the_farm_and_its_omen(client, conn, campaign_id):
+    seen_before = get_map(client, campaign_id)
+    assert seen_before["omens"] == []
+    travel(client, campaign_id, to="CAR-086")
+    m = get_map(client, campaign_id)
+    assert "CAR-086" in {p["id"] for p in m["known"]}
+    assert m["position"]["node_id"] == "CAR-086"
+    sighted = {o["id"]: o for o in m["omens"]}
+    assert "OM-001" in sighted and sighted["OM-001"]["description"] == "A scarecrow facing the wrong way" and sighted["OM-001"]["stage"] == "visible"
+    assert m["last_route"]["geometry_px"] and m["last_route"]["interrupted"]["omen_id"] in sighted
+    assert "UNKNOWNPLACE-HOTEL-8" not in client.get(f"/api/campaigns/{campaign_id}/map").text
+
+
+def test_old_known_world_route_is_gone(client, campaign_id):
+    assert client.get(f"/api/campaigns/{campaign_id}/places").status_code == 404
+
+
+def test_location_art_is_served_read_only(client):
+    assert client.get("/location-art/%2e%2e/data/review_reference_index.json").status_code == 404
