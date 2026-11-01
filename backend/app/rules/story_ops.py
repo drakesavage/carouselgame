@@ -12,9 +12,10 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from ..carousel.refdata import require_reference
-from ..carousel.stories import ENDINGS, PHASES, active_story, canonical, endings_from, seal, ticket_can_revise
-from ..db import one
-from .carousel_ops import UseTrope, _apply_use, _owned
+from ..carousel.sheet import sheet
+from ..carousel.stories import ENDINGS, PHASES, active_story, canonical, endings_from, novelty, seal, ticket_can_revise
+from ..db import one, rows
+from .carousel_ops import UseTrope, _apply_use, _owned, recharge
 from .engine import ChangeError, Ctx, resolve_character
 
 EndingName = Literal["full_success", "costly_success", "survive_without_victory", "defeat"]
@@ -310,6 +311,168 @@ def _apply_revise(ctx: Ctx, op: ReviseScreenplay) -> dict:
     return {"summary": f"Screenplay revised to version {version}: {op.public_summary}", "version": version}
 
 
+STARS_PER_POINT = 5
+DECAY_AFTER = 3          # concluded stories in a row without a star
+MARKS_TO_UNLOCK = 10     # System Bible §4.4 [DECISION]
+ASPECT_MIN_PA = 21
+
+
+class Award(BaseModel):
+    character: str
+    performance: int = Field(ge=0, le=2)
+    difficulty: int = Field(ge=0, le=2)
+
+
+class ConcludeStory(BaseModel):
+    op: Literal["conclude_story"]
+    ending: EndingName
+    reason: str = Field(min_length=1, max_length=600)
+    awards: list[Award] = Field(default_factory=list, max_length=12)
+
+
+class SpendStatPoint(BaseModel):
+    op: Literal["spend_stat_point"]
+    character: str
+    stat: Literal["mettle", "moxie", "hustle", "savvy", "grit"]
+
+
+class AwardMark(BaseModel):
+    op: Literal["award_mark"]
+    character: str
+    track: str
+    feat: str = Field(min_length=1, max_length=300)
+
+
+class SelectAspect(BaseModel):
+    op: Literal["select_aspect"]
+    character: str
+    aspect: str
+    feat: str = Field(min_length=1, max_length=300)
+
+
+class ConfirmSpoiler(BaseModel):
+    op: Literal["confirm_spoiler"]
+    story_lock: str = Field(min_length=1, max_length=120)
+    element: str = Field(min_length=1, max_length=200)
+    source: str = Field(min_length=1, max_length=300)
+
+
+def _pay_stars(ctx: Ctx, c: dict, gain: int) -> None:
+    stars, points, streak = c["stars"] + gain, c["pending_stat_points"], c["starless_streak"]
+    while stars >= STARS_PER_POINT:
+        stars, points = stars - STARS_PER_POINT, points + 1
+        ctx.event("stat_point_earned", f"{c['name']} earns a stat point", {"character_id": c["id"]})
+    if gain:
+        streak = 0
+    else:
+        streak += 1
+        if streak >= DECAY_AFTER:
+            if stars > 0:
+                stars -= 1
+                ctx.event("stars_decayed", f"{c['name']} loses an unspent star after {DECAY_AFTER} stories without one", {"character_id": c["id"]})
+            streak = 0
+    ctx.conn.execute("UPDATE characters SET stars = ?, pending_stat_points = ?, starless_streak = ? WHERE id = ?", (stars, points, streak, c["id"]))
+
+
+def _apply_conclude(ctx: Ctx, op: ConcludeStory) -> dict:
+    s = _running(ctx)
+    if op.ending in ("full_success", "costly_success") and s["phase"] != "Finale":
+        raise ChangeError(f"{op.ending} is reached only from the Finale (the story is at {s['phase']}); "
+                          "survive_without_victory and defeat can end it from any phase")
+    cast = rows(ctx.conn, "SELECT c.* FROM story_cast x JOIN characters c ON c.id = x.character_id WHERE x.story_id = ?", (s["id"],))
+    by_id = {c["id"]: c for c in cast}
+    awards: dict[int, Award] = {}
+    for a in op.awards:
+        c = _cast_member(ctx, s, a.character)
+        if c["kind"] != "pc":
+            raise ChangeError(f"{c['name']} is not a player character; NPC cast earn no stars")
+        if c["id"] in awards:
+            raise ChangeError(f"{c['name']} has two awards")
+        awards[c["id"]] = a
+    missing = [c["name"] for c in cast if c["kind"] == "pc" and c["id"] not in awards]
+    if missing:
+        raise ChangeError(f"every player character in the cast needs an award (performance and difficulty 0-2): {', '.join(missing)}")
+    nov = novelty(ctx.conn, ctx.campaign_id, s["story_lock"])
+    ctx.conn.execute("""UPDATE stories SET status = 'concluded', phase = 'The End', ending = ?, ending_reason = ?, ended_minutes = ?, novelty = ?,
+                        ended_turn_id = ? WHERE id = ?""", (op.ending, op.reason, ctx.game_time(), nov, ctx.turn_id, s["id"]))
+    recharge(ctx, "story")
+    ctx.conn.execute(f"DELETE FROM stat_modifiers WHERE campaign_id = ? AND scope = 'story' AND character_id IN ({','.join('?' * len(by_id))})",
+                     (ctx.campaign_id, *by_id))
+    stars = {}
+    for cid_, a in awards.items():
+        stars[str(cid_)] = nov + a.performance + a.difficulty
+        _pay_stars(ctx, by_id[cid_], stars[str(cid_)])
+    ending = op.ending.replace("_", " ")
+    ctx.event("story_phase", f"Plot Cycle: {s['phase']} → The End", {"story_id": s["id"], "from": s["phase"], "to": "The End"})
+    ctx.event("story_concluded", f"{s['title']} ends: {ending}", {"story_id": s["id"], "ending": op.ending, "cast": list(by_id), "stars": stars})
+    return {"summary": f"{s['title']} ends: {ending}", "ending": op.ending, "stars": stars, "novelty": nov}
+
+
+def _apply_spend(ctx: Ctx, op: SpendStatPoint) -> dict:
+    c = resolve_character(ctx.conn, ctx.campaign_id, op.character)
+    if c["pending_stat_points"] <= 0:
+        raise ChangeError(f"{c['name']} has no stat points to spend")
+    if c[op.stat] is None:
+        raise ChangeError(f"{c['name']} has no stats yet")
+    ctx.conn.execute(f"UPDATE characters SET {op.stat} = {op.stat} + 1, pending_stat_points = pending_stat_points - 1 WHERE id = ?", (c["id"],))
+    summary = f"{c['name']} spends a stat point: {op.stat.title()} {c[op.stat]} → {c[op.stat] + 1}"
+    ctx.event("stat_point_spent", summary, {"character_id": c["id"], "stat": op.stat})
+    return {"summary": summary}
+
+
+def _apply_mark(ctx: Ctx, op: AwardMark) -> dict:
+    require_reference(ctx.conn)
+    c = resolve_character(ctx.conn, ctx.campaign_id, op.character)
+    role = one(ctx.conn, "SELECT id, name FROM ref.roles WHERE id = ? AND kind = 'advanced'", (op.track,))
+    if not role:
+        raise ChangeError(f"{op.track!r} is not an advanced role track")
+    s = active_story(ctx.conn, ctx.campaign_id) or one(ctx.conn, "SELECT * FROM stories WHERE campaign_id = ? AND status = 'concluded' "
+                                                                 "ORDER BY id DESC LIMIT 1", (ctx.campaign_id,))
+    if not s:
+        raise ChangeError("marks are earned in a story; there is none yet")
+    if one(ctx.conn, "SELECT 1 AS x FROM mark_awards WHERE story_id = ? AND character_id = ? AND track_role_id = ?", (s["id"], c["id"], role["id"])):
+        raise ChangeError(f"{c['name']} already has a {role['name']} mark from {s['title']}")
+    ctx.conn.execute("INSERT INTO mark_awards (story_id, character_id, track_role_id, feat) VALUES (?,?,?,?)", (s["id"], c["id"], role["id"], op.feat))
+    ctx.conn.execute("""INSERT INTO advanced_marks (character_id, track_role_id, marks) VALUES (?,?,1)
+                        ON CONFLICT(character_id, track_role_id) DO UPDATE SET marks = marks + 1""", (c["id"], role["id"]))
+    m = one(ctx.conn, "SELECT marks, unlocked FROM advanced_marks WHERE character_id = ? AND track_role_id = ?", (c["id"], role["id"]))
+    summary = f"{c['name']} earns a {role['name']} mark ({m['marks']}/{MARKS_TO_UNLOCK}): {op.feat}"
+    ctx.event("mark_awarded", summary, {"character_id": c["id"], "track": role["id"], "marks": m["marks"], "story_id": s["id"]})
+    if m["marks"] >= MARKS_TO_UNLOCK and not m["unlocked"]:
+        ctx.conn.execute("UPDATE advanced_marks SET unlocked = 1 WHERE character_id = ? AND track_role_id = ?", (c["id"], role["id"]))
+        ctx.event("advanced_role_unlocked", f"{c['name']} unlocks the {role['name']} Archetype", {"character_id": c["id"], "track": role["id"]})
+    return {"summary": summary, "marks": m["marks"]}
+
+
+def _apply_aspect(ctx: Ctx, op: SelectAspect) -> dict:
+    require_reference(ctx.conn)
+    c = resolve_character(ctx.conn, ctx.campaign_id, op.character)
+    a = one(ctx.conn, "SELECT r.id, r.name, r.parent, p.name AS parent_name FROM ref.roles r LEFT JOIN ref.roles p ON p.id = r.parent "
+                      "WHERE r.id = ? AND r.kind = 'aspect'", (op.aspect,))
+    if not a:
+        raise ChangeError(f"{op.aspect!r} is not an Aspect")
+    if c["aspect_id"]:
+        raise ChangeError(f"{c['name']} already has an Aspect")
+    if a["parent"] != c["role_id"]:
+        raise ChangeError(f"{a['name']} is an Aspect of the {a['parent_name'] or a['parent']}; {c['name']} is not one")
+    pa = sheet(ctx.conn, c["id"])["plot_armor"]["base"]
+    if pa is None or pa < ASPECT_MIN_PA:
+        raise ChangeError(f"an Aspect needs base Plot Armor {ASPECT_MIN_PA}; {c['name']} has {pa}")
+    ctx.conn.execute("UPDATE characters SET aspect_id = ? WHERE id = ?", (a["id"], c["id"]))
+    summary = f"{c['name']} takes the Aspect {a['name']}: {op.feat}"
+    ctx.event("aspect_selected", summary, {"character_id": c["id"], "aspect": a["id"], "feat": op.feat})
+    return {"summary": summary}
+
+
+def _apply_spoiler(ctx: Ctx, op: ConfirmSpoiler) -> dict:
+    new = ctx.conn.execute("INSERT OR IGNORE INTO story_spoilers (campaign_id, story_lock, element, source) VALUES (?,?,?,?)",
+                           (ctx.campaign_id, op.story_lock, op.element, op.source)).rowcount > 0
+    summary = f"Spoiler {'confirmed' if new else 'already recorded'} for {op.story_lock}: {op.element}"
+    if new:
+        ctx.event("spoiler_confirmed", summary, {"story_lock": op.story_lock, "element": op.element, "source": op.source}, "gm")
+    return {"summary": summary, "visibility": "gm"}
+
+
 def register(ops: dict) -> None:
     ops.update({
         "sight_omen": (SightOmen, _apply_sight),
@@ -320,4 +483,9 @@ def register(ops: dict) -> None:
         "camera": (Camera, _apply_camera),
         "cast_character": (CastCharacter, _apply_cast),
         "revise_screenplay": (ReviseScreenplay, _apply_revise),
+        "conclude_story": (ConcludeStory, _apply_conclude),
+        "spend_stat_point": (SpendStatPoint, _apply_spend),
+        "award_mark": (AwardMark, _apply_mark),
+        "select_aspect": (SelectAspect, _apply_aspect),
+        "confirm_spoiler": (ConfirmSpoiler, _apply_spoiler),
     })
