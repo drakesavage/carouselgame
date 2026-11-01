@@ -5,16 +5,16 @@ from app.carousel.refdb import count
 
 
 def test_place_counts(ref_real):
-    assert count(ref_real, "places") == 234
-    assert count(ref_real, "places", "in_town_map = 1") == 191
-    assert count(ref_real, "graph_nodes") == 511
-    assert count(ref_real, "graph_edges") == 546
+    assert count(ref_real, "places") == 236   # the 2026-10-31 audit resolution added the bowling alley and the Strings Attached mansion
+    assert count(ref_real, "places", "in_town_map = 1") == 193
+    assert count(ref_real, "graph_nodes") == 513
+    assert count(ref_real, "graph_edges") == 548
     assert count(ref_real, "place_aliases") == 8
 
 
 def test_rejected_and_alias_records_are_kept(ref_real):
     got = dict(ref_real.execute("SELECT status, COUNT(*) FROM places GROUP BY status").fetchall())
-    assert got == {"active": 221, "alias": 8, "rejected": 5}
+    assert got == {"active": 223, "alias": 8, "rejected": 5}
 
 
 def test_aliases_resolve(ref_real):
@@ -36,13 +36,13 @@ def test_flags_preserved(ref_real):
     assert json.loads(e[0]) == [] and e[1] == 0
     gated = ref_real.execute("SELECT requires_json FROM graph_edges WHERE id = 'EDGE-00145'").fetchone()
     assert json.loads(gated[0]) == ["western_passage"]
-    assert count(ref_real, "graph_edges", "requires_json != '[]'") == 131
+    assert count(ref_real, "graph_edges", "requires_json != '[]'") == 132
     assert count(ref_real, "graph_edges", "directed = 1") == 1
 
 
 def test_pixels_match_handoff(ref_real, real_files):
     anchors = real_files["pixel_anchors"].data["locations"]
-    assert len(anchors) == 191
+    assert len(anchors) == 193
     for a in anchors:
         px, py = ref_real.execute("SELECT px, py FROM places WHERE id = ?", (a["id"],)).fetchone()
         assert abs(px - a["image_px"][0]) < 0.5 and abs(py - a["image_px"][1]) < 0.5, a["id"]

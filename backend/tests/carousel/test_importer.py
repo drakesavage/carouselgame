@@ -33,7 +33,7 @@ def test_import_builds_reference_db(real_source, tmp_path):
     s.ensure_dirs()
     r = run_import(s)
     assert r.ok, (r.error, r.missing)
-    assert r.counts["places"] == 234 and r.counts["omens"] == 111 and r.counts["npc_templates"] == 70
+    assert r.counts["places"] == 236 and r.counts["omens"] == 111 and r.counts["npc_templates"] == 70
     assert s.reference_db.exists() and not s.reference_db.with_suffix(".db.new").exists()
     assert json.loads(r.report_path.read_text(encoding="utf-8"))["ok"] is True
 
