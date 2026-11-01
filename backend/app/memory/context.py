@@ -4,6 +4,8 @@ Sections, in order:
   1 CAMPAIGN        identity, state version, floor, location, game time, dungeon day, collapse clock, cycles
   2 CURRENT SCENE   the active scene record + recent significant events
     STORY           the active story: phase, pressure, camera, cast, obligations, revisions, endings (or OMENS HERE when none)
+    VENUE           inside a venue: the zone, the ways on (blocked ones marked), zones seen, entry and exit, this story's
+                    overlays; then GM-ONLY the venue's Omen cues and where they sit
     OPENING         during the new-game flow: the stage, its job, what blocks the next stage, the lure, the friends, Silas's options
   3 PARTY           every group: location, activity, members (who is present vs elsewhere)
   4 PRESENT         full sheets for the player character and everyone present (scene participants, the PC's group,
@@ -48,7 +50,7 @@ PROFILES: dict[str, dict] = {
 },
 }
 CATEGORIES = {"CAMPAIGN": "state", "PARTY": "state", "PRESENT": "state", "OBJECTIVES": "state", "SHARED STASH": "state",
-              "ACTIVE COMBAT": "state", "STORY": "state", "OMENS HERE": "state", "OPENING": "state", "LEDGER RECORDS": "ledger", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
+              "ACTIVE COMBAT": "state", "STORY": "state", "OMENS HERE": "state", "VENUE": "state", "OPENING": "state", "LEDGER RECORDS": "ledger", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
               "RULEBOOK": "rulebook", "RECENT TRANSCRIPT": "narrative", "RECENT ROLLS": "state", "GM-ONLY SECRETS": "gm_private"}
 STOP = set("the a an and or of to in on for with by is are be as at it this that from what how does do can when which who i we my our me us "
            "you your he she they them his her their then than into onto about there here just also will would should could".split())
@@ -239,6 +241,35 @@ OPENING_JOBS = {
 }
 
 
+def _venue_section(conn: sqlite3.Connection, cid: int) -> str | None:
+    """Only the zones the group may know (visited, or one link from here); the Omen cues come last, marked GM-ONLY."""
+    from ..carousel import venues
+    from ..carousel.stories import active_story
+    venue_id, here = venues.position(conn, cid)
+    v = venues.venue(conn, venue_id) if venue_id else None
+    z = venues.zone(conn, here) if here else None
+    if not v or not z:
+        return None
+    out = [f"{v['title']} — you are at {z['label']} ({z['area_type']})", "Ways on:"]
+    out += [f"- {n['label']}" + (f" [blocked: {n['blocked_reason']}]" if n["blocked_reason"] else "")
+            for n in venues.neighbours(conn, cid, here)] or ["- none"]
+    out.append("Zones seen: " + ", ".join(venues.label(conn, i) or i for i in venues.visited(conn, cid, venue_id)))
+    out.append(f"Entry: {venues.label(conn, v['entry_zone'])}. Exit: {venues.label(conn, v['exit_zone'])}.")
+    story = active_story(conn, cid)
+    if story:
+        ov = rows(conn, "SELECT * FROM venue_overlays WHERE story_id = ? AND venue_id = ? AND lifted = 0 ORDER BY id", (story["id"], venue_id))
+        out.append("Overlays from this story:")
+        out += [f"- blocked: {venues.label(conn, o['a'])} – {venues.label(conn, o['b'])} ({o['reason']})" if o["kind"] == "block"
+                else f"- added room: {o['label']}, off {venues.label(conn, o['b'])} ({o['reason']})" for o in ov] or ["- none"]
+    cues = rows(conn, """SELECT vo.omen_id, vo.zone_id, vo.placed, o.description, o.choice_trigger FROM ref.venue_omens vo
+                         LEFT JOIN ref.omens o ON o.id = vo.omen_id WHERE vo.venue_id = ? ORDER BY vo.omen_id""", (venue_id,))
+    if cues:
+        out.append("GM-ONLY cues placed in this venue (never tell the player where these sit):")
+        out += [f"- {c['omen_id']} at {venues.label(conn, c['zone_id']) or 'unplaced'}: {c['description']} "
+                f"(Choice {c['choice_trigger'] or 'not recorded'})" + ("" if c["placed"] else " (GM places it)") for c in cues]
+    return "\n".join(out)
+
+
 def _opening_section(conn: sqlite3.Connection, cid: int) -> str | None:
     """The new-game flow's stage and job, its blockers, the lure belief, the friends, and (in the car and at Silas) the
     starting Archetypes and contextual tickets Silas can deal, read from the reference data."""
@@ -346,6 +377,10 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
                                                   + ("a hub: it never starts a story itself" if o["record_type"] != "Playable Omen"
                                                      else f"Choice action: {o['choice_trigger'] or 'not recorded (record the action with begin_story reason)'}")
                                                   for o in here_omens))
+
+    venue_text = _venue_section(conn, cid) if has_reference(conn) else None
+    if venue_text:
+        sections["VENUE"] = venue_text
 
     opening_text = _opening_section(conn, cid)
     if opening_text:
