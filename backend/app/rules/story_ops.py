@@ -379,11 +379,16 @@ def _pay_stars(ctx: Ctx, c: dict, gain: int) -> None:
 
 
 def _apply_conclude(ctx: Ctx, op: ConcludeStory) -> dict:
+    """System Bible order: objective (the ending), fates (restoration or posters), rescue, rewards; then overlays lift."""
+    from .fate_ops import resolve_fates
     s = _running(ctx)
     if op.ending in ("full_success", "costly_success") and s["phase"] != "Finale":
         raise ChangeError(f"{op.ending} is reached only from the Finale (the story is at {s['phase']}); "
                           "survive_without_victory and defeat can end it from any phase")
     cast = rows(ctx.conn, "SELECT c.* FROM story_cast x JOIN characters c ON c.id = x.character_id WHERE x.story_id = ?", (s["id"],))
+    unsure = ", ".join(c["name"] + "'s" for c in cast if c["physical_condition"] == "uncertain")
+    if unsure:
+        raise ChangeError(f"decide {unsure} fate first (set_fate): The End needs every body known")
     by_id = {c["id"]: c for c in cast}
     awards: dict[int, Award] = {}
     for a in op.awards:
@@ -402,15 +407,15 @@ def _apply_conclude(ctx: Ctx, op: ConcludeStory) -> dict:
     recharge(ctx, "story")
     ctx.conn.execute(f"DELETE FROM stat_modifiers WHERE campaign_id = ? AND scope = 'story' AND character_id IN ({','.join('?' * len(by_id))})",
                      (ctx.campaign_id, *by_id))
-    stars = {}
-    for cid_, a in awards.items():
-        stars[str(cid_)] = nov + a.performance + a.difficulty
-        _pay_stars(ctx, by_id[cid_], stars[str(cid_)])
+    stars = {str(cid_): nov + a.performance + a.difficulty for cid_, a in awards.items()}
     ending = op.ending.replace("_", " ")
     ctx.event("story_phase", f"Plot Cycle: {s['phase']} → The End", {"story_id": s["id"], "from": s["phase"], "to": "The End"})
     ctx.event("story_concluded", f"{s['title']} ends: {ending}", {"story_id": s["id"], "ending": op.ending, "cast": list(by_id), "stars": stars})
+    fates = resolve_fates(ctx, s, cast)
+    for cid_ in awards:   # re-read: resolve_fates changed the rows; a dead PC still earns its award
+        _pay_stars(ctx, one(ctx.conn, "SELECT * FROM characters WHERE id = ?", (cid_,)), stars[str(cid_)])
     lift_overlays(ctx, s["id"])
-    return {"summary": f"{s['title']} ends: {ending}", "ending": op.ending, "stars": stars, "novelty": nov}
+    return {"summary": f"{s['title']} ends: {ending}", "ending": op.ending, "stars": stars, "novelty": nov, "fates": fates["outcome"]}
 
 
 def _apply_spend(ctx: Ctx, op: SpendStatPoint) -> dict:

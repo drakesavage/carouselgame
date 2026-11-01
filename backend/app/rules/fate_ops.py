@@ -159,6 +159,50 @@ def _apply_window(ctx: Ctx, op: PosthumousWindow) -> dict:
     return {"summary": summary, "visibility": vis}
 
 
+def _last_seen(ctx: Ctx, pos: dict) -> str | None:
+    from ..carousel.venues import label
+    place = one(ctx.conn, "SELECT name FROM ref.places WHERE id = ?", (pos.get("node_id"),)) if pos.get("node_id") else None
+    zone = label(ctx.conn, pos.get("zone_id"))
+    return " — ".join(p for p in ((place or {}).get("name"), zone) if p) or None
+
+
+def resolve_fates(ctx: Ctx, story: dict, cast: list[dict]) -> dict:
+    """The End (Bible §11.6): if anyone in the group is neither dead nor permanently lost, everyone not lost is restored
+    where they stand; otherwise everyone not lost goes up on the missing-poster board. The death records stay."""
+    from ..carousel.sheet import sheet
+    alive = [c for c in cast if c["persistent_fate"] != "permanently_lost"]
+    if any(c["physical_condition"] != "dead" for c in alive):
+        restored = []
+        for c in alive:
+            hurt = c["physical_condition"] in ("dead", "dying", "injured")
+            debuffs = [r["name"] for r in rows(ctx.conn, "SELECT name FROM status_effects WHERE character_id = ? AND polarity = 'debuff' ORDER BY id",
+                                               (c["id"],))]
+            ctx.conn.execute("DELETE FROM status_effects WHERE character_id = ? AND polarity = 'debuff'", (c["id"],))
+            ctx.conn.execute("UPDATE characters SET physical_condition = 'alive', wallpaper_status = 'active', rights_basis = NULL, "
+                             "persistent_fate = CASE WHEN ? THEN 'restored' ELSE persistent_fate END WHERE id = ?", (int(hurt), c["id"]))
+            fate.set_rights(ctx.conn, c["id"])
+            restored.append(c["id"])
+            if hurt or debuffs or c["wallpaper_status"] != "active":   # nothing to say about someone who came through untouched
+                ctx.event("fate_restored", f"{c['name']} walks out of the story whole", {"character_id": c["id"], "story_id": story["id"],
+                                                                                          "was": c["physical_condition"], "cleared": debuffs})
+        return {"outcome": "restored", "restored": restored, "posters": []}
+    group_no = one(ctx.conn, "SELECT group_no FROM campaigns WHERE id = ?", (ctx.campaign_id,))["group_no"]
+    posters = []
+    for c in alive:
+        d = one(ctx.conn, "SELECT * FROM death_events WHERE character_id = ? AND story_id = ? ORDER BY id DESC LIMIT 1", (c["id"], story["id"]))
+        role = one(ctx.conn, "SELECT name FROM ref.roles WHERE id = ?", (c["role_id"],)) if c["role_id"] else None
+        pid = ctx.conn.execute("""INSERT INTO missing_posters (campaign_id, character_id, group_no, name, plot_armor, archetype, last_seen, story_id,
+                                                               story_lock, death_event_id, posted_minutes) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                               (ctx.campaign_id, c["id"], group_no, c["name"], sheet(ctx.conn, c["id"])["plot_armor"]["effective"],
+                                (role or {}).get("name"), _last_seen(ctx, d or where(ctx, c)), story["id"], story["story_lock"],
+                                d["id"] if d else None, ctx.game_time())).lastrowid
+        ctx.conn.execute("""UPDATE characters SET persistent_fate = 'missing_postered', rescue_eligibility = 'possible', status = 'missing',
+                            in_party = 0, assignment = NULL WHERE id = ?""", (c["id"],))
+        posters.append(pid)
+        ctx.event("poster_created", f"A missing poster goes up: {c['name']}", {"character_id": c["id"], "poster_id": pid, "story_id": story["id"]})
+    return {"outcome": "postered", "restored": [], "posters": posters}
+
+
 def register(ops: dict) -> None:
     ops.update({
         "set_fate": (SetFate, _apply_set_fate),
