@@ -105,6 +105,9 @@ def _norm(action: str) -> str:
 
 
 def _apply_begin(ctx: Ctx, op: BeginStory) -> dict:
+    from ..carousel.opening import stage
+    if stage(ctx.conn, ctx.campaign_id) in ("car", "silas"):
+        raise ChangeError("the opening Omen comes after Silas")
     o = _omen(ctx, op.omen)
     if o["record_type"] != PLAYABLE:
         raise ChangeError(f"{op.omen} is not a Playable Omen ({o['record_type']}); a story starts only from a playable one")

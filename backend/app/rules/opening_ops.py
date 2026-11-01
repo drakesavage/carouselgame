@@ -2,12 +2,13 @@
 
 `set_lure` records why the group came (the belief is the players', the truth is GM-only), `drop_friend` is the player's
 veto on a GM-made friend in the car, `introduce_resident` brings a Camp Dyer resident template into the campaign (Phase 7
-reuses it), `pay_off_lure` closes the lure at the Lodge."""
+reuses it), `silas_assigns` is Silas dealing a character's Archetype and two starter tickets from quoted evidence,
+`pay_off_lure` closes the lure at the Lodge."""
 from __future__ import annotations
 
 import json
 import re
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -42,6 +43,16 @@ class IntroduceResident(BaseModel):
     resident: str
     in_party: bool = False
     location: str | None = None
+
+
+class SilasAssigns(BaseModel):
+    op: Literal["silas_assigns"]
+    character: str
+    role: str
+    reason: str = Field(min_length=1, max_length=400)
+    evidence: list[Annotated[str, Field(min_length=8, max_length=300)]] = Field(min_length=1, max_length=5)
+    contextual_ticket: str
+    contextual_reason: str = Field(min_length=1, max_length=300)
 
 
 class PayOffLure(BaseModel):
@@ -123,6 +134,37 @@ def _apply_introduce_resident(ctx: Ctx, op: IntroduceResident) -> dict:
     return {"summary": summary, "character_id": char_id}
 
 
+def _apply_silas_assigns(ctx: Ctx, op: SilasAssigns) -> dict:
+    """Every check runs before any write, so a refusal leaves no stats, tickets or evidence behind."""
+    from .carousel_ops import _grant, _initialize
+    require_reference(ctx.conn)
+    _at(ctx, "silas")
+    c = resolve_character(ctx.conn, ctx.campaign_id, op.character)
+    pc = one(ctx.conn, "SELECT active_character_id FROM campaigns WHERE id = ?", (ctx.campaign_id,))["active_character_id"]
+    if c["id"] != pc and c["id"] not in {f["id"] for f in opening.friends(ctx.conn, ctx.campaign_id)}:
+        raise ChangeError(f"Silas deals only to the group from the car; {c['name']} isn't one of them")
+    if c.get("role_id") or c.get("mettle") is not None:
+        raise ChangeError(f"Silas has already dealt {c['name']} their tickets")
+    if not one(ctx.conn, "SELECT 1 AS x FROM ref.roles r JOIN ref.start_profiles p ON p.role_id = r.id WHERE r.id = ? AND r.kind = 'base'", (op.role,)):
+        raise ChangeError(f"{op.role!r} is not a starting Archetype with a profile")
+    for q in op.evidence:
+        if not opening.quote_found(ctx.conn, ctx.campaign_id, q):
+            raise ChangeError(f"Silas can only cite what happened: {q!r} was never said")
+    if not one(ctx.conn, "SELECT 1 AS x FROM ref.tickets WHERE id = ? AND relationship = 'contextual_shared_starter'", (op.contextual_ticket,)):
+        raise ChangeError(f"{op.contextual_ticket!r} is not a contextual starter ticket")
+    sig = one(ctx.conn, "SELECT id FROM ref.tickets WHERE relationship = 'starting_signature' AND source_role_id = ?", (op.role,))
+    if not sig:
+        raise ChangeError(f"{op.role} has no starting signature ticket in the reference data")
+    role_name = _initialize(ctx, c, op.role, op.reason)["role_name"]
+    names = [_grant(ctx, c, t, "Silas")["name"] for t in (sig["id"], op.contextual_ticket)]
+    ctx.conn.execute("UPDATE characters SET role_evidence_json = ? WHERE id = ?",
+                     (json.dumps({"quotes": op.evidence, "contextual_reason": op.contextual_reason}, ensure_ascii=False), c["id"]))
+    summary = f"Silas deals {c['name']} three tickets: {role_name} ({op.reason}), {names[0]}, {names[1]}"
+    ctx.event("silas_deals", summary, {"character_id": c["id"], "role": op.role, "tickets": [sig["id"], op.contextual_ticket],
+                                       "evidence": op.evidence, "contextual_reason": op.contextual_reason})
+    return {"summary": summary}
+
+
 def _apply_pay_off_lure(ctx: Ctx, op: PayOffLure) -> dict:
     _at(ctx, "escort")
     camp = one(ctx.conn, "SELECT node_id, lure_kind, lure_resident, lure_paid_off FROM campaigns WHERE id = ?", (ctx.campaign_id,))
@@ -145,5 +187,6 @@ def register(ops: dict) -> None:
         "set_lure": (SetLure, _apply_set_lure),
         "drop_friend": (DropFriend, _apply_drop_friend),
         "introduce_resident": (IntroduceResident, _apply_introduce_resident),
+        "silas_assigns": (SilasAssigns, _apply_silas_assigns),
         "pay_off_lure": (PayOffLure, _apply_pay_off_lure),
     })

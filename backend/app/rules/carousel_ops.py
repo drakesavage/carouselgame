@@ -90,22 +90,30 @@ def _vis(t: dict) -> str:
     return "gm" if t["hidden"] else "player"
 
 
-def _apply_initialize(ctx: Ctx, op: InitializeCharacter) -> dict:
+def _initialize(ctx: Ctx, c: dict, role_id: str, reason: str) -> dict:
+    """Set a character's stats once from a starting Archetype's profile (also used by silas_assigns)."""
     require_reference(ctx.conn)
-    c = resolve_character(ctx.conn, ctx.campaign_id, op.character)
     if c.get("mettle") is not None:
         raise ChangeError(f"{c['name']}'s stats are set once; changes go through modifiers or rewards")
     role = one(ctx.conn, "SELECT r.name, p.mettle, p.moxie, p.hustle, p.savvy, p.grit, p.base_pa FROM ref.roles r "
-                         "JOIN ref.start_profiles p ON p.role_id = r.id WHERE r.id = ? AND r.kind = 'base'", (op.role,))
+                         "JOIN ref.start_profiles p ON p.role_id = r.id WHERE r.id = ? AND r.kind = 'base'", (role_id,))
     if not role:
-        raise ChangeError(f"{op.role!r} is not a starting Archetype with a profile")
+        raise ChangeError(f"{role_id!r} is not a starting Archetype with a profile")
     stats = {s: role[s.lower()] for s in STATS}
     ctx.conn.execute("UPDATE characters SET mettle = ?, moxie = ?, hustle = ?, savvy = ?, grit = ?, role_id = ?, role_reason = ?, "
-                     "ruleset_version = ? WHERE id = ?", (*stats.values(), op.role, op.reason, RULESET, c["id"]))
-    summary = f"Carousel names {c['name']} the {role['name']}: {op.reason}"
-    ctx.event("character_stats_initialized", summary, {"character_id": c["id"], "role": op.role, "stats": stats,
+                     "ruleset_version = ? WHERE id = ?", (*stats.values(), role_id, reason, RULESET, c["id"]))
+    summary = f"Carousel names {c['name']} the {role['name']}: {reason}"
+    ctx.event("character_stats_initialized", summary, {"character_id": c["id"], "role": role_id, "stats": stats,
                                                        "base_pa": sum(stats.values()), "ruleset": RULESET})
-    return {"summary": summary}
+    return {"summary": summary, "role_name": role["name"]}
+
+
+def _apply_initialize(ctx: Ctx, op: InitializeCharacter) -> dict:
+    from ..carousel.opening import stage
+    if stage(ctx.conn, ctx.campaign_id) in ("car", "silas"):
+        raise ChangeError("during the opening, Silas assigns Archetypes (silas_assigns)")
+    r = _initialize(ctx, resolve_character(ctx.conn, ctx.campaign_id, op.character), op.role, op.reason)
+    return {"summary": r["summary"]}
 
 
 def _apply_add_modifier(ctx: Ctx, op: AddModifier) -> dict:
@@ -136,19 +144,24 @@ def _apply_remove_modifier(ctx: Ctx, op: RemoveModifier) -> dict:
     return {"summary": summary, "visibility": vis}
 
 
-def _apply_grant(ctx: Ctx, op: GrantTicket) -> dict:
-    c = resolve_character(ctx.conn, ctx.campaign_id, op.character)
-    d = ticket_definition(ctx.conn, op.ticket)
+def _grant(ctx: Ctx, c: dict, ticket_ref: str, source: str, hidden: bool = False) -> dict:
+    """Give a character a reference ticket they don't own yet (also used by silas_assigns)."""
+    d = ticket_definition(ctx.conn, ticket_ref)
     if not d:
-        raise ChangeError(f"no such ticket {op.ticket!r} in the reference data")
+        raise ChangeError(f"no such ticket {ticket_ref!r} in the reference data")
     if one(ctx.conn, "SELECT id FROM character_tickets WHERE character_id = ? AND ticket_ref = ?", (c["id"], d["ref"])):
         raise ChangeError(f"{c['name']} already owns {d['name']}")
     ctx.conn.execute("""INSERT INTO character_tickets (campaign_id, character_id, ticket_ref, uses_left, uses_max, recharge, hidden, source, acquired_turn_id)
                         VALUES (?,?,?,?,?,?,?,?,?)""", (ctx.campaign_id, c["id"], d["ref"], d["uses_max"], d["uses_max"], d["recharge"],
-                                                         int(op.hidden), op.source, ctx.turn_id))
+                                                         int(hidden), source, ctx.turn_id))
     summary = f"{c['name']} receives the ticket {d['name']}"
-    ctx.event("ticket_granted", summary, {"character_id": c["id"], "ticket": d["ref"], "source": op.source}, "gm" if op.hidden else "player")
-    return {"summary": summary, "visibility": "gm" if op.hidden else "player"}
+    ctx.event("ticket_granted", summary, {"character_id": c["id"], "ticket": d["ref"], "source": source}, "gm" if hidden else "player")
+    return {"summary": summary, "visibility": "gm" if hidden else "player", "name": d["name"]}
+
+
+def _apply_grant(ctx: Ctx, op: GrantTicket) -> dict:
+    r = _grant(ctx, resolve_character(ctx.conn, ctx.campaign_id, op.character), op.ticket, op.source, op.hidden)
+    return {"summary": r["summary"], "visibility": r["visibility"]}
 
 
 def _apply_equip(ctx: Ctx, op: TicketRef) -> dict:

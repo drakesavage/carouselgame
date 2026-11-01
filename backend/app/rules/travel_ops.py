@@ -77,6 +77,9 @@ def _label(ctx: Ctx, node: str) -> tuple[str, str | None]:
 
 def _apply_travel(ctx: Ctx, op: Travel) -> dict:
     require_reference(ctx.conn)
+    from ..carousel.opening import stage
+    if stage(ctx.conn, ctx.campaign_id) in ("car", "silas"):
+        raise ChangeError("you haven't left the car park yet")
     camp = one(ctx.conn, "SELECT node_id, travel_seq FROM campaigns WHERE id = ?", (ctx.campaign_id,))
     start = camp["node_id"]
     if not start:
