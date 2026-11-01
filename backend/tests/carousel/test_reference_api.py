@@ -29,7 +29,7 @@ def gm(settings):
 
 def test_status_has_counts_and_hashes_but_no_content(client_ref):
     body = client_ref.get("/api/reference/status").json()
-    assert body["imported"] is True and body["counts"]["places"] == 7 and body["counts"]["npc_templates"] == 1
+    assert body["imported"] is True and body["counts"]["places"] == 8 and body["counts"]["npc_templates"] == 2
     assert set(body["sources"]) >= {"gazetteer", "omens", "npcs"} and all(len(v) == 12 for v in body["sources"].values())
     text = json.dumps(body)
     assert "MINI-SEALED-TRUTH" not in text and "MINI-NPC-SECRET" not in text and "gm_json" not in text
