@@ -170,3 +170,17 @@ def test_lifting_overlays_returns_the_group(conn, campaign_id):
     assert ev["summary"] == "A second cellar is gone; the group is back in cellar door"
     assert conn.execute("SELECT * FROM ref.venue_links ORDER BY a, b").fetchall() == baseline
     apply(conn, campaign_id, {"op": "move_zone", "to": BARN})   # the block went with the story
+
+
+def test_overlay_events_never_name_an_unreached_room(conn, campaign_id):
+    story_at_cellar(conn, campaign_id)
+    for z in (BARN, GATE):
+        apply(conn, campaign_id, {"op": "move_zone", "to": z})   # the hidden room is no longer one link away
+    apply(conn, campaign_id, {"op": "block_passage", "a": CELLAR, "b": HIDDEN, "reason": "rubble"})
+    apply(conn, campaign_id, {"op": "open_passage", "a": CELLAR, "b": HIDDEN, "reason": "cleared"})
+    apply(conn, campaign_id, {"op": "add_zone", "label": "A crawlspace", "connect_to": HIDDEN, "reason": "a hole"})
+    rows = conn.execute("""SELECT summary, payload_json FROM events WHERE campaign_id = ? AND visibility = 'player'
+                           AND type IN ('passage_blocked', 'passage_opened', 'zone_appeared')""", (campaign_id,)).fetchall()
+    assert len(rows) == 3
+    for summary, payload in rows:
+        assert "MINI-HIDDEN-ROOM" not in summary and "MINI-HIDDEN-ROOM" not in payload

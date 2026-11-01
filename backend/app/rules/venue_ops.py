@@ -122,6 +122,14 @@ def _block(ctx: Ctx, a: str, b: str) -> dict | None:
                             AND ((a = ? AND b = ?) OR (a = ? AND b = ?))""", (ctx.campaign_id, a, b, b, a))
 
 
+FURTHER_IN = "somewhere further in"
+
+
+def _shown(ctx: Ctx, zone: dict) -> str:
+    """A zone's label for a player-visible event: only zones the group may know (visited or one link away) are named."""
+    return zone["label"] if zone["id"] in venues.visible_zones(ctx.conn, ctx.campaign_id) else FURTHER_IN
+
+
 def _apply_passage(ctx: Ctx, op: Passage) -> dict:
     s = _story(ctx)
     venue_id = _here_venue(ctx)
@@ -135,13 +143,17 @@ def _apply_passage(ctx: Ctx, op: Passage) -> dict:
         ctx.conn.execute("""INSERT INTO venue_overlays (campaign_id, story_id, venue_id, kind, a, b, reason, created_minutes)
                             VALUES (?,?,?, 'block', ?,?,?,?)""", (ctx.campaign_id, s["id"], venue_id, a["id"], b["id"], op.reason, ctx.game_time()))
         summary = f"The way between {a['label']} and {b['label']} is blocked: {op.reason}"
-        ctx.event("passage_blocked", summary, {"venue_id": venue_id, "a": a["label"], "b": b["label"], "reason": op.reason})
+        sa, sb = _shown(ctx, a), _shown(ctx, b)
+        ctx.event("passage_blocked", f"A way {FURTHER_IN} is blocked" if sa == sb == FURTHER_IN
+                  else f"The way between {sa} and {sb} is blocked: {op.reason}", {"venue_id": venue_id, "a": sa, "b": sb})
     else:
         if not held or held["story_id"] != s["id"]:
             raise ChangeError(f"the way between {a['label']} and {b['label']} is not blocked by this story")
         ctx.conn.execute("UPDATE venue_overlays SET lifted = 1 WHERE id = ?", (held["id"],))
         summary = f"The way between {a['label']} and {b['label']} opens: {op.reason}"
-        ctx.event("passage_opened", summary, {"venue_id": venue_id, "a": a["label"], "b": b["label"], "reason": op.reason})
+        sa, sb = _shown(ctx, a), _shown(ctx, b)
+        ctx.event("passage_opened", f"A way {FURTHER_IN} opens" if sa == sb == FURTHER_IN
+                  else f"The way between {sa} and {sb} opens: {op.reason}", {"venue_id": venue_id, "a": sa, "b": sb})
     return {"summary": summary}
 
 
@@ -155,7 +167,10 @@ def _apply_add_zone(ctx: Ctx, op: AddZone) -> dict:
                         VALUES (?,?,?, 'add_zone', ?,?,?,?,?)""",
                      (ctx.campaign_id, s["id"], venue_id, zid, joined["id"], op.label, op.reason, ctx.game_time()))
     summary = f"A way opens from {joined['label']}: {op.label}"
-    ctx.event("zone_appeared", summary, {"venue_id": venue_id, "zone": op.label, "from": joined["label"]})
+    if _shown(ctx, joined) == FURTHER_IN:
+        ctx.event("zone_appeared", f"Something changes {FURTHER_IN}", {"venue_id": venue_id})
+    else:
+        ctx.event("zone_appeared", summary, {"venue_id": venue_id, "zone": op.label, "from": joined["label"]})
     return {"summary": summary, "zone_id": zid}
 
 
