@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Flag, Handshake, MapPin, MessageCircle, Sear
 import { api, fmtMinutes, Life, Person } from "../api";
 import { Chip, Empty, Portrait } from "../ui";
 import { portraitSrc, role, useManifest } from "./Hud";
+import { PosterBoard } from "./PosterBoard";
 import "../people.css";
 
 /** Life state as a chip; nothing for the ordinary active case. */
@@ -60,6 +61,7 @@ export function PeopleView({ cid, version, pcAssignment, pcName, openCharacter, 
           {FILTERS.map((f) => <button key={f.id} className={filter === f.id ? "active" : ""} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>{f.label}</button>)}
         </div>
       </div>
+      <PosterBoard cid={cid} version={version} />
       {shown.length === 0 && <Empty>No one matches.</Empty>}
       {sections.filter(([, list]) => list.length).map(([title, list]) => (
         <section key={title}>

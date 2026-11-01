@@ -959,6 +959,8 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     register_opening(app, state, write_lock)
     from .venue_api import register as register_venue
     register_venue(app, state)
+    from .fate_api import register as register_fate
+    register_fate(app, state, write_lock)
 
     # ------------------------------------------------------------------ frontend
     if FRONTEND_DIST.exists():

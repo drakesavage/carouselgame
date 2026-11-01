@@ -14,6 +14,7 @@ export type CharacterCard = {
   status: string; location?: string | null; in_party: number; party_order: number;
   role_id?: string | null; aspect_id?: string | null; advanced_role_id?: string | null; role_reason?: string | null;
   portrait_crop?: { cx: number; cy: number; k: number; ar: number } | null;
+  physical_condition?: string; wallpaper_status?: string; participation?: string; persistent_fate?: string;   // fate axes (never rescue)
   stats: CarouselStats; tickets?: Ticket[]; portrait_path?: string | null; statuses: Status[]; equipped: { id: number; name: string; slot?: string }[];
   personality?: string | null; known_motivation?: string | null; attitude?: number | null; voice?: string | null; assignment?: string | null;
   life?: Life;
@@ -68,7 +69,13 @@ export type Campaign = {
   art?: ArtMap;
   /** The new-game flow (null: this campaign has no opening). `belief` is why the group thinks it came. */
   opening?: { stage: OpeningStage; belief: string | null; paid_off: string | null } | null;
+  /** Fate (fate_api.py): Deathwatch while the player's character can't act; wiped once the group is on the poster board. */
+  fate?: { deathwatch: { pace: DeathwatchPace } | null; wiped: boolean };
 };
+export type DeathwatchPace = "full" | "condensed";
+/** A missing poster on the board outside the Diner: never the cause of death or whether a rescue is possible. */
+export type MissingPoster = { id: number; name: string; plot_armor: number | null; archetype: string | null; last_seen: string | null;
+  posted_minutes: number | null; held_by: string | null; found: boolean };
 export type OpeningStage = "car" | "silas" | "opening_omen" | "escort" | "done";
 export type ArtKind = "character" | "item" | "mob" | "scene" | "location";
 /** Current picture URL per subject: ids as keys, except mobs (lower-case name). */
@@ -214,6 +221,9 @@ export const api = {
   spendStatPoint: (id: number, charId: number, stat: string) => post<{ summary: string }>(`api/campaigns/${id}/characters/${charId}/stat-point`, { stat }),
   travel: (id: number, to: { to: string } | { north: number; west: number }, key: string) =>
     post<{ travel: TravelResult; turn: TurnStatus }>(`api/campaigns/${id}/travel`, { ...to, idempotency_key: key }),
+  posters: (id: number) => req<MissingPoster[]>(`api/campaigns/${id}/posters`),
+  deathwatchPace: (id: number, pace: DeathwatchPace) => post<{ pace: DeathwatchPace }>(`api/campaigns/${id}/deathwatch/pace`, { pace }),
+  newGroup: (id: number, character: string) => post<{ character_id: number }>(`api/campaigns/${id}/new-group`, { character }),
   venue: (id: number) => req<PlayerVenue | null>(`api/campaigns/${id}/venue`),
   venueMove: (id: number, to: string, key: string) =>
     post<{ move: { summary: string; zone_id: string; sighted: string[] }; turn: TurnStatus }>(`api/campaigns/${id}/venue/move`, { to, idempotency_key: key }),

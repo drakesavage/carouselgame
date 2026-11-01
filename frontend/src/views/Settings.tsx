@@ -39,7 +39,7 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
         <DeviceSettings />
         <Panel title={<><Save size={13} /> Save points</>}>
           <div className="row"><input className="input" placeholder="Label (optional)" value={label} onChange={(e) => setLabel(e.target.value)} /><button className="btn primary" onClick={save}>Save</button></div>
-          <div className="sub" style={{ margin: "8px 0" }}>Every completed turn autosaves (last 25 kept). Restoring hides later transcript/events but keeps them in the audit log.</div>
+          <div className="sub" style={{ margin: "8px 0" }}>Saving happens only at camp (Dyer's Lodge, between stories): turns there autosave (last 25 kept). Restoring hides later transcript/events but keeps them in the audit log.</div>
           {!saves ? null : saves.length === 0 ? <Empty>No saves.</Empty> : (
             <table className="data"><tbody>{saves.map((s) => (
               <tr key={s.id}><td><div>{s.label}</div><div className="sub">{new Date(s.created_at).toLocaleString()}</div></td>

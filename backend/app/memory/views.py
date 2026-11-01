@@ -13,7 +13,8 @@ from ..carousel.fate import GONE_SQL
 from ..db import one, rows
 
 PUBLIC_CHAR_COLUMNS = """id, campaign_id, slug, name, kind, roster_category, species, status, location, in_party, party_order,
-    role_id, aspect_id, advanced_role_id, role_reason, portrait_path, portrait_crop_json, provenance, assignment, stars, pending_stat_points"""
+    role_id, aspect_id, advanced_role_id, role_reason, portrait_path, portrait_crop_json, provenance, assignment, stars, pending_stat_points,
+    physical_condition, wallpaper_status, participation, persistent_fate"""   # never rescue_eligibility (GM-only)
 
 
 def _statuses(conn: sqlite3.Connection, char_id: int) -> list[dict]:
@@ -100,6 +101,9 @@ def campaign_summary(conn: sqlite3.Connection, cid: int) -> dict | None:
     # the new-game flow: stage, the lure as the players believe it, its payoff (never the truth or the resident's ID)
     op = one(conn, "SELECT opening_stage, lure_belief, lure_paid_off FROM campaigns WHERE id = ?", (cid,))
     camp["opening"] = {"stage": op["opening_stage"], "belief": op["lure_belief"], "paid_off": op["lure_paid_off"]} if op["opening_stage"] else None
+    from ..fate_api import player_fate
+    f = player_fate(conn, cid)
+    camp["fate"] = {"deathwatch": f["deathwatch"], "wiped": f["wiped"]}
     return camp
 
 

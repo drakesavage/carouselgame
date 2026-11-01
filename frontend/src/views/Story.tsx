@@ -7,6 +7,7 @@ import { ReportButton } from "./Report";
 import { StoryBar } from "./StoryBar";
 import { VenuePanel } from "./VenuePanel";
 import { OpeningBar } from "./OpeningBar";
+import { DeathwatchBar } from "./DeathwatchBar";
 import { startOpening } from "./Campaigns";
 import { CampaignSidebar, CombatPanel, Decision, DiscoveryCards, IMPORTANT_CARDS, portraitSrc, RosterPanel, SceneBanner, splitDecision, StoryText, useManifest } from "./Hud";
 
@@ -40,9 +41,9 @@ const unreachable = (e: unknown) => (e instanceof ApiError && [502, 503, 504].in
 
 const PAGE = 80;  // the server's default page of messages
 
-export function StoryView({ campaign, onState, onNotices, openCharacter, openQuest }: {
+export function StoryView({ campaign, onState, onNotices, openCharacter, openQuest, openSaves }: {
   campaign: Campaign; onState: () => void; onNotices: (n: { text: string; style: string }[]) => void; openCharacter: (id: number) => void;
-  openQuest: (id?: number) => void;
+  openQuest: (id?: number) => void; openSaves?: () => void;
 }) {
   const cid = campaign.id;
   const [messages, setMessages] = useState<Message[] | null>(null);
@@ -176,6 +177,7 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
       <div className="story-col">
         <SceneBanner campaign={campaign} onArt={onState} openCharacter={openCharacter} />
         <OpeningBar campaign={campaign} />
+        <DeathwatchBar campaign={campaign} onChanged={onState} openSaves={openSaves} />
         <StoryBar cid={cid} version={campaign} />
         <VenuePanel cid={cid} version={campaign} onTurn={(t) => {
           anchor.current = { kind: "bottom" };
@@ -232,7 +234,8 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
         {unseen && <button className="btn small to-latest" onClick={toLatest}><ArrowDown size={13} /> New narration</button>}
         <div className="composer">
           <textarea ref={textarea} value={draft} onChange={(e) => setDraft(e.target.value)} disabled={busy}
-            placeholder={`What does ${pc?.name.split(" ")[0] ?? "your crawler"} do? Describe actions, dialogue, plans — anything.`}
+            placeholder={campaign.fate?.deathwatch ? "Ask for a cut, a pace, or a summary"
+              : `What does ${pc?.name.split(" ")[0] ?? "your crawler"} do? Describe actions, dialogue, plans — anything.`}
             onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(draft); } }} />
           <div className="row wrap">
             <div className="quick">

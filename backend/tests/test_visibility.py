@@ -12,7 +12,8 @@ SECRETS = ["GMSECRET-ALPHA-1", "GMSECRET-BRAVO-2", "GMSECRET-CHARLIE-3", "GMSECR
            "MINI-OBLIGATION", "MINI-COUNTERPLAY", "MINI-CLUE",   # the active story's screenplay and sealed house story
            "REVISION-INDIA-9", "ENDING-JULIET-10",   # a revision's private operations/reason and a revised ending predicate
            "LURE-TRUTH-KILO-11", "MINI-NPC-SECRET-2",   # a new game's lure truth and its introduced resident's gm_only (mini CAR-NPC-003)
-           "MINI-HIDDEN-ROOM", "OM-005", "open:cellar_door"]   # an unreached farm room, and the Omen placed in a room not yet entered
+           "MINI-HIDDEN-ROOM", "OM-005", "open:cellar_door",   # an unreached farm room, and the Omen placed in a room not yet entered
+           "CAUSE-SECRET-LIMA-7", "rescue_eligibility", "rescue_json", "poster_ids"]   # a death cause, rescue eligibility, a Rescue's posters
 
 
 def _plant(conn, cid):
@@ -60,6 +61,32 @@ def _plant_opening(conn):
     return cid
 
 
+def _plant_fate(conn):
+    """A third campaign: Mara and Jonah died in OM-001 (Mara's cause planted), and Nora carries Mara's poster into a Rescue."""
+    from tests.carousel.test_fate_end import jonah_dies
+    from tests.carousel.test_fate_ops import give, kill
+    from tests.carousel.test_rescue import rescue_begin, take, to_diner
+    from tests.carousel.test_rewards import conclude
+    from tests.carousel.test_story_ops import begin, seen
+    from tests.fixtures.carousel_seed import seed_carousel
+    cid = seed_carousel(conn)
+    seen(conn, cid, "OM-001")
+    begin(conn, cid)
+    kill(conn, cid)
+    jonah_dies(conn, cid)
+    conclude(conn, cid)
+    with transaction(conn):
+        nora = conn.execute("""INSERT INTO characters (campaign_id, slug, name, kind, roster_category, status, in_party, provenance)
+                               VALUES (?, 'nora', 'Nora Quill', 'pc', 'player_character', 'active', 1, 'test')""", (cid,)).lastrowid
+        conn.execute("UPDATE campaigns SET active_character_id = ? WHERE id = ?", (nora, cid))
+    give(conn, cid, nora, "trope:2")
+    to_diner(conn, cid)
+    poster = conn.execute("SELECT id FROM missing_posters WHERE campaign_id = ? AND name = 'Mara Vance'", (cid,)).fetchone()[0]
+    take(conn, cid, poster)
+    rescue_begin(conn, cid, [poster])
+    return cid
+
+
 def _player_urls(client, cid):
     urls = ["/api/health", "/api/settings", "/api/campaigns", f"/api/campaigns/{cid}", f"/api/campaigns/{cid}/characters",
             f"/api/campaigns/{cid}/inventory", f"/api/campaigns/{cid}/quests", f"/api/campaigns/{cid}/npcs", f"/api/campaigns/{cid}/timeline",
@@ -69,7 +96,8 @@ def _player_urls(client, cid):
             f"/api/campaigns/{cid}/journal", f"/api/campaigns/{cid}/lore-notebook", f"/api/campaigns/{cid}/chronology",
             f"/api/campaigns/{cid}/search?q=gmsecret alpha bravo charlie delta echo foxtrot secret plot",
             f"/api/campaigns/{cid}/inventory", f"/api/campaigns/{cid}/map", "/api/reference/status",
-            f"/api/campaigns/{cid}/story", f"/api/campaigns/{cid}/stories", f"/api/campaigns/{cid}/venue"]
+            f"/api/campaigns/{cid}/story", f"/api/campaigns/{cid}/stories", f"/api/campaigns/{cid}/venue",
+            f"/api/campaigns/{cid}/fate", f"/api/campaigns/{cid}/posters"]
     for ch in client.get(f"/api/campaigns/{cid}/characters").json():
         urls.append(f"/api/campaigns/{cid}/characters/{ch['id']}")
         urls.append(f"/api/campaigns/{cid}/characters/{ch['id']}/dossier")
@@ -90,7 +118,9 @@ def test_no_gm_material_in_any_player_response(client, conn, campaign_id):
     assert r.status_code == 200, r.text
     assert client.get(f"/api/campaigns/{cid}/story").json()["active"]["revisions"] == ["Jonah has a plan for the barn."]
     other = _plant_opening(conn)
-    for url in [*_player_urls(client, cid), *_player_urls(client, other)]:
+    lost = _plant_fate(conn)
+    assert client.get(f"/api/campaigns/{lost}/posters").json(), "the fate campaign's board should be visible to crawl"
+    for url in [*_player_urls(client, cid), *_player_urls(client, other), *_player_urls(client, lost)]:
         r = client.get(url)
         assert r.status_code == 200, url
         text = r.text

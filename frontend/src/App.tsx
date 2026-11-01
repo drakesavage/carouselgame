@@ -156,7 +156,8 @@ export default function App() {
         {!campaigns ? <div className="view muted">Loading…</div> : campaigns.length === 0 || cid == null ? (
           <div className="view"><div className="view-inner"><SettingsView cid={0} version={version} onChanged={refresh} onCampaign={chooseCampaign} /></div></div>
         ) : !campaign ? <div className="view muted">Loading campaign…</div> : tab === "story" ? (
-          <StoryView key={cid} campaign={campaign} onState={refresh} onNotices={pushNotices} openCharacter={setSheet} openQuest={openQuest} />
+          <StoryView key={cid} campaign={campaign} onState={refresh} onNotices={pushNotices} openCharacter={setSheet} openQuest={openQuest}
+            openSaves={() => setTab("settings")} />
         ) : (
           <div className="view">
             {tab === "characters" && <CharactersView cid={cid} version={version} openCharacter={setSheet} />}

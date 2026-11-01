@@ -24,3 +24,10 @@
 .venuepanel-ways .btn { display: inline-flex; align-items: center; gap: 4px; }
 .venuepanel-seen, .venuepanel-leave { font-size: 12px; color: var(--muted); }
 .venuepanel-msg { font-size: 12px; color: var(--red); margin-bottom: 4px; }
+
+/* DeathwatchBar: the player's character can't act (pace buttons), or the whole group is on the poster board (new group) */
+.deathwatch { border-color: var(--red); }
+.deathwatch .storybar-title svg { vertical-align: -2px; }
+.deathwatch .storybar-head { flex-wrap: wrap; }
+.deathwatch form .input { flex: 1; min-width: 160px; }
+.storybar-cast.error { color: var(--red); }
