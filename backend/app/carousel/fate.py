@@ -15,6 +15,7 @@ from .stories import active_story
 GONE = ("deceased", "dead", "missing", "lost")   # characters.status values that are out of play
 GONE_SQL = "(" + ",".join(f"'{s}'" for s in GONE) + ")"
 DINER = "CAR-006"                                # the missing-poster board is outside the Diner
+CAMP_ONLY = "You can only save at camp (Dyer's Lodge, between stories)"
 
 
 def rights(physical: str, wallpaper: str, basis: str | None) -> str:

@@ -1,9 +1,16 @@
 import uuid
 
-from app.db import connect, one
+from app.db import connect, one, transaction
 
 
-def test_save_change_restore_and_undo_restore(client, settings, campaign_id):
+def at_camp(conn, cid):
+    """Save points are made only at camp (carousel/fate.py at_camp); the seed stands on the Town Square."""
+    with transaction(conn):
+        conn.execute("UPDATE campaigns SET node_id = 'CAR-047' WHERE id = ?", (cid,))
+
+
+def test_save_change_restore_and_undo_restore(client, settings, conn, campaign_id):
+    at_camp(conn, campaign_id)
     sp = client.post(f"/api/campaigns/{campaign_id}/saves", json={"label": "before nap"}).json()["save_point_id"]
     t0 = client.get(f"/api/campaigns/{campaign_id}").json()["game_time_minutes"]
     client.post(f"/api/campaigns/{campaign_id}/turns", json={"text": "I rest", "idempotency_key": uuid.uuid4().hex})
@@ -30,7 +37,8 @@ def test_save_change_restore_and_undo_restore(client, settings, campaign_id):
     assert any(i["name"] == "Suspicious Gray Rock" for i in inv["by_character"])
 
 
-def test_autosaves_are_pruned(client, settings, campaign_id):
+def test_autosaves_are_pruned(client, settings, conn, campaign_id):
+    at_camp(conn, campaign_id)
     settings.autosave_keep = 2
     for _ in range(4):
         client.post(f"/api/campaigns/{campaign_id}/turns", json={"text": "I wait", "idempotency_key": uuid.uuid4().hex})

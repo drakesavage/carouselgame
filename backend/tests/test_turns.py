@@ -9,7 +9,9 @@ def _turn(client, cid, text, key=None):
     return client.post(f"/api/campaigns/{cid}/turns", json={"text": text, "idempotency_key": key or uuid.uuid4().hex})
 
 
-def test_turn_persists_transcript_and_state(client, settings, campaign_id):
+def test_turn_persists_transcript_and_state(client, settings, conn, campaign_id):
+    from tests.test_saves import at_camp
+    at_camp(conn, campaign_id)   # autosaves happen only at camp
     r = _turn(client, campaign_id, "I drink a healing potion")
     body = r.json()
     assert r.status_code == 200 and body["status"] == "completed", body

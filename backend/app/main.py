@@ -794,7 +794,10 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
 
     @app.post("/api/campaigns/{cid}/saves")
     def create_save(cid: int, body: SaveIn, c=Depends(db), _=Depends(write_lock)):
+        from .carousel.fate import CAMP_ONLY, at_camp
         campaign_or_404(c, cid)
+        if not at_camp(c, cid):
+            raise HTTPException(409, CAMP_ONLY)
         return {"save_point_id": snapshots.create_save_point(c, cid, body.label, kind="manual")}
 
     @app.post("/api/campaigns/{cid}/saves/{sid}/restore")

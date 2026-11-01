@@ -115,6 +115,9 @@ class ToolRunner:
             return {"ok": False, "result": {"error": msg}}
 
     def t_save_game(self, a: dict) -> dict:
+        from ..carousel.fate import CAMP_ONLY, at_camp
+        if not at_camp(self.conn, self.cid):
+            raise ValueError(CAMP_ONLY)
         self.effects.save_label = (str(a.get("label") or "").strip() or "Player save")[:120]
         return {"summary": f"Save point '{self.effects.save_label}' will be created when this turn commits"}
 

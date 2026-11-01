@@ -42,6 +42,8 @@ def test_backups_are_listed_made_verified_and_automatic_ones_are_database_only(c
 
 
 def test_restore_preview_says_what_would_change_and_changes_nothing(client, conn, campaign_id):
+    from tests.test_saves import at_camp
+    at_camp(conn, campaign_id)   # save points are made only at camp
     save = client.post(f"/api/campaigns/{campaign_id}/saves", json={"label": "before the haul"})
     assert save.status_code == 200
     sid = save.json()["save_point_id"]

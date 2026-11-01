@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from ..carousel.fate import GONE_SQL
+from ..carousel.fate import GONE_SQL, at_camp
 from ..carousel.refdata import open_campaign
 from ..config import Settings
 from ..db import connect, now_iso, one, rows, transaction
@@ -236,7 +236,8 @@ class TurnService:
                 response = self._commit_turn(conn, cid, turn, narration, runner, provider.name)
                 conn.execute("UPDATE turns SET status = 'completed', provider = ?, response_json = ?, stage_json = NULL, completed_at = ? WHERE id = ?",
                              (provider.name, json.dumps(response), now_iso(), turn_id))
-                create_save_point(conn, cid, f"After turn {turn_id}", kind="auto", turn_id=turn_id, keep_auto=self.settings.autosave_keep)
+                if at_camp(conn, cid):   # save points only at camp (design §8.1)
+                    create_save_point(conn, cid, f"After turn {turn_id}", kind="auto", turn_id=turn_id, keep_auto=self.settings.autosave_keep)
                 if runner.effects.save_label:  # the player asked to save (save_game): a manual point, never pruned (playtest 1, M6)
                     create_save_point(conn, cid, runner.effects.save_label, kind="manual", turn_id=turn_id)
                 fx = runner.effects
