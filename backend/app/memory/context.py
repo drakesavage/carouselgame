@@ -3,6 +3,7 @@
 Sections, in order:
   1 CAMPAIGN        identity, state version, floor, location, game time, dungeon day, collapse clock, cycles
   2 CURRENT SCENE   the active scene record + recent significant events
+    STORY           the active story: phase, pressure, camera, cast, obligations, revisions, endings (or OMENS HERE when none)
   3 PARTY           every group: location, activity, members (who is present vs elsewhere)
   4 PRESENT         full sheets for the player character and everyone present (scene participants, the PC's group,
                     anyone named); GM-ONLY companion sheets and memories for them
@@ -10,7 +11,7 @@ Sections, in order:
   6 MEMORY          closed-scene summaries, transcript summaries, relevant canonical facts, the last N messages
   7 HOUSE RULES     always-apply constitution sections, house rules matching this action, recent rulings
   8 RULEBOOK        auto-retrieved rulebook passages with page refs (to verify before citing)
-  9 GM-ONLY         relevant unrevealed secrets
+  9 GM-ONLY         the active story's sealed truth (never cut), relevant unrevealed secrets
 The player's exact input is sent separately as its own step.
 
 Every section maps to one category (CATEGORIES) so diagnostics can report what was loaded. Budgets are characters
@@ -46,7 +47,7 @@ PROFILES: dict[str, dict] = {
 },
 }
 CATEGORIES = {"CAMPAIGN": "state", "PARTY": "state", "PRESENT": "state", "OBJECTIVES": "state", "SHARED STASH": "state",
-              "ACTIVE COMBAT": "state", "LEDGER RECORDS": "ledger", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
+              "ACTIVE COMBAT": "state", "STORY": "state", "OMENS HERE": "state", "LEDGER RECORDS": "ledger", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
               "RULEBOOK": "rulebook", "RECENT TRANSCRIPT": "narrative", "RECENT ROLLS": "state", "GM-ONLY SECRETS": "gm_private"}
 STOP = set("the a an and or of to in on for with by is are be as at it this that from what how does do can when which who i we my our me us "
            "you your he she they them his her their then than into onto about there here just also will would should could".split())
@@ -182,6 +183,50 @@ def _due(q: dict, now: int) -> str:
     return f" [due in {left // 60}h{left % 60:02d}m]" if left >= 0 else f" [OVERDUE by {-left // 60}h{-left % 60:02d}m]"
 
 
+def _story_section(conn: sqlite3.Connection, story: dict, packet: dict) -> str:
+    """The GM's view of the running story: everything but the sealed truth (that goes in GM-ONLY)."""
+    from ..carousel.stories import PHASES
+    sp, endings = packet["screenplay"], packet["endings"]
+    omen = one(conn, "SELECT choice_trigger FROM ref.omens WHERE id = ?", (story["omen_id"],)) or {}
+    lines = [f"{story['title']} (story #{story['id']}, Omen {story['omen_id']}, lock {story['story_lock']}, "
+             f"Choice action {omen.get('choice_trigger') or story['choice_action']})",
+             f"Phase {story['phase']} | pressure {story['pressure']}/6 (GM-only) | camera {story['camera']} | screenplay version {story['version']}"]
+    cast = rows(conn, """SELECT c.id, c.name, x.casting, x.joined_phase, x.screen_moments FROM story_cast x JOIN characters c ON c.id = x.character_id
+                         WHERE x.story_id = ? ORDER BY x.screen_moments, c.id""", (story["id"],))
+    lines.append("Cast (fewest screen moments first; bring quiet ones on-screen): " + "; ".join(
+        f"{c['name']} (id {c['id']}) {c['casting']}, screen moments {c['screen_moments']}" + (f", joined at {c['joined_phase']}" if c["joined_phase"] != "Party" else "")
+        for c in cast))
+    plan = {p.get("phase"): p.get("obligation") for p in sp.get("phase_plan") or []}
+    i = PHASES.index(story["phase"])
+    nxt = PHASES[i + 1] if i + 1 < len(PHASES) else None
+    lines.append(f"Now ({story['phase']}): {plan.get(story['phase']) or 'no scripted obligation'}")
+    if nxt:
+        lines.append(f"Next ({nxt}): {plan.get(nxt) or 'no scripted obligation'}")
+    for n in sp.get("notes") or []:
+        ops = "; ".join(f"{o['family']}: {o['detail']}" for o in n.get("operations") or [])
+        lines.append(f"Revision v{n.get('version')} ({n.get('scope')}, {n.get('by')}): {ops}"
+                     + (f" | costs: {', '.join(n['costs'])}" if n.get("costs") else "")
+                     + (f" | new dangers: {', '.join(n['new_dangers'])}" if n.get("new_dangers") else "")
+                     + (f" | keep: {', '.join(n['preserved_facts'])}" if n.get("preserved_facts") else ""))
+    lines.append("Endings (conclude_story; full/costly success only from the Finale): " + " | ".join(
+        f"{k}: {(v or {}).get('predicate', '')}" for k, v in endings.items()))
+    return "\n".join(lines)
+
+
+def _sealed_truth(story: dict, packet: dict) -> str:
+    hs = (packet["sealed"] or {}).get("house_story") or {}
+    ab = hs.get("antagonist_behavior")
+    lines = [f"Sealed truth (story #{story['id']}, sha256 {packet['sealed_sha256'][:12]}): never changes; a deduction that fits it succeeds.",
+             f"- Truth: {hs.get('secret_truth') or 'not recorded'}"]
+    if hs.get("actionable_counterplay"):
+        lines.append(f"- Counterplay: {hs['actionable_counterplay']}")
+    if ab:
+        lines.append(f"- Antagonist: {ab.get('policy') if isinstance(ab, dict) else ab}")
+    for c in hs.get("clue_routes") or []:
+        lines.append(f"- Clue ({c.get('route') or c.get('id')}): {c.get('evidence')}")
+    return "\n".join(lines)
+
+
 def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_window: int = 12, rule_conn: sqlite3.Connection | None = None,
                   budgets: dict | None = None) -> dict:
     B = {**DEFAULT_BUDGET, **(budgets or {})}
@@ -243,6 +288,24 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     if ev:
         sc.append("Recent events: " + " | ".join(e["summary"][:160] for e in ev))
     sections["CURRENT SCENE"] = cut("CURRENT SCENE", "\n".join(sc), B["scene"])
+
+    # STORY (or the Omens at hand when none is running)
+    from ..carousel.refdata import has_reference
+    from ..carousel.stories import active_story
+    story = active_story(conn, cid)
+    packet = one(conn, "SELECT * FROM story_packets WHERE story_id = ?", (story["id"],)) if story else None
+    if story and packet:
+        sections["STORY"] = _story_section(conn, story, packet)
+    elif has_reference(conn) and camp.get("node_id"):
+        here_omens = rows(conn, """SELECT o.id, o.description, o.choice_trigger, o.record_type, s.stage FROM omen_states s
+                                   JOIN ref.omens o ON o.id = s.omen_id WHERE s.campaign_id = ? AND o.place_id = ? ORDER BY o.id""",
+                          (cid, camp["node_id"]))
+        if here_omens:
+            sections["OMENS HERE"] = ("Seen here. Looking is safe; only the player's own Choice action commits (then begin_story):\n"
+                                      + "\n".join(f"- {o['id']} [{o['stage']}] {o['description']} — "
+                                                  + ("a hub: it never starts a story itself" if o["record_type"] != "Playable Omen"
+                                                     else f"Choice action: {o['choice_trigger'] or 'not recorded (record the action with begin_story reason)'}")
+                                                  for o in here_omens))
 
     # 3 PARTY ORGANIZATION
     pc_group = pc.get("assignment") if pc else None
@@ -399,11 +462,14 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     hidden_tickets += [f"- {by_id[i]['name']}: secret modifier #{m['id']} {m['target']} {'x' if m['op'] == 'multiply' else '+'}{m['value']:g} "
                        f"from {m['source']} ({m['scope']})"
                        for i in full_ids for m in rows(conn, "SELECT * FROM stat_modifiers WHERE character_id = ? AND hidden = 1", (i,))]
+    sealed = _sealed_truth(story, packet) if story and packet else ""   # never cut by the secrets budget
+    if sealed:
+        sections["GM-ONLY SECRETS"] = sealed
     if hidden_tickets:
-        sections["GM-ONLY SECRETS"] = ("Hidden tropes (reveal only through play or a trope such as Trope Master, then op reveal_ticket):\n"
+        sections["GM-ONLY SECRETS"] = (sections["GM-ONLY SECRETS"] + "\n" if sealed else "") + ("Hidden tropes (reveal only through play or a trope such as Trope Master, then op reveal_ticket):\n"
                                        + "\n".join(hidden_tickets))
     if chosen:
-        sections["GM-ONLY SECRETS"] = (sections.get("GM-ONLY SECRETS", "") + "\n" if hidden_tickets else "") + cut("GM-ONLY SECRETS", "Never reveal directly; reveal only through play, then reveal_secret.\n"
+        sections["GM-ONLY SECRETS"] = (sections["GM-ONLY SECRETS"] + "\n" if sealed or hidden_tickets else "") + cut("GM-ONLY SECRETS", "Never reveal directly; reveal only through play, then reveal_secret.\n"
                                           + "\n".join(f"- #{s['id']} [{s['kind']}] {s['subject']}: {s['content'][:500]}" for s in chosen), B["secrets"])
 
     # transcript
