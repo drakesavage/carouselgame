@@ -68,8 +68,9 @@ def blockers(conn: sqlite3.Connection, cid: int, reason: str | None = None) -> l
         running = active_story(conn, cid)
         if running:
             out.append(f"a story is still running: {running['title']}")
-        elif not one(conn, "SELECT id FROM stories WHERE campaign_id = ?", (cid,)) and not (reason or "").strip():
-            # begin_story is refused before this stage, so any story in the campaign started during the opening
+        elif not one(conn, "SELECT id FROM stories WHERE campaign_id = ? AND group_no = ?", (cid, camp["group_no"])) and not (reason or "").strip():
+            # begin_story is refused before this stage, so any story of this group started during its opening (a new group
+            # after a wipe has its own opening; the lost group's stories don't count)
             out.append("no story has started; give a reason if the player refused every Omen")
     elif s == "escort":
         if camp["node_id"] != LODGE:

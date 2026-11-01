@@ -151,8 +151,9 @@ def _apply_begin(ctx: Ctx, op: BeginStory) -> dict:
     title = o["playable_title"] or dossier.get("title") or op.omen
     now = ctx.game_time()
     sid = ctx.conn.execute("""INSERT INTO stories (campaign_id, omen_id, story_lock, title, status, phase, pressure, camera, version,
-                                                   choice_action, started_minutes, started_turn_id) VALUES (?,?,?,?, 'active', 'Party', 1, 'on', 0, ?,?,?)""",
-                           (ctx.campaign_id, op.omen, lock, title, op.action, now, ctx.turn_id)).lastrowid
+                                                   choice_action, started_minutes, started_turn_id, group_no)
+                              VALUES (?,?,?,?, 'active', 'Party', 1, 'on', 0, ?,?,?, (SELECT group_no FROM campaigns WHERE id = ?))""",
+                           (ctx.campaign_id, op.omen, lock, title, op.action, now, ctx.turn_id, ctx.campaign_id)).lastrowid
     ctx.conn.execute("INSERT INTO story_packets (story_id, sealed_json, sealed_sha256, screenplay_json, endings_json) VALUES (?,?,?,?,?)",
                      (sid, sealed_json, sha, canonical({"version": 0, "phase_plan": dossier.get("phase_plan") or [], "notes": []}), canonical(endings)))
     for c, casting in cast:

@@ -1,9 +1,10 @@
 """Starting the new-game opening (carousel/opening.py): the server submits the first turn, of kind `opening`, which
 narrates the car scene. The client sends an idempotency key it keeps across reloads, so a refresh or a double click
-returns the same turn instead of starting a second one."""
+returns the same turn instead of starting a second one. After a wipe, POST /new-group puts a new group in the car
+(campaigns.new_group); its opening then starts the same way."""
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .carousel.opening import stage
@@ -17,7 +18,24 @@ class OpeningStartIn(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=80)
 
 
-def register(app: FastAPI, state) -> None:
+class NewGroupIn(BaseModel):
+    character: str = Field(min_length=1, max_length=80)
+
+
+def register(app: FastAPI, state, write_lock) -> None:
+    @app.post("/api/campaigns/{cid}/new-group")
+    def start_new_group(cid: int, body: NewGroupIn, _=Depends(write_lock)):
+        from .campaigns import new_group
+        c = state.conn()
+        try:
+            return {"character_id": new_group(c, cid, body.character)}
+        except LookupError as exc:
+            raise HTTPException(404, str(exc))
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+        finally:
+            c.close()
+
     @app.post("/api/campaigns/{cid}/opening/start")
     def start_opening(cid: int, body: OpeningStartIn):
         c = state.conn()

@@ -956,7 +956,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     from .story_api import register as register_story
     register_story(app, state, write_lock)
     from .opening_api import register as register_opening
-    register_opening(app, state)
+    register_opening(app, state, write_lock)
     from .venue_api import register as register_venue
     register_venue(app, state)
 

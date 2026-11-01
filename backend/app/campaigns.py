@@ -99,6 +99,40 @@ def _place_on_map(conn: sqlite3.Connection, cid: int, location: str, t: str) -> 
     venues.enter(conn, cid, start)
 
 
+def new_group(conn: sqlite3.Connection, cid: int, character: str) -> int:
+    """After a wipe (design §8.1): a new player character arrives in the same town, in the car at the arrival lot, knowing
+    nothing. The world stays: the clock, the posters, story history, residents and their memories, secrets and lore."""
+    from .carousel.stories import active_story
+    character = character.strip()
+    if not character:
+        raise ValueError("the new character needs a name")
+    camp = one(conn, "SELECT * FROM campaigns WHERE id = ?", (cid,))
+    if not camp:
+        raise LookupError("campaign not found")
+    pc = one(conn, "SELECT persistent_fate FROM characters WHERE id = ?", (camp["active_character_id"],))
+    if not pc or pc["persistent_fate"] not in ("missing_postered", "permanently_lost"):
+        raise ValueError("a new group starts only when your group is on the missing-poster board or lost")
+    if active_story(conn, cid):
+        raise ValueError("a story is still running")
+    # a running turn: the API holds the write lock, and a turn staged meanwhile fails its state fingerprint on commit
+    base, n = slug(character), 1
+    while one(conn, "SELECT id FROM characters WHERE campaign_id = ? AND slug = ?", (cid, base if n == 1 else f"{base}-{n}")):
+        n += 1
+    with transaction(conn):
+        conn.execute("UPDATE campaigns SET group_no = group_no + 1, lure_kind = NULL, lure_belief = NULL, lure_resident = NULL, "
+                     "lure_paid_off = NULL, updated_at = ? WHERE id = ?", (now_iso(), cid))
+        new = conn.execute("""INSERT INTO characters (campaign_id, slug, name, kind, roster_category, status, in_party, party_order, sheet_json, provenance)
+                              VALUES (?,?,?,?,?,?,?,?,?,?)""", (cid, base if n == 1 else f"{base}-{n}", character, "pc", "player_character", "active",
+                                                                1, 0, "{}", "manual")).lastrowid
+        conn.execute("UPDATE campaigns SET active_character_id = ? WHERE id = ?", (new, cid))
+        conn.execute("UPDATE characters SET in_party = 0 WHERE campaign_id = ? AND in_party = 1 AND id != ?", (cid, new))
+        for t in ("known_places", "omen_states", "zone_visits"):   # what the group knows; the town itself is unchanged
+            conn.execute(f"DELETE FROM {t} WHERE campaign_id = ?", (cid,))
+        _start_opening(conn, cid)
+        create_save_point(conn, cid, "A new group arrives", kind="manual")
+    return new
+
+
 def rename(conn: sqlite3.Connection, cid: int, name: str) -> None:
     name = name.strip()
     if not name:
