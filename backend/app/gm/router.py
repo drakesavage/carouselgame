@@ -61,15 +61,16 @@ OFFSCREEN = re.compile(r"\b(message|messages|text|ping|radio|chat|contact|check 
                        r"(?:they|he|she) (?:should be|must be) back|recon team|the others|discover|discovers|find out|learn)\w*", re.I)
 
 
-ARRIVAL_ROUTES = {"arrival": ("talk", "a quiet arrival (the move is already applied)"),
-                  "arrival_omen": ("action", "an Omen interrupted the walk")}
+SERVER_TURN_ROUTES = {"arrival": ("talk", "a quiet arrival (the move is already applied)"),
+                      "arrival_omen": ("action", "an Omen interrupted the walk"),
+                      "opening": ("action", "the opening sets the lure and the cast")}
 
 
 def classify_turn(text: str, story_active: bool, absent: set[str] | frozenset = frozenset(), turn_kind: str | None = None) -> tuple[str, str]:
-    """classify(), except that a turn the server started (an arrival after travel) routes by its kind. An active story
+    """classify(), except that a turn the server started (an arrival after travel, the opening) routes by its kind. An active story
     still sends everything to Codex."""
-    if turn_kind in ARRIVAL_ROUTES and not story_active:
-        return ARRIVAL_ROUTES[turn_kind]
+    if turn_kind in SERVER_TURN_ROUTES and not story_active:
+        return SERVER_TURN_ROUTES[turn_kind]
     return classify(text, story_active, absent)
 
 

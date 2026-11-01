@@ -178,3 +178,8 @@ def test_offscreen_contact_and_reports_go_to_the_mechanics_gm():
 def test_conversation_mode_cannot_record_canon():
     assert check_call("apply_changes", {"changes": [{"op": "fact", "subject": "recon", "fact": "holding at the loft"}]})
     assert check_call("apply_changes", {"changes": [{"op": "remember", "character": "Vada", "content": "x"}]}) is None
+
+
+def test_the_opening_turn_routes_to_the_mechanics_gm():
+    assert router.classify_turn("hi", False, turn_kind="opening")[0] == "action"
+    assert set(router.SERVER_TURN_ROUTES) == {"arrival", "arrival_omen", "opening"}

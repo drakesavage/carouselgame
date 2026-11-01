@@ -173,7 +173,7 @@ class TurnService:
         if forced is not None:  # an escalated conversation turn, re-run by the mechanics GM
             provider, route = forced
         elif hasattr(provider, "route"):
-            provider, route = provider.route(turn["player_input"], story_active(conn, cid), absent_names(conn, cid), **_kind(turn))
+            provider, route = provider.route(turn["player_input"], needs_mechanics(conn, cid), absent_names(conn, cid), **_kind(turn))
         conversation = bool(getattr(provider, "conversation", False))
         tools = [t for t in TOOL_SPECS if t["name"] in SAFE_TOOLS] + [ESCALATE_SPEC] if conversation else TOOL_SPECS
         system = SYSTEM_PROMPT + "\n\n" + CONVERSATION_MODE if conversation else SYSTEM_PROMPT
@@ -265,7 +265,7 @@ class TurnService:
             if exc.reroute and hasattr(root, "route"):
                 c2 = open_campaign(self.settings)
                 try:
-                    active = story_active(c2, cid)
+                    active = needs_mechanics(c2, cid)
                     absent = absent_names(c2, cid)
                 finally:
                     c2.close()
@@ -375,6 +375,12 @@ def story_active(conn, cid: int) -> bool:
     """Whether a story is in progress (every such turn goes to the mechanics GM)."""
     from ..carousel.stories import active_story
     return active_story(conn, cid) is not None
+
+
+def needs_mechanics(conn, cid: int) -> bool:
+    """A story is running, or Silas is dealing Archetypes and tickets (opening stage `silas`): route to the mechanics GM."""
+    from ..carousel.opening import stage
+    return story_active(conn, cid) or stage(conn, cid) == "silas"
 
 
 def absent_names(conn, cid: int) -> frozenset:
