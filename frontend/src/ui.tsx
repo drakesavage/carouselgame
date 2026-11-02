@@ -64,25 +64,9 @@ export function Portrait({ name, path, src, size = 52, crop }: { name: string; p
   );
 }
 
-export function Bar({ kind, cur, max, label }: { kind: "hp" | "mana"; cur?: number | null; max?: number | null; label?: string }) {
-  const known = cur != null && max != null && max > 0;
-  const pct = known ? Math.max(0, Math.min(100, (cur! / max!) * 100)) : 0;
-  return (
-    <div className="barrow">
-      <span>{label ?? (kind === "hp" ? "HP" : "MP")}</span>
-      <div className={`bar ${kind} ${known ? "" : "unknown"} ${kind === "hp" && known && pct <= 30 ? "low" : ""}`}><i style={{ width: `${pct}%` }} /></div>
-      <span>{cur ?? "?"}/{max ?? "?"}</span>
-    </div>
-  );
-}
-
 export function Chip({ children, tone, title }: { children: ReactNode; tone?: string; title?: string }) {
   return <span className={`chip ${tone ?? ""}`} title={title}>{children}</span>;
 }
-
-const STAT_KEYS = ["strength", "intelligence", "constitution", "dexterity", "charisma"];
-export const STAT_ABBR: Record<string, string> = { strength: "STR", intelligence: "INT", constitution: "CON", dexterity: "DEX", charisma: "CHA" };
-export { STAT_KEYS };
 
 export const humanize = (k: string) => k.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
