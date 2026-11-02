@@ -34,6 +34,18 @@ def test_around_matches_place_and_zone(real_campaign):
     assert residents.around(conn, cid) == []      # 09:00: everyone is at camp
 
 
+def test_a_shared_venue_matches_by_zone(real_campaign):
+    """The Town Square and the Diner are one venue (SM-001): arriving at the Diner puts the group in the square zone,
+    where residents hanging out at the Town Square stand."""
+    conn, cid = real_campaign
+    square, diner = "SM-001:n01_square_central_approach", "SM-001:n02_diner_front_and_interio"
+    apply(conn, cid, {"op": "resident_whereabouts", "resident": "CAR-NPC-001", "place": "CAR-002", "zone": square, "until_minutes": 600, "reason": "x"})
+    stand(conn, cid, "CAR-006", square)
+    assert [a["name"] for a in residents.around(conn, cid)] == ["Adeline Winter"]
+    stand(conn, cid, "CAR-006", diner)
+    assert residents.around(conn, cid) == []
+
+
 def test_around_without_zones_and_party_left_out(conn):
     cid = create(conn, name="Around", character="Mara", opening=False, location="Dyer's Lodge")
     stand(conn, cid, "CAR-047")

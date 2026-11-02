@@ -4,6 +4,7 @@ import { api, fmtMinutes, Life, Person } from "../api";
 import { Chip, Empty, Portrait } from "../ui";
 import { portraitSrc, role, useManifest } from "./Hud";
 import { PosterBoard } from "./PosterBoard";
+import { LodgeRoster } from "./AroundPanel";
 import "../people.css";
 
 /** Life state as a chip; nothing for the ordinary active case. */
@@ -62,6 +63,7 @@ export function PeopleView({ cid, version, pcAssignment, pcName, openCharacter, 
         </div>
       </div>
       <PosterBoard cid={cid} version={version} />
+      <LodgeRoster cid={cid} version={version} />
       {shown.length === 0 && <Empty>No one matches.</Empty>}
       {sections.filter(([, list]) => list.length).map(([title, list]) => (
         <section key={title}>

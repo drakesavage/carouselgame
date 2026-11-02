@@ -13,7 +13,8 @@ SECRETS = ["GMSECRET-ALPHA-1", "GMSECRET-BRAVO-2", "GMSECRET-CHARLIE-3", "GMSECR
            "REVISION-INDIA-9", "ENDING-JULIET-10",   # a revision's private operations/reason and a revised ending predicate
            "LURE-TRUTH-KILO-11", "MINI-NPC-SECRET-2",   # a new game's lure truth and its introduced resident's gm_only (mini CAR-NPC-003)
            "MINI-HIDDEN-ROOM", "OM-005", "open:cellar_door",   # an unreached farm room, and the Omen placed in a room not yet entered
-           "CAUSE-SECRET-LIMA-7", "rescue_eligibility", "rescue_json", "poster_ids"]   # a death cause, rescue eligibility, a Rescue's posters
+           "CAUSE-SECRET-LIMA-7", "rescue_eligibility", "rescue_json", "poster_ids",   # a death cause, rescue eligibility, a Rescue's posters
+           "WHEREABOUTS-MIKE-12", "HOOK-NOVEMBER-13", "camp_leadership"]   # a whereabouts note's reason, a resident's hook, a GM-only relationship
 
 
 def _plant(conn, cid):
@@ -31,6 +32,7 @@ def _plant(conn, cid):
                      (cid, "npc", "adeline", SECRETS[5], "gm", now_iso()))
     from tests.conftest import apply
     apply(conn, cid, {"op": "use_trope", "character": "Adeline Winter", "ticket": "trope:1", "effect": "she knew where they hid"})
+    apply(conn, cid, {"op": "resident_whereabouts", "resident": "Adeline Winter", "place": "CAR-002", "until_minutes": 2000, "reason": "WHEREABOUTS-MIKE-12"})
     _plant_story(conn, cid)
 
 
@@ -97,7 +99,7 @@ def _player_urls(client, cid):
             f"/api/campaigns/{cid}/search?q=gmsecret alpha bravo charlie delta echo foxtrot secret plot",
             f"/api/campaigns/{cid}/inventory", f"/api/campaigns/{cid}/map", "/api/reference/status",
             f"/api/campaigns/{cid}/story", f"/api/campaigns/{cid}/stories", f"/api/campaigns/{cid}/venue",
-            f"/api/campaigns/{cid}/fate", f"/api/campaigns/{cid}/posters"]
+            f"/api/campaigns/{cid}/fate", f"/api/campaigns/{cid}/posters", f"/api/campaigns/{cid}/around", f"/api/campaigns/{cid}/residents"]
     for ch in client.get(f"/api/campaigns/{cid}/characters").json():
         urls.append(f"/api/campaigns/{cid}/characters/{ch['id']}")
         urls.append(f"/api/campaigns/{cid}/characters/{ch['id']}/dossier")

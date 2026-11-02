@@ -6,6 +6,7 @@ import { play } from "../prefs";
 import { ReportButton } from "./Report";
 import { StoryBar } from "./StoryBar";
 import { VenuePanel } from "./VenuePanel";
+import { AroundPanel } from "./AroundPanel";
 import { OpeningBar } from "./OpeningBar";
 import { DeathwatchBar } from "./DeathwatchBar";
 import { startOpening } from "./Campaigns";
@@ -166,6 +167,13 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
     }
   };
 
+  /** A turn the server started from a panel click (a venue move, talking to a resident). */
+  const serverTurn = (t: TurnStatus) => {
+    anchor.current = { kind: "bottom" };
+    if (t.status === "completed") finish(t);
+    else setPending({ key: "", text: "", turnId: t.turn_id, status: t.status === "failed" ? "failed" : "processing", progress: t.progress,
+                      error: t.error ?? undefined });
+  };
   const busy = !!pending && pending.status !== "failed";
   const lastGm = messages ? [...messages].reverse().find((x) => x.role === "gm")?.id : undefined;
   return (
@@ -179,12 +187,8 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
         <OpeningBar campaign={campaign} />
         <DeathwatchBar campaign={campaign} onChanged={onState} openSaves={openSaves} />
         <StoryBar cid={cid} version={campaign} />
-        <VenuePanel cid={cid} version={campaign} onTurn={(t) => {
-          anchor.current = { kind: "bottom" };
-          if (t.status === "completed") finish(t);
-          else setPending({ key: "", text: "", turnId: t.turn_id, status: t.status === "failed" ? "failed" : "processing", progress: t.progress,
-                            error: t.error ?? undefined });
-        }} />
+        <VenuePanel cid={cid} version={campaign} onTurn={serverTurn} />
+        <AroundPanel cid={cid} version={campaign} onTurn={serverTurn} />
         <div className="combat-top">{campaign.encounter && <CombatPanel enc={campaign.encounter} campaign={campaign} onArt={onState} />}</div>
         <div className="transcript" ref={scroller} onScroll={onScroll} role="log" aria-label="Story transcript">
           <div className="transcript-inner">

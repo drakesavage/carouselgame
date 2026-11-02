@@ -62,3 +62,8 @@
 .poster dt { color: var(--muted); }
 .poster dd { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
 .poster-note { margin-top: 6px; font-size: 11px; color: var(--amber); }
+
+/* Plan 7: the Lodge roster (met residents, last seen, with the group, what their introduction said) */
+.lodge-roster { margin: 10px 0 4px; }
+.lodge-resident-head { display: grid; gap: 4px; padding: 10px 12px; }
+.lodge-resident-known { margin: 0; padding: 0 14px 10px 30px; font-size: 12.5px; line-height: 1.5; color: var(--text-2); }

@@ -151,7 +151,7 @@ MINI = {
     "npcs": {"residents": [{"id": "CAR-NPC-001", "name": "Adeline Winter", "provenance": "canon_expanded", "canon_appearance": True,
                             "at_start": {"status": "alive"}, "camp_role": "Camp leader", "usual_location": "Dyer's Lodge",
                             "relationships": [{"with": "CAR-NPC-003", "type": "camp_leadership", "visibility": "socially_discoverable", "basis": "canon"}],
-                            "gm_only": {"canonical_secret": "MINI-NPC-SECRET"}},
+                            "gm_only": {"canonical_secret": "MINI-NPC-SECRET", "adaptation_hook": "HOOK-NOVEMBER-13"}},
                            {"id": "CAR-NPC-003", "name": "Valerie Choi", "provenance": "original_adaptation", "canon_appearance": False,
                             "at_start": {"status": "alive"}, "camp_role": "Scout", "usual_location": "Dyer's Lodge",
                             "appearance": "Wiry, in a patched field jacket.", "personality": "Dry, watchful, quick to laugh.",

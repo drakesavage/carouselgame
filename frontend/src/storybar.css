@@ -31,3 +31,11 @@
 .deathwatch .storybar-head { flex-wrap: wrap; }
 .deathwatch form .input { flex: 1; min-width: 160px; }
 .storybar-cast.error { color: var(--red); }
+
+/* AroundPanel: met residents where the group stands, each with a Talk button */
+.aroundpanel .storybar-title svg { vertical-align: -2px; }
+.aroundpanel-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; }
+.aroundpanel-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.aroundpanel-name { font-weight: 600; font-size: 13px; }
+.aroundpanel-role { font-size: 12px; color: var(--muted); flex: 1 1 140px; min-width: 0; }
+.aroundpanel-list .btn { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }

@@ -247,8 +247,9 @@ def where(conn: sqlite3.Connection, cid: int, character_id: int) -> dict | None:
 
 
 def around(conn: sqlite3.Connection, cid: int) -> list[dict]:
-    """[{id, name, met, why}]: residents (met or not, never party members) whose where() is the group's place, and its zone
-    when the group is in a venue and the resident has one. Met first, then by name."""
+    """[{id, name, met, why}]: residents (met or not, never party members) where the group is. When both the group and the
+    resident stand in a venue zone the zone decides (one venue can hold several places: the Town Square and the Diner are
+    SM-001); otherwise the resident's place must be the group's. Met first, then by name."""
     node, zone = _group_position(conn, cid)
     if not node:
         return []
@@ -256,7 +257,7 @@ def around(conn: sqlite3.Connection, cid: int) -> list[dict]:
     for r in rows(conn, """SELECT c.id, c.name, p.met FROM characters c JOIN npc_profiles p ON p.character_id = c.id
                            WHERE c.campaign_id = ? AND p.ref_id IS NOT NULL AND c.in_party = 0 ORDER BY p.met DESC, c.name""", (cid,)):
         w = where(conn, cid, r["id"])
-        if w and w["place_id"] == node and (not zone or not w["zone_id"] or w["zone_id"] == zone):
+        if w and (w["zone_id"] == zone if zone and w["zone_id"] else w["place_id"] == node):
             out.append({"id": r["id"], "name": r["name"], "met": bool(r["met"]), "why": w["why"]})
     return out
 

@@ -140,6 +140,9 @@ export type StoryHistory = { id: number; title: string; ending: string; started_
   novelty: number | null; cast: string[] };
 export type PlayerVenue = { venue_id: string; title: string; zone: { id: string; label: string };
   ways: { id: string; label: string; blocked: string | null }[]; seen: { id: string; label: string }[]; entry: string; exit: string };
+/** Camp Dyer residents the group has met (resident_api.py): never an unmet resident, a hook or a GM note. */
+export type AroundResident = { id: number; name: string; role: string | null };
+export type LodgeResident = AroundResident & { last_seen: string | null; in_party: boolean; known: string[] };
 export type TravelResult = { summary: string; arrived: string; interrupted: { omen_id: string; description: string } | null; minutes: number; geometry_px: [number, number][] };
 export type Manifest = { locations: Record<string, string>; characters: Record<string, string> };
 export type DiagnosticsRow = { turn_id: number; status: string; input: string; created_at: string; rounds: number; flags: number; input_tokens: number };
@@ -227,6 +230,10 @@ export const api = {
   venue: (id: number) => req<PlayerVenue | null>(`api/campaigns/${id}/venue`),
   venueMove: (id: number, to: string, key: string) =>
     post<{ move: { summary: string; zone_id: string; sighted: string[] }; turn: TurnStatus }>(`api/campaigns/${id}/venue/move`, { to, idempotency_key: key }),
+  around: (id: number) => req<AroundResident[]>(`api/campaigns/${id}/around`),
+  residents: (id: number) => req<LodgeResident[]>(`api/campaigns/${id}/residents`),
+  talkResident: (id: number, charId: number, key: string) =>
+    post<{ turn: TurnStatus }>(`api/campaigns/${id}/residents/${charId}/talk`, { idempotency_key: key }),
   journal: (id: number) => req<{ kinds: { id: string; label: string }[]; quests: JournalQuest[] }>(`api/campaigns/${id}/journal`),
   loreNotebook: (id: number) => req<LoreFact[]>(`api/campaigns/${id}/lore-notebook`),
   chronology: (id: number) => req<Chronology>(`api/campaigns/${id}/chronology`),

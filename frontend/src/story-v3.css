@@ -4,7 +4,11 @@
 .banner .narrow-only, .narrow-only { display: none; }
 
 /* ---------- layout: scene header pinned, transcript scrolls, composer anchored ---------- */
-.story-col { position: relative; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 10px; }
+/* a column, not a grid: the bars above the transcript come and go (opening, deathwatch, story, venue, around), and only the
+   transcript may shrink and scroll */
+.story-col { position: relative; display: flex; flex-direction: column; gap: 10px; }
+.story-col > * { flex: none; }
+.story-col > .transcript { flex: 1 1 0; min-height: 0; }
 .transcript { scroll-behavior: auto; padding-top: 4px; }
 .transcript-inner { max-width: 760px; gap: 16px; }
 .earlier { align-self: center; }

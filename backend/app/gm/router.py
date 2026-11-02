@@ -65,7 +65,8 @@ SERVER_TURN_ROUTES = {"arrival": ("talk", "a quiet arrival (the move is already 
                       "arrival_omen": ("action", "an Omen interrupted the walk"),
                       "opening": ("action", "the opening sets the lure and the cast"),
                       "zone": ("talk", "a quiet move inside a venue"),
-                      "zone_omen": ("action", "an Omen in this room")}
+                      "zone_omen": ("action", "an Omen in this room"),
+                      "talk_resident": ("talk", "the player walks over to a resident")}
 
 
 def classify_turn(text: str, story_active: bool, absent: set[str] | frozenset = frozenset(), turn_kind: str | None = None) -> tuple[str, str]:
