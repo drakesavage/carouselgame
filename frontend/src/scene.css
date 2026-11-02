@@ -1,0 +1,97 @@
+/* The scene (views/Story.tsx, Hud.tsx, SceneRail.tsx): camera line, Plot Cycle, establishing shot, the On Screen frame,
+   the cast tiles and the right rail. The camera state is read from <html data-camera>, which App.tsx sets from the engine. */
+
+/* ------------------------------------------------------------------ camera line */
+.camera-line { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fog); padding: 2px 2px 0; }
+.camera-line b { font: 600 11px/1 var(--body); letter-spacing: 0.16em; color: var(--text-2); }
+.camera-line.off svg { color: var(--brass); }
+.camera-line.on b { color: #E58C93; }
+.camera-line .rec {
+  display: inline-flex; align-items: center; gap: 5px; font: 600 10.5px/1 var(--body); letter-spacing: 0.14em;
+  color: var(--parchment); background: var(--oxblood); border: 1px solid var(--blood); padding: 3px 7px; border-radius: var(--radius);
+}
+.camera-line .rec i { width: 7px; height: 7px; border-radius: 50%; background: var(--blood); box-shadow: 0 0 8px var(--blood); }
+
+/* ------------------------------------------------------------------ the On Screen frame: viewfinder corners, a red rule */
+.story-col { transition: background-color 450ms ease, box-shadow 450ms ease; border-radius: var(--radius); }
+.viewfinder { position: absolute; inset: -6px; pointer-events: none; opacity: 0; transition: opacity 450ms ease; z-index: 2; }
+.viewfinder i { position: absolute; width: 18px; height: 18px; border: 0 solid var(--blood); }
+.viewfinder i:nth-child(1) { top: 0; left: 0; border-width: 2px 0 0 2px; }
+.viewfinder i:nth-child(2) { top: 0; right: 0; border-width: 2px 2px 0 0; }
+.viewfinder i:nth-child(3) { bottom: 0; left: 0; border-width: 0 0 2px 2px; }
+.viewfinder i:nth-child(4) { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
+:root[data-camera="on"] .viewfinder { opacity: 1; }
+:root[data-camera="on"] .story-col { background-color: rgba(var(--blood-rgb), 0.025); }
+:root[data-camera="on"] .establishing { border-color: rgba(var(--blood-rgb), 0.7); }
+
+/* ------------------------------------------------------------------ establishing shot: a 16:9 frame */
+.establishing {
+  position: relative; margin: 0; aspect-ratio: 16 / 9; max-height: 30vh; width: 100%; overflow: hidden;
+  border: 1px solid var(--line-2); border-radius: var(--radius); background: #0B0B0E; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  transition: border-color 450ms ease;
+}
+.establishing-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.projection { /* no art: a dark projection card with the place name */
+  position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 0 24px;
+  background: radial-gradient(60% 70% at 50% 45%, rgba(var(--brass-rgb), 0.10), transparent 70%), #0B0B0E;
+}
+.projection span { font-family: var(--display); font-size: clamp(22px, 3vw, 34px); letter-spacing: 0.06em; color: rgba(232, 222, 207, 0.55); }
+.establishing-shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(14, 14, 18, 0.65), transparent 40%, transparent 60%, rgba(14, 14, 18, 0.8)); }
+.establishing-body { position: absolute; left: 14px; right: 14px; top: 10px; display: grid; gap: 4px; justify-items: start; }
+.establishing-kicker {
+  font: 600 10px/1 var(--body); letter-spacing: 0.16em; text-transform: uppercase; color: var(--brass);
+  border: 1px solid rgba(var(--brass-rgb), 0.4); background: rgba(14, 14, 18, 0.6); padding: 4px 7px; border-radius: var(--radius);
+}
+.establishing-title { font-family: var(--display); font-size: 22px; color: var(--parchment); text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9); display: flex; gap: 6px; align-items: center; }
+.establishing-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.safe-badge { font: 600 10px/1 var(--body); letter-spacing: 0.14em; text-transform: uppercase; color: var(--sage); border: 1px solid rgba(var(--hp-rgb), 0.5); background: rgba(14, 14, 18, 0.6); padding: 4px 7px; border-radius: var(--radius); }
+.establishing .banner-toggle { background: rgba(14, 14, 18, 0.6); border: 1px solid var(--line-2); color: var(--text-2); border-radius: var(--radius); font-size: 11.5px; padding: 2px 8px; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; }
+.establishing .banner-situation { background: rgba(14, 14, 18, 0.85); border: 1px solid var(--line-2); padding: 8px 10px; font-size: 13.5px; max-width: 60ch; border-radius: var(--radius); }
+.establishing.open { max-height: none; }
+.establishing-caption {
+  position: absolute; left: 14px; bottom: 9px; font: 600 10.5px/1 var(--body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-2);
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.establishing-caption svg { color: var(--brass); }
+
+/* ------------------------------------------------------------------ the cast */
+.portrait-initial {
+  display: grid; place-items: center; background: var(--parchment); color: var(--oxblood);
+  font-family: var(--display); font-weight: 600; line-height: 1; border-radius: var(--radius);
+}
+.tile-head { grid-template-columns: auto minmax(0, 1fr); gap: 11px; }
+.tile .pa { font: 600 11px/1 var(--body); letter-spacing: 0.06em; color: var(--brass); font-variant-numeric: tabular-nums; }
+.tile .pclass { font-size: 12px; color: var(--fog); }
+.tile .pfate { font-size: 11.5px; color: #E58C93; margin-top: 2px; }
+.role { font: 600 9.5px/1.4 var(--body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--fog); border: 1px solid var(--line-2); padding: 1px 5px; }
+.role.cyan { color: var(--brass); border-color: rgba(var(--brass-rgb), 0.5); }
+.roster-divider, .roster-label { font: 600 10.5px/1.2 var(--body); letter-spacing: 0.16em; text-transform: uppercase; color: var(--brass); }
+
+/* ------------------------------------------------------------------ the right rail */
+.feature-card {
+  position: relative; text-align: center; padding: 22px 18px 20px; border-radius: var(--radius);
+  border: 1px solid rgba(var(--brass-rgb), 0.45); background: radial-gradient(120% 80% at 50% 0%, rgba(var(--blood-rgb), 0.18), transparent 60%), #15121A;
+  box-shadow: inset 0 0 0 4px #15121A, inset 0 0 0 5px rgba(var(--brass-rgb), 0.25);
+}
+.feature-kicker { font: 600 10px/1 var(--body); letter-spacing: 0.22em; text-transform: uppercase; color: var(--brass); }
+.feature-title { font-family: var(--display); font-weight: 600; font-size: 28px; line-height: 1.05; letter-spacing: 0.04em; color: var(--parchment); margin: 10px 0 8px; }
+.feature-title.unknown { text-transform: uppercase; color: #E58C93; font-size: 26px; }
+.feature-premise { font: italic 15px/1.45 var(--story); color: var(--text-2); margin: 0; }
+.feature-cast { list-style: none; margin: 12px 0 0; padding: 10px 0 0; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--text-2); display: grid; gap: 3px; }
+.feature-cast span { color: var(--parchment); }
+.feature-cast i { color: var(--fog); }
+.rail-section { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 10px 12px; }
+.rail-head { font: 600 10.5px/1.2 var(--body); letter-spacing: 0.16em; text-transform: uppercase; color: var(--brass); margin: 0 0 8px; }
+.notes { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; font-size: 13px; }
+.notes dt { color: var(--fog); }
+.notes dd { margin: 0; text-align: right; color: var(--parchment); min-width: 0; overflow-wrap: anywhere; }
+.notes dd.rec { color: #E58C93; }
+.revisions { margin: 0; padding-left: 16px; font-size: 13px; color: var(--text-2); display: grid; gap: 4px; }
+.rail-link { align-self: flex-end; font: 600 11px/1 var(--body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--brass); background: none; border: 0; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; padding: 6px 0; }
+
+/* ------------------------------------------------------------------ working line */
+.working .stage { font-size: 11px; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .story-col, :root:not([data-motion="full"]) .viewfinder, :root:not([data-motion="full"]) .establishing { transition: none; }
+}

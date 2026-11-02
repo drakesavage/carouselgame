@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowDown, BookOpen, ChevronRight, Cog, Dices, Eye, Footprints, Hand, Hourglass, MessageSquare, RotateCcw, Send, Shield, ShieldCheck, Sparkles, Swords, Tent, Users } from "lucide-react";
-import { api, ApiError, Campaign, CharacterCard, Message, newKey, RollCard, TurnStatus } from "../api";
+import { AlertTriangle, ArrowDown, BookOpen, ChevronRight, Clapperboard, Eye, Film, Info, MessageSquare, RotateCcw, Send, Sparkles, Tent, Users } from "lucide-react";
+import { ActiveStory, api, ApiError, Campaign, CharacterCard, Message, newKey, TurnStatus } from "../api";
 import { Chip, Empty, Markdown, Portrait } from "../ui";
-import { play } from "../prefs";
 import { ReportButton } from "./Report";
 import { StoryBar } from "./StoryBar";
 import { VenuePanel } from "./VenuePanel";
@@ -10,30 +9,20 @@ import { AroundPanel } from "./AroundPanel";
 import { OpeningBar } from "./OpeningBar";
 import { DeathwatchBar } from "./DeathwatchBar";
 import { startOpening } from "./Campaigns";
-import { CampaignSidebar, CombatPanel, Decision, DiscoveryCards, IMPORTANT_CARDS, portraitSrc, RosterPanel, SceneBanner, splitDecision, StoryText, useManifest } from "./Hud";
+import { SceneRail } from "./SceneRail";
+import { Decision, DiscoveryCards, IMPORTANT_CARDS, portraitSrc, RosterPanel, SceneBanner, splitDecision, StoryText, useManifest } from "./Hud";
+import "../scene.css";
 
-const QUIPS = [
-  "Consulting the Showrunner…", "Calculating maximum humiliation…", "Negotiating with sponsors…", "Rolling actual dice. No, really.",
-  "Reviewing your poor life choices…", "Buffering dramatic tension…", "Auditing your inventory for sins…", "Asking the NPCs how they feel…",
-  "Checking the rulebook so you can't…", "Rendering consequences…",
-];
 const STAGES = ["loading", "gm_thinking", "resolving", "saving"];
-const STAGE_LABEL: Record<string, string> = { loading: "load state", gm_thinking: "GM thinking", resolving: "tools & dice", saving: "persist" };
+const STAGE_LABEL: Record<string, string> = { loading: "load state", gm_thinking: "GM thinking", resolving: "rules", saving: "persist" };
 
-const RECAP_PROMPT = "Give me a \"Previously on Dungeon Crawler Carl\" recap from the campaign records to re-baseline us, then set the current scene with where everyone is and what decision is in front of me. (Recap/orientation only — not a substantive decision.)";
+const RECAP_PROMPT = "Give me a \"Previously on Carousel\" recap from the campaign records to re-baseline us, then set the current scene with where everyone is and what decision is in front of me. (Recap/orientation only — not a substantive decision.)";
 const QUICK = [
   { icon: Eye, label: "Look around", text: "I take a careful look around. " },
   { icon: MessageSquare, label: "Talk to…", text: "I talk to " },
-  { icon: Users, label: "Party check-in", text: "I check in with the party — how is everyone doing? " },
-  { icon: Tent, label: "Rest", text: "We rest here for " },
-  { icon: BookOpen, label: "Rules question", text: "Rules question (no in-world action): " },
-];
-const COMBAT_QUICK = [
-  { icon: Shield, label: "Evade", text: "I spend an Action to Evade. " },
-  { icon: Swords, label: "Attack…", text: "I attack " },
-  { icon: Hand, label: "Help / Intervene", text: "I spend an Action to help " },
-  { icon: Footprints, label: "Move", text: "I move " },
-  { icon: BookOpen, label: "Rules question", text: "Rules question (no in-world action): " },
+  { icon: Users, label: "Check in with the group", text: "I check in with the group — how is everyone doing? " },
+  { icon: Tent, label: "Rest at camp", text: "We rest here at camp for ", safeOnly: true },
+  { icon: BookOpen, label: "Ask about the rules", text: "Rules question (no in-world action): " },
 ];
 
 type Pending = { key: string; text: string; turnId?: number; status: "sending" | "processing" | "failed"; progress?: TurnStatus["progress"]; error?: string; unreachable?: boolean };
@@ -42,15 +31,14 @@ const unreachable = (e: unknown) => (e instanceof ApiError && [502, 503, 504].in
 
 const PAGE = 80;  // the server's default page of messages
 
-export function StoryView({ campaign, onState, onNotices, openCharacter, openQuest, openSaves }: {
-  campaign: Campaign; onState: () => void; onNotices: (n: { text: string; style: string }[]) => void; openCharacter: (id: number) => void;
-  openQuest: (id?: number) => void; openSaves?: () => void;
+export function StoryView({ campaign, story, onState, onNotices, openCharacter, openSaves, openBehindTheScenes }: {
+  campaign: Campaign; story: ActiveStory | null; onState: () => void; onNotices: (n: { text: string; style: string }[]) => void;
+  openCharacter: (id: number) => void; openSaves?: () => void; openBehindTheScenes?: () => void;
 }) {
   const cid = campaign.id;
   const [messages, setMessages] = useState<Message[] | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [draft, setDraft] = useState(() => { try { return localStorage.getItem(`draft:${cid}`) ?? ""; } catch { return ""; } });
-  const [quip, setQuip] = useState(QUIPS[0]);
   const scroller = useRef<HTMLDivElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const pc = campaign.roster.find((p) => p.id === campaign.active_character_id) ?? campaign.party.find((p) => p.id === campaign.active_character_id);
@@ -113,12 +101,6 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
   }, [opening, cid]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (pending?.status !== "processing") return;
-    const q = setInterval(() => setQuip(QUIPS[Math.floor(Math.random() * QUIPS.length)]), 3500);
-    return () => clearInterval(q);
-  }, [pending?.status]);
-
-  useEffect(() => {
     if (pending?.status !== "processing" || !pending.turnId) return;
     let alive = true;
     const tick = async () => {
@@ -148,8 +130,7 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
     setPending(null);
     onState();
     const gm = [...fresh].reverse().find((m) => m.role === "gm" && m.turn_id === t.turn_id);
-    if (gm?.meta.rolls?.length) play("dice");
-    const moments = broadcastMoments(t.result?.notices ?? [], gm?.meta.cards ?? [], gm?.meta.rolls ?? []);
+    const moments = turnMoments(t.result?.notices ?? [], gm?.meta.cards ?? []);
     if (moments.length) onNotices(moments);
   };
 
@@ -176,27 +157,28 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
   };
   const busy = !!pending && pending.status !== "failed";
   const lastGm = messages ? [...messages].reverse().find((x) => x.role === "gm")?.id : undefined;
+  const first = pc?.name.split(" ")[0];
   return (
     <div className="story-layout">
-      <aside className="side left">
+      <aside className="side left" aria-label="Cast">
         <RosterPanel campaign={campaign} openCharacter={openCharacter} />
-        {campaign.encounter && <div className="combat-left"><CombatPanel enc={campaign.encounter} campaign={campaign} onArt={onState} /></div>}
       </aside>
       <div className="story-col">
+        <div className="viewfinder" aria-hidden><i /><i /><i /><i /></div>
+        {story && <CameraLine camera={story.camera} />}
+        <StoryBar story={story} />
         <SceneBanner campaign={campaign} onArt={onState} openCharacter={openCharacter} />
         <OpeningBar campaign={campaign} />
         <DeathwatchBar campaign={campaign} onChanged={onState} openSaves={openSaves} />
-        <StoryBar cid={cid} version={campaign} />
         <VenuePanel cid={cid} version={campaign} onTurn={serverTurn} />
         <AroundPanel cid={cid} version={campaign} onTurn={serverTurn} />
-        <div className="combat-top">{campaign.encounter && <CombatPanel enc={campaign.encounter} campaign={campaign} onArt={onState} />}</div>
         <div className="transcript" ref={scroller} onScroll={onScroll} role="log" aria-label="Story transcript">
           <div className="transcript-inner">
             {more && <button className="btn small ghost earlier" onClick={earlier}>Load earlier messages</button>}
             {messages === null ? <div className="muted">Loading transcript…</div> : messages.length === 0 && !pending ? (
               <Empty>
-                <div className="h2" style={{ marginTop: 0 }}>No play recorded in this console yet</div>
-                <p>Start with a recap of where the campaign left off, or just say what {pc?.name.split(" ")[0] ?? "you"} does.</p>
+                <div className="h2" style={{ marginTop: 0 }}>Nothing has happened yet</div>
+                <p>Start with a recap of where the campaign left off, or just say what {first ? `${first} does` : "you do"}.</p>
                 <button className="btn primary" onClick={() => send(RECAP_PROMPT)}><Sparkles size={15} /> Previously on…</button>
               </Empty>
             ) : messages.map((m) => <MessageView key={m.id} cid={cid} m={m} pc={pc} roster={campaign.roster} fresh={!known.current?.has(m.id)} latest={m.id === lastGm && !pending} />)}
@@ -210,7 +192,7 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
                     <div className="mono" style={{ margin: "6px 0 10px", whiteSpace: "pre-wrap", fontSize: 12 }}>{pending.error}</div>
                     <div className="sub" style={{ marginBottom: 8 }}>{pending.unreachable
                       ? "Your turn never reached the game, so nothing happened. Check that the server is running on the game PC (start.cmd), then Retry."
-                      : "Nothing was applied to the game state. Dice already rolled stay in the audit log."}</div>
+                      : "Nothing was applied to the game state."}</div>
                     <div className="row">
                       {pending.text && <button className="btn" onClick={() => send(pending.text, pending.key)}><RotateCcw size={14} /> Retry</button>}
                       <button className="btn ghost" onClick={() => { setDraft(pending.text); setPending(null); textarea.current?.focus(); }}>Edit &amp; resend</button>
@@ -219,7 +201,7 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
                   </div>
                 ) : (
                   <div className="working">
-                    <div className="row"><Hourglass size={15} color="var(--cyan)" /><span className="quip">{quip}</span><span className="spacer" />
+                    <div className="row"><Film size={15} color="var(--brass)" aria-hidden /><span className="quip">The projector warms up…</span><span className="spacer" />
                       <span className="mono muted">{pending.progress ? `${Math.round(pending.progress.elapsed_s)}s` : ""}</span></div>
                     <div className="stages">
                       {STAGES.map((s) => {
@@ -237,16 +219,16 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
         </div>
         {unseen && <button className="btn small to-latest" onClick={toLatest}><ArrowDown size={13} /> New narration</button>}
         <div className="composer">
-          <textarea id="composer" ref={textarea} value={draft} onChange={(e) => setDraft(e.target.value)} disabled={busy}
+          <textarea id="composer" ref={textarea} value={draft} onChange={(e) => setDraft(e.target.value)} disabled={busy} aria-label="Your next move"
             placeholder={campaign.fate?.deathwatch ? "Ask for a cut, a pace, or a summary"
-              : `What does ${pc?.name.split(" ")[0] ?? "your crawler"} do? Describe actions, dialogue, plans — anything.`}
+              : `What does ${first ?? "your character"} do? Say anything.`}
             onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(draft); } }} />
           <div className="row wrap">
             <div className="quick">
               <button className="btn small" disabled={busy} onClick={() => send(RECAP_PROMPT)} title="Ask the GM for a recap and scene-setting"><Sparkles size={13} /> Previously on…</button>
-              {(campaign.encounter ? COMBAT_QUICK : QUICK).map((q) => (
+              {QUICK.filter((q) => !q.safeOnly || campaign.safe_room).map((q) => (
                 <button key={q.label} className="btn small ghost" disabled={busy} onClick={() => { setDraft((d) => (d ? d + " " : "") + q.text); textarea.current?.focus(); }}>
-                  <q.icon size={13} /> {q.label}
+                  <q.icon size={13} aria-hidden /> {q.label}
                 </button>
               ))}
             </div>
@@ -256,9 +238,16 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
           </div>
         </div>
       </div>
-      <aside className="side right" aria-label="Floor and objective"><CampaignSidebar campaign={campaign} onArt={onState} openQuest={openQuest} openCharacter={openCharacter} /></aside>
+      <aside className="side right" aria-label="Production"><SceneRail campaign={campaign} story={story} onArt={onState} openBehindTheScenes={openBehindTheScenes} /></aside>
     </div>
   );
+}
+
+/** The camera line over the story: the camera is away, or rolling. Only shown while a story runs (story_api camera). */
+function CameraLine({ camera }: { camera: "on" | "off" }) {
+  return camera === "on"
+    ? <div className="camera-line on"><span className="rec"><i aria-hidden /> REC</span><b>ON SCREEN</b> — The camera is rolling.</div>
+    : <div className="camera-line off"><Clapperboard size={13} aria-hidden /><b>OFF SCREEN</b> — The camera is away.</div>;
 }
 
 function PlayerLine({ pc, text }: { pc?: CharacterCard; text: string }) {
@@ -282,28 +271,24 @@ function MessageView({ cid, m, pc, roster, fresh, latest }: { cid: number; m: Me
       {meta.provider === "mock" && <div className="msg-label"><Chip tone="amber">mock GM</Chip></div>}
       <StoryText text={body} roster={roster} />
       <DiscoveryCards cards={meta.cards ?? []} />
-      <Mechanics meta={meta} open={fresh && !!meta.rolls?.length} />
+      <BehindTheScenes meta={meta} />
       <div className="msg-tools"><ReportButton cid={cid} turnId={m.turn_id} /></div>
       {ask && <Decision text={ask} />}
     </div>
   );
 }
 
-/** Mechanics, separate from the story: roll results at a glance in the summary, the workings one click away. */
-function Mechanics({ meta, open }: { meta: Message["meta"]; open: boolean }) {
-  const rolls = meta.rolls ?? [], changes = meta.changes ?? [], rules = meta.rules_cited ?? [];
-  if (!rolls.length && !changes.length && !rules.length) return null;
+/** Behind the Scenes: the state changes and rules consulted for this turn, closed by default and never part of the story. */
+function BehindTheScenes({ meta }: { meta: Message["meta"] }) {
+  const changes = meta.changes ?? [], rules = meta.rules_cited ?? [];
+  if (!changes.length && !rules.length) return null;
   const count = [changes.length && `${changes.length} change${changes.length > 1 ? "s" : ""}`, rules.length && `${rules.length} rule${rules.length > 1 ? "s" : ""}`].filter(Boolean).join(" · ");
   return (
-    <details className="mechanics" open={open}>
+    <details className="mechanics">
       <summary>
-        <ChevronRight size={12} className="caret" /><Cog size={11} /> <span className="mechanics-title">Mechanics</span>
-        {rolls.map((r) => <RollPill key={r.roll_id} r={r} />)}
+        <ChevronRight size={12} className="caret" aria-hidden /> <span className="mechanics-title">Behind the Scenes</span>
         {count && <span className="mech-count">{count}</span>}
-        <span className="spacer" />
-        {meta.floor_clock?.remaining_display && <span className="clock-stamp" title="Floor clock after this turn">{meta.floor_clock.remaining_display}</span>}
       </summary>
-      {!!rolls.length && <div className="rolls">{rolls.map((r) => <RollView key={r.roll_id} r={r} />)}</div>}
       {!!changes.length && (
         <div className="ledger">
           <div className="mechanics-sub">State changes</div>
@@ -313,84 +298,28 @@ function Mechanics({ meta, open }: { meta: Message["meta"]; open: boolean }) {
       {!!rules.length && (
         <div className="ledger">
           <div className="mechanics-sub">Rules consulted</div>
-          <div className="chips">{rules.map((r) => <CitedRule key={r} cite={r} />)}</div>
+          <div className="chips">{rules.map((r) => <span key={r} className="chip cite-btn"><BookOpen size={11} aria-hidden /> {r}</span>)}</div>
         </div>
       )}
     </details>
   );
 }
 
-/** A rule the GM consulted this turn: opens that rulebook page in the local page viewer. */
-function CitedRule({ cite }: { cite: string }) {
-  return <span className="chip violet cite-btn"><BookOpen size={11} /> {cite}</span>;
-}
-
-/**
- * What a finished turn puts on stage (views/Announce.tsx): the System's own notices first (a greeting from Borant is a
- * broadcast), then achievements, level-ups, loot reveals, deaths and collapses from the records, and a natural 1.
- * An achievement the System already announced in its own words is not announced twice from the record.
- */
-const BORANT = /^\W*(hello|welcome|attention|good (morning|evening))\b.*crawlers|^\W*admin notice/i;
-function broadcastMoments(notices: { text: string; style: string }[], cards: { type: string; summary: string }[], rolls: RollCard[]) {
-  const said = notices.some((n) => n.style === "achievement");
+/** What a finished turn puts up as a toast or a title card: the turn's own notices, then deaths and resolved leads from the records. */
+function turnMoments(notices: { text: string; style: string }[], cards: { type: string; summary: string }[]) {
   return [
-    ...notices.map((n) => ({ text: n.text, style: n.style === "notice" && BORANT.test(n.text) ? "broadcast" : n.style })),
-    ...cards.filter((c) => IMPORTANT_CARDS.has(c.type) && !(c.type === "achievement" && said))
-      .map((c) => ({ text: c.summary, style: c.type === "level_awarded" ? "levelup" : /down|death|collapse/.test(c.type) ? "warning" : "achievement" })),
-    ...cards.filter((c) => c.type === "box_opened").map((c) => ({ text: c.summary, style: "loot" })),
-    ...rolls.filter((r) => natural(r) === "nat1").slice(0, 1)
-      .map((r) => ({ text: `${r.reason ? `**${r.reason}**: ` : ""}a natural 1. The Dungeon noticed.`, style: "critfail" })),
+    ...notices.map((n) => ({ text: n.text, style: n.style === "warning" ? "warning" : "notice" })),
+    ...cards.filter((c) => IMPORTANT_CARDS.has(c.type)).map((c) => ({ text: c.summary, style: /down|death/.test(c.type) ? "warning" : "notice" })),
   ];
 }
 
-const CHECK_KINDS = new Set(["skill_check", "stat_check", "attack", "evade"]);
-const natural = (r: RollCard) => (CHECK_KINDS.has(r.detail?.kind) ? (r.detail?.natural === 20 ? "nat20" : r.detail?.natural === 1 ? "nat1" : "") : "");
-
-function RollPill({ r }: { r: RollCard }) {
-  const d = r.detail ?? {};
-  const who = d.character ? String(d.character).split(" ")[0] + " " : "";
-  const what = d.skill ?? d.stat ?? r.reason ?? "roll";
-  return (
-    <span className={`roll-pill ${r.outcome ?? ""} ${natural(r)}`} title={d.summary ?? `${who}${what}: ${r.total}`}>
-      <b>{r.total}</b> {who}{String(what).slice(0, 22)}{r.degree || r.outcome ? <i> · {r.degree ?? r.outcome}</i> : null}
-    </span>
-  );
-}
-
+/** A notice in the transcript or a toast: a small title card labelled NOTICE or WARNING. */
 export function SystemNotice({ text, style }: { text: string; style?: string }) {
-  const head = style === "achievement" ? "NEW ACHIEVEMENT" : style === "warning" ? "SYSTEM WARNING" : style === "tooltip" ? "SYSTEM TOOLTIP" : "SYSTEM NOTIFICATION";
+  const warning = style === "warning";
   return (
-    <div className={`sys ${style ?? ""}`}>
-      <div className="sys-head glitch"><ShieldCheck size={14} />{head}</div>
+    <div className={`sys ${warning ? "warning" : "notice"}`}>
+      <div className="sys-head">{warning ? <AlertTriangle size={13} aria-hidden /> : <Info size={13} aria-hidden />}{warning ? "WARNING" : "NOTICE"}</div>
       <Markdown text={text} />
     </div>
-  );
-}
-
-function RollView({ r }: { r: RollCard }) {
-  const d = r.detail ?? {};
-  const nat = natural(r);
-  const cls = `${nat ? "crit " + nat : ""} ${r.outcome ?? ""}`;
-  const line = d.summary ?? `${d.character ? d.character + " — " : ""}${r.reason ?? "Roll"}: ${r.expression} = ${r.total}${r.target != null ? ` vs ${r.target}` : ""}`;
-  return (
-    <details className={`roll ${cls}`}>
-      <summary>
-        <span className="d20">{d.natural ?? r.total}</span>
-        <span className="roll-line">{line}</span>
-        {(r.degree || r.outcome) && <span className="degree">{r.degree ?? r.outcome}</span>}
-        <Dices size={14} color="var(--muted)" />
-      </summary>
-      <div className="roll-detail">
-        <div className="dice">{r.dice.map((x, i) => <span key={i} className={`die ${x.kept ? "" : "dropped"}`} title={`d${x.sides}`}>{x.value}<span className="muted">/d{x.sides}</span></span>)}</div>
-        {d.kind === "skill_check" || d.kind === "stat_check" ? (
-          <div>
-            {d.skill ? `${d.skill} Rank ${d.rank}${d.untrained ? " (untrained → Disadvantage)" : ""}` : "Stat Check"} · {String(d.stat).slice(0, 3).toUpperCase()} {d.stat_mod >= 0 ? "+" : ""}{d.stat_mod}
-            {d.advantage !== "none" ? ` · ${d.advantage}` : ""}{d.modifiers?.map((m: any) => ` · ${m.source} ${m.value >= 0 ? "+" : ""}${m.value}`)}
-            {d.help?.map((h: any) => ` · ${h.helper} Help ${h.value} (${h.dice})`)} · DC {d.dc}
-          </div>
-        ) : null}
-        <div>Expression {r.expression} · total {r.total}{r.target != null ? ` · target ${r.target}` : ""} · roll #{r.roll_id} · OS CSPRNG</div>
-      </div>
-    </details>
   );
 }

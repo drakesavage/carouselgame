@@ -1,13 +1,10 @@
 import { createContext, ReactNode, useContext, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import {
-  AlertTriangle, ArrowUpCircle, Award, Backpack, Bookmark, ChevronDown, ChevronRight, Clock3, Flag, Footprints, Hammer, Handshake,
-  MapPin, Skull, Sparkles, Sun, Swords, TrendingUp, Trophy, Wrench, Zap,
-} from "lucide-react";
-import { Campaign, CharacterCard, Encounter, fmtMinutes, Group, Manifest, Quest } from "../api";
+import { AlertTriangle, ChevronDown, ChevronRight, Flag, Footprints, MapPin, Skull, Sparkles, TrendingUp, Award } from "lucide-react";
+import { Campaign, CharacterCard, Group, Manifest } from "../api";
 import { Chip, humanize, Panel, placeKey, Portrait, sized } from "../ui";
-import { ArtButton, ArtQueue } from "./Art";
+import { ArtButton } from "./Art";
 
 // ------------------------------------------------------------------ local artwork
 export const ManifestContext = createContext<Manifest>({ locations: {}, characters: {} });
@@ -29,7 +26,7 @@ export function locationArtFor(campaign: Campaign, location?: string | null): st
   return null;
 }
 
-/** Uploaded portrait first, then manifest art (data/assets), else the generated placeholder. */
+/** Uploaded portrait first, then manifest art (data/assets), else the parchment initial. */
 export function portraitSrc(c: CharacterCard | undefined, m: Manifest): string | null {
   if (!c) return null;
   if (c.portrait_path) return `media/portraits/${encodeURIComponent(c.portrait_path)}`;
@@ -40,38 +37,6 @@ function hash(s: string) {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
   return h >>> 0;
-}
-
-/** Generated skyline banner when no local art exists for a location. */
-function BannerArt({ seed }: { seed: string }) {
-  const h = hash(seed);
-  const hue = h % 360;
-  const towers = Array.from({ length: 18 }, (_, i) => {
-    const r = (h >> (i % 24)) & 0xff;
-    const w = 30 + (r % 40);
-    const height = 30 + ((r * 7) % 90);
-    return { x: i * 56 + (r % 20), w, height };
-  });
-  return (
-    <svg className="banner-art" viewBox="0 0 1000 160" preserveAspectRatio="xMidYMid slice" aria-hidden>
-      <defs>
-        <linearGradient id={`sky${h}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor={`hsl(${hue} 55% 14%)`} />
-          <stop offset="1" stopColor={`hsl(${(hue + 40) % 360} 60% 5%)`} />
-        </linearGradient>
-      </defs>
-      <rect width="1000" height="160" fill={`url(#sky${h})`} />
-      <circle cx={120 + (h % 700)} cy="46" r="26" fill={`hsl(${(hue + 180) % 360} 90% 70% / 0.18)`} />
-      {towers.map((t, i) => (
-        <g key={i}>
-          <rect x={t.x} y={160 - t.height} width={t.w} height={t.height} fill={`hsl(${hue} 40% ${8 + (i % 4)}%)`} />
-          {Array.from({ length: Math.floor(t.height / 18) }, (_, j) => (
-            <rect key={j} x={t.x + 6} y={166 - t.height + j * 18} width={t.w - 12} height="3" fill={`hsl(${(hue + 160) % 360} 90% 65% / ${(i + j) % 3 === 0 ? 0.35 : 0.08})`} />
-          ))}
-        </g>
-      ))}
-    </svg>
-  );
 }
 
 function sameplace(a?: string | null, b?: string | null) {
@@ -86,29 +51,30 @@ export function pcGroup(campaign: Campaign) {
   return campaign.groups.find((g) => g.key === key) ?? null;
 }
 
-/** Compact scene header pinned above the transcript: where, what, who is here. */
+/** The establishing shot over the transcript: a 16:9 frame captioned with the place and the time. Missing art shows a
+ * dark projection card with the place name, never a blank box. */
 export function SceneBanner({ campaign, onArt, openCharacter }: { campaign: Campaign; onArt?: () => void; openCharacter?: (id: number) => void }) {
   const m = useManifest();
   const [open, setOpen] = useState(false);
   const s = campaign.scene;
-  // this scene's own picture, else the place's (reused for every scene there), else local assets, else a generated skyline
+  // this scene's own picture, else the place's (reused for every scene there), else local assets
   const art = (s && campaign.art?.scene[String(s.id)]) || locationArtFor(campaign, s?.location ?? campaign.current_location)
     || locationArt(m, s?.location, s?.title, campaign.current_location);
   const here = pcGroup(campaign);
   const others = (here?.members ?? []).filter((c) => c.id !== campaign.active_character_id);
   const safe = campaign.safe_room && sameplace(s?.location, campaign.current_location);
-  const now = campaign.active_objective ?? campaign.quests.find((q) => q.immediate)?.title;
+  const place = s?.location ?? campaign.current_location ?? "Somewhere in Carousel";
+  const clock = campaign.clock;
   return (
-    <header className={`banner ${open ? "open" : ""}`} aria-label="Current scene">
-      {art ? <img className="banner-art" src={sized(art, 1024)!} alt="" /> : <BannerArt seed={s?.location ?? campaign.current_location ?? campaign.name} />}
-      <div className="banner-shade" />
-      <div className="banner-body">
-        <div className="banner-kicker">
-          <MapPin size={12} /> {s?.location ?? campaign.current_location ?? "Unknown location"}
-          <span className={`safety ${safe ? "safe" : "exposed"}`}>{safe ? "saferoom" : "exposed"}</span>
-        </div>
-        <div className="banner-title">{s?.title ?? "No scene recorded"}{s && <span className="banner-paint"><ArtButton cid={campaign.id} kind="scene" subjectId={s.id} subjectName={s.title} label="" onChanged={onArt} /></span>}</div>
-        <div className="banner-meta">
+    <figure className={`establishing ${open ? "open" : ""}`} aria-label="Establishing shot">
+      {art ? <img className="establishing-art" src={sized(art, 1024)!} alt="" />
+        : <div className="projection" aria-hidden><span>{place}</span></div>}
+      <div className="establishing-shade" />
+      <div className="establishing-body">
+        <span className="establishing-kicker">Establishing shot</span>
+        {s?.title && <div className="establishing-title">{s.title}{<span className="banner-paint"><ArtButton cid={campaign.id} kind="scene" subjectId={s.id} subjectName={s.title} label="" onChanged={onArt} /></span>}</div>}
+        <div className="establishing-meta">
+          {safe ? <span className="safe-badge">Safe place</span> : null}
           {others.length > 0 && (
             <span className="banner-with" title={`With you: ${others.map((c) => c.name).join(", ")}`}>
               <span className="sr-only">With you:</span>
@@ -122,10 +88,10 @@ export function SceneBanner({ campaign, onArt, openCharacter }: { campaign: Camp
           )}
           {s?.situation && <button className="banner-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>Situation {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</button>}
         </div>
-        {now && <div className="banner-now narrow-only"><Flag size={11} /> {now}</div>}
         {open && s?.situation && <div className="banner-situation">{s.situation}</div>}
       </div>
-    </header>
+      <figcaption className="establishing-caption"><MapPin size={11} aria-hidden /> {place}{clock ? ` · Day ${clock.day}, ${clock.time}` : ""}</figcaption>
+    </figure>
   );
 }
 
@@ -153,9 +119,9 @@ export function splitDecision(text: string): [string, string | null] {
 }
 
 /**
- * Narration with visual-novel dialogue: a paragraph led by a bold "Name:" label is a spoken line when the rest opens
- * with a quotation ("**Nate:** “Together is good.”"), shown with the speaker's portrait and colour; "Erin, over HUD:"
- * names the channel. Any other bold label ("**Floor time:** …", "**Margit:** She accepted…") is a record line, not speech.
+ * Narration with dialogue: a paragraph led by a bold "Name:" label is a spoken line when the rest opens with a quotation
+ * ("**Mara:** “Together is good.”"), shown with the speaker's portrait and colour; "Jonah, on the phone:" names the
+ * channel. Any other bold label is a record line, not speech.
  */
 export function StoryText({ text, roster }: { text: string; roster: CharacterCard[] }) {
   const m = useManifest();
@@ -204,28 +170,18 @@ export function Decision({ text }: { text: string }) {
 
 // ------------------------------------------------------------------ discovery cards
 const CARD: Record<string, { icon: typeof Award; tone: string; label: string }> = {
-  item_added: { icon: Backpack, tone: "gold", label: "Loot" },
-  achievement: { icon: Trophy, tone: "gold", label: "New achievement" },
-  level_awarded: { icon: ArrowUpCircle, tone: "gold", label: "Level up" },
-  advancement_checkpoint: { icon: Sparkles, tone: "gold", label: "Advancement checkpoint" },
-  skill_changed: { icon: TrendingUp, tone: "cyan", label: "Skill" },
-  stats_allocated: { icon: TrendingUp, tone: "cyan", label: "Stats" },
-  ai_favor_changed: { icon: Zap, tone: "magenta", label: "AI Favor" },
-  quest_added: { icon: Flag, tone: "cyan", label: "New objective" },
-  quest_completed: { icon: Award, tone: "green", label: "Objective complete" },
-  quest_failed: { icon: Flag, tone: "red", label: "Objective failed" },
+  quest_added: { icon: Flag, tone: "", label: "New lead" },
+  quest_completed: { icon: Award, tone: "green", label: "Lead resolved" },
+  quest_failed: { icon: Flag, tone: "red", label: "Lead lost" },
+  stats_allocated: { icon: TrendingUp, tone: "", label: "Stats" },
   status_added: { icon: AlertTriangle, tone: "amber", label: "Condition" },
   character_down: { icon: Skull, tone: "red", label: "Down" },
   character_death: { icon: Skull, tone: "red", label: "Death" },
-  mob_defeated: { icon: Swords, tone: "magenta", label: "Defeated" },
-  encounter_start: { icon: Swords, tone: "red", label: "Combat" },
-  encounter_end: { icon: Swords, tone: "green", label: "Combat over" },
-  floor_collapse: { icon: Clock3, tone: "red", label: "Floor collapse" },
-  dungeon_day: { icon: Sun, tone: "amber", label: "New dungeon day" },
   group_moved: { icon: Footprints, tone: "", label: "On the move" },
   scene_started: { icon: MapPin, tone: "", label: "Scene" },
 };
-export const IMPORTANT_CARDS = new Set(["achievement", "level_awarded", "advancement_checkpoint", "character_down", "character_death", "floor_collapse", "quest_completed"]);
+/** Records worth a toast or a title card when a turn lands. */
+export const IMPORTANT_CARDS = new Set(["character_down", "character_death", "quest_completed"]);
 
 export function DiscoveryCards({ cards }: { cards: { type: string; summary: string }[] }) {
   if (!cards.length) return null;
@@ -245,31 +201,43 @@ export function DiscoveryCards({ cards }: { cards: { type: string; summary: stri
   );
 }
 
-// ------------------------------------------------------------------ roster grouped by assignment
+// ------------------------------------------------------------------ the cast, grouped by assignment
 const ROLE: Record<string, [string, string]> = {
-  player_character: ["You", "cyan"], core_party: ["Party", ""], pets_companions: ["Companion", "violet"], allied_npcs: ["Ally", ""],
+  player_character: ["You", "cyan"], core_party: ["Group", ""], pets_companions: ["Companion", "violet"], allied_npcs: ["Ally", ""],
   external_contacts: ["Contact", "amber"], deceased_npcs: ["Fallen", "red"],
 };
 export function role(c: CharacterCard): [string, string] {
-  if (/manager/i.test(c.status)) return ["Manager", "magenta"];
   return ROLE[c.roster_category ?? ""] ?? [humanize(c.kind), ""];
+}
+
+/** The fate axes that aren't at their default, in plain words ("Dead · Wallpaper: missing · Watching"). */
+const FATE_DEFAULTS = { physical_condition: "alive", wallpaper_status: "active", participation: "full", persistent_fate: "ongoing" } as const;
+export function fateLine(c: CharacterCard): string | null {
+  const out: string[] = [];
+  if (c.physical_condition && c.physical_condition !== FATE_DEFAULTS.physical_condition) out.push(humanize(c.physical_condition));
+  if (c.wallpaper_status && c.wallpaper_status !== FATE_DEFAULTS.wallpaper_status) out.push(`Wallpaper: ${humanize(c.wallpaper_status).toLowerCase()}`);
+  if (c.participation && c.participation !== FATE_DEFAULTS.participation) out.push(humanize(c.participation));
+  if (c.persistent_fate && c.persistent_fate !== FATE_DEFAULTS.persistent_fate) out.push(humanize(c.persistent_fate));
+  return out.length ? out.join(" · ") : null;
 }
 
 function Tile({ c, pc, openCharacter }: { c: CharacterCard; pc: boolean; openCharacter: (id: number) => void }) {
   const [open, setOpen] = useState(false);
   const m = useManifest();
   const [label, tone] = role(c);
+  const fate = fateLine(c);
   return (
     <div className={`tile ${pc ? "pc" : ""} ${open ? "open" : ""}`}>
       <button className="tile-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        <Portrait name={c.name} src={portraitSrc(c, m)} crop={c.portrait_crop} size={pc ? 64 : 52} />
+        <Portrait name={c.name} src={portraitSrc(c, m)} crop={c.portrait_crop} size={pc ? 56 : 44} />
         <div className="tile-main">
           <div className="row" style={{ gap: 6 }}>
             <span className="pname grow" title={c.name}>{c.name.split(" ")[0]}</span>
-            {c.stats.plot_armor.effective != null && <span className="mono muted" style={{ fontSize: 11 }} title="Plot Armor (effective)">PA {c.stats.plot_armor.effective}</span>}
+            {c.stats.plot_armor.effective != null && <span className="pa" title="Plot Armor (effective)">PA {c.stats.plot_armor.effective}</span>}
             <span className={`role ${tone}`}>{label}</span>
           </div>
-          <div className="pclass">{roleLabel(c) ?? c.status}</div>
+          <div className="pclass">{roleLabel(c) ?? "No Archetype yet"}</div>
+          {fate && <div className="pfate">{fate}</div>}
         </div>
       </button>
       {c.statuses.length > 0 && !open && <div className="tile-status">{c.statuses.slice(0, 3).map((s) => <i key={s.id} className={`sdot ${s.polarity}`} title={s.name} />)}</div>}
@@ -278,7 +246,6 @@ function Tile({ c, pc, openCharacter }: { c: CharacterCard; pc: boolean; openCha
           <div><b>{c.name}</b></div>
           <div className="pclass">{[roleLabel(c), paLabel(c)].filter(Boolean).join(" · ")}</div>
           {c.statuses.length > 0 && <div className="chips">{c.statuses.map((s) => <Chip key={s.id} tone={s.polarity === "buff" ? "green" : s.polarity === "debuff" ? "red" : ""}>{s.name}</Chip>)}</div>}
-          {c.equipped.length > 0 && <div className="sub">Equipped: {c.equipped.map((e) => e.name).join(", ")}</div>}
           <button className="btn small" onClick={() => openCharacter(c.id)}>Open dossier</button>
         </div>
       )}
@@ -290,7 +257,7 @@ export function RosterPanel({ campaign, openCharacter }: { campaign: Campaign; o
   const pcId = campaign.active_character_id;
   const pcGroup = campaign.roster.find((c) => c.id === pcId)?.assignment;
   const groups = useMemo(() => {
-    if (!campaign.groups.length) return [{ key: "_party", label: "Party", location: campaign.current_location, activity: null, members: campaign.party }];
+    if (!campaign.groups.length) return [{ key: "_party", label: "The group", location: campaign.current_location, activity: null, members: campaign.party }];
     return [...campaign.groups].sort((a, b) => (a.key === pcGroup ? -1 : b.key === pcGroup ? 1 : 0));
   }, [campaign, pcGroup]);
   const grouped = new Set(groups.flatMap((g) => g.members.map((c) => c.id)));
@@ -301,7 +268,7 @@ export function RosterPanel({ campaign, openCharacter }: { campaign: Campaign; o
   const here = groups.filter((g) => g.key === pcGroup || g.key === "_party");
   const offscreen = groups.filter((g) => g.key !== pcGroup && g.key !== "_party" && g.members.length > 0);
   return (
-    <Panel title="Roster" accent={pcGroup ? `${withPc} here · ${away} offscreen` : campaign.roster.length || campaign.party.length}>
+    <Panel title="Starring cast" accent={pcGroup ? `${withPc} here · ${away} away` : campaign.roster.length || campaign.party.length}>
       <div className="roster">
         {here.map((g) => (
           <section key={g.key} className="roster-group here" aria-label={g.key === "_party" ? g.label : "You are here"}>
@@ -312,10 +279,10 @@ export function RosterPanel({ campaign, openCharacter }: { campaign: Campaign; o
             {[...g.members].sort((a, b) => (a.id === pcId ? -1 : b.id === pcId ? 1 : 0)).map((c) => <Tile key={c.id} c={c} pc={c.id === pcId} openCharacter={openCharacter} />)}
           </section>
         ))}
-        {offscreen.length > 0 && <div className="roster-divider">Offscreen party</div>}
+        {offscreen.length > 0 && <div className="roster-divider">Elsewhere in town</div>}
         {offscreen.map((g) => <OffscreenGroup key={g.key} g={g} openCharacter={openCharacter} />)}
         {others.length > 0 && (
-          <Collapsible label={`Contacts & elsewhere (${others.length})`}>
+          <Collapsible label={`Elsewhere (${others.length})`}>
             {others.map((c) => <Tile key={c.id} c={c} pc={false} openCharacter={openCharacter} />)}
           </Collapsible>
         )}
@@ -347,7 +314,7 @@ export function paLabel(c: CharacterCard): string | null {
   return pa.effective == null ? null : pa.effective === pa.base ? `Plot Armor ${pa.base}` : `Plot Armor ${pa.effective} (base ${pa.base})`;
 }
 
-/** An offscreen group: collapsed to faces, place and orders; expands to full tiles. */
+/** A group elsewhere: collapsed to faces, place and orders; expands to full tiles. */
 function OffscreenGroup({ g, openCharacter }: { g: Group; openCharacter: (id: number) => void }) {
   const m = useManifest();
   const hurt = g.members.filter((c) => c.statuses.some((s) => s.polarity === "debuff"));
@@ -372,137 +339,6 @@ function OffscreenGroup({ g, openCharacter }: { g: Group; openCharacter: (id: nu
       {activity && <div className="roster-activity">{activity}</div>}
       {g.members.map((c) => <Tile key={c.id} c={c} pc={false} openCharacter={openCharacter} />)}
     </Collapsible>
-  );
-}
-
-// ------------------------------------------------------------------ campaign sidebar
-const KIND_ICON: Record<string, typeof Flag> = { quest: Flag, project: Hammer, crafting: Wrench, commitment: Handshake, reservation: Bookmark };
-
-export function Objective({ q, now }: { q: Quest; now: number }) {
-  const [open, setOpen] = useState(false);
-  const Icon = KIND_ICON[q.kind] ?? Flag;
-  const details = Object.entries(q.details ?? {}).filter(([k]) => k !== "ledger_source" && !k.includes("/"));
-  const due = q.due_at_minutes != null ? q.due_at_minutes - now : null;
-  return (
-    <div className={`objective ${q.kind}`}>
-      <button className="objective-head" onClick={() => setOpen((o) => !o)}>
-        <Icon size={13} />
-        <span className="grow">{q.title}</span>
-        {due != null && <Chip tone={due < 0 ? "red" : due < 120 ? "amber" : ""}>{due < 0 ? "overdue" : fmtMinutes(due)}</Chip>}
-        {q.immediate ? <Chip tone="cyan" title="Part of the immediate objective">now</Chip> : q.priority === 1 && <Chip tone="magenta">priority</Chip>}
-      </button>
-      {open && (
-        <div className="objective-body">
-          {q.description && !q.description.startsWith("Ledger objective id:") && <div className="sub">{q.description}</div>}
-          {q.progress && <div>Progress: {q.progress}</div>}
-          {details.map(([k, v]) => <div key={k} className="kvline"><span>{humanize(k)}</span><span>{typeof v === "object" ? JSON.stringify(v) : String(v)}</span></div>)}
-          {q.details && "conflict" in q.details && <div className="sub" style={{ color: "var(--amber)" }}>Records disagree — settle this in play.</div>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-type Alert = { key: string; tone: "red" | "amber"; text: string; quest?: number; character?: number };
-
-/** What needs the player's attention now: overdue or imminent deadlines, and hurt or afflicted people in the PC's group. */
-export function urgentAlerts(campaign: Campaign): Alert[] {
-  const out: Alert[] = [];
-  const now = campaign.game_time_minutes;
-  for (const q of campaign.quests) {
-    if (q.due_at_minutes == null) continue;
-    const due = q.due_at_minutes - now;
-    if (due < 0) out.push({ key: `q${q.id}`, tone: "red", text: `Overdue: ${q.title}`, quest: q.id });
-    else if (due < 180) out.push({ key: `q${q.id}`, tone: "amber", text: `${q.title} in ${fmtMinutes(due)}`, quest: q.id });
-  }
-  for (const c of pcGroup(campaign)?.members ?? []) {
-    const bad = c.statuses.filter((s) => s.polarity === "debuff").map((s) => s.name);
-    if (bad.length) out.push({ key: `c${c.id}`, tone: "amber", character: c.id, text: `${c.name.split(" ")[0]}: ${bad.join(", ")}` });
-  }
-  return out;
-}
-
-export function CampaignSidebar({ campaign, onArt, openQuest, openCharacter }: {
-  campaign: Campaign; onArt?: () => void; openQuest?: (id?: number) => void; openCharacter?: (id: number) => void;
-}) {
-  const adv = campaign.clocks.find((c) => c.key === "advancement_cycles");
-  const safe = campaign.safe_room && sameplace(campaign.scene?.location, campaign.current_location);
-  const linked = campaign.quests.filter((q) => q.immediate);
-  const alerts = urgentAlerts(campaign);
-  return (
-    <>
-      <Panel title={campaign.current_location ?? "Somewhere in Carousel"} accent={<span className={`safety ${safe ? "safe" : "exposed"}`}>{safe ? "safe place" : "exposed"}</span>} className="floor-panel">
-        {!safe && campaign.safe_room ? <div className="sub" style={{ color: "var(--amber)" }} title={`Campaign record: ${campaign.current_location}`}>The record still says saferoom; the scene is elsewhere.</div> : null}
-        {adv && (
-          <div className="adv-line" title="Advancement cycles toward the next checkpoint">
-            <span className="k">Advancement</span>
-            <div className="segments" style={{ gridTemplateColumns: `repeat(${adv.maximum ?? 12}, 1fr)` }}>
-              {Array.from({ length: adv.maximum ?? 12 }, (_, i) => <i key={i} className={i < adv.current ? "on" : ""} />)}
-            </div>
-            <span className="mono">{adv.current}/{adv.maximum}</span>
-          </div>
-        )}
-      </Panel>
-      {campaign.encounter && <CombatPanel enc={campaign.encounter} campaign={campaign} onArt={onArt} />}
-      <Panel title={<><Flag size={13} /> Now</>} className="now-panel">
-        {/* linked quests are the immediate objective; the stored string is its summary */}
-        {campaign.active_objective ? <div className="now-text">{campaign.active_objective}</div>
-          : linked.length === 0 && <div className="muted">No immediate objective recorded.</div>}
-        {linked.map((q) => (
-          <button key={q.id} className="now-quest" onClick={() => openQuest?.(q.id)}><Flag size={11} /> <span className="grow">{q.title}</span><ChevronRight size={12} /></button>
-        ))}
-        <button className="link-btn" onClick={() => openQuest?.()}>All objectives ({campaign.quests.length}) <ChevronRight size={12} /></button>
-      </Panel>
-      {alerts.length > 0 && (
-        <Panel title={<><AlertTriangle size={13} /> Alerts</>} accent={alerts.length} className="alerts-panel">
-          <ul className="alerts">
-            {alerts.map((a) => (
-              <li key={a.key} className={a.tone}>
-                {a.quest || a.character ? (
-                  <button onClick={() => (a.quest ? openQuest?.(a.quest) : openCharacter?.(a.character!))}>{a.text} <ChevronRight size={11} /></button>
-                ) : <span>{a.text}</span>}
-              </li>
-            ))}
-          </ul>
-        </Panel>
-      )}
-      <ArtQueue cid={campaign.id} onChanged={onArt} />
-    </>
-  );
-}
-
-// ------------------------------------------------------------------ combat
-const PHASES: Record<string, string> = { surprise: "Surprise", mob_declaration: "Mobs declaring", crawler_reaction: "Your reaction — Interrupts?",
-  crawler_action: "Crawler actions", ended: "Ended" };
-
-export function CombatPanel({ enc, campaign, onArt }: { enc: Encounter; campaign?: Campaign; onArt?: () => void }) {
-  const party = enc.combatants.filter((c) => c.side === "party");
-  const foes = enc.combatants.filter((c) => c.side === "foe");
-  return (
-    <Panel title={<><Swords size={13} /> Combat</>} accent={`Round ${enc.round}`} className="combat">
-      <div style={{ fontWeight: 600 }}>{enc.name}</div>
-      {enc.phase && <div className="row" style={{ margin: "4px 0 8px" }}><Chip tone={enc.phase === "crawler_reaction" ? "magenta" : "cyan"}>{PHASES[enc.phase] ?? enc.phase}</Chip></div>}
-      {foes.map((f) => (
-        <div key={f.id} className="combatant">
-          {campaign?.art?.mob[f.name.toLowerCase()] ? <img className="foe-art" src={sized(campaign.art.mob[f.name.toLowerCase()], 64)!} alt="" />
-            : campaign && <ArtButton cid={campaign.id} kind="mob" subjectName={f.name} label="" onChanged={onArt} />}
-          <span className={f.defeated ? "muted" : ""} style={{ textDecoration: f.defeated ? "line-through" : undefined }}>{f.name}</span>
-          <div className="bar hp" style={{ width: 80 }}><i style={{ width: `${f.hb_percent ?? 0}%`, background: "linear-gradient(90deg,#b8323a,#ff5257)" }} /></div>
-          <span className="mono muted">{f.defeated ? "down" : `${f.hb_percent}%`}</span>
-        </div>
-      ))}
-      <div className="h2" style={{ margin: "10px 0 4px", fontSize: 11 }}>Party</div>
-      {party.map((p) => (
-        <div key={p.id} className="combatant">
-          <span>{p.name.split(" ")[0]}</span>
-          <span className="pips">{[0, 1].map((i) => <i key={i} className={i < (p.actions_left ?? 0) ? "on" : ""} />)}</span>
-          <span className="mono" style={{ fontSize: 11 }}>
-            {p.dead ? <span style={{ color: "var(--red)" }}>DEAD</span> : p.dying ? <span style={{ color: "var(--red)" }}>DYING {p.dying.split(" ")[0]}</span>
-              : p.evading ? <span style={{ color: "var(--cyan)" }}>evading</span> : `${p.hp_current ?? "?"}/${p.hp_max ?? "?"}`}
-          </span>
-        </div>
-      ))}
-    </Panel>
   );
 }
 

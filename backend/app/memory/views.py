@@ -105,6 +105,9 @@ def campaign_summary(conn: sqlite3.Connection, cid: int) -> dict | None:
     from ..fate_api import player_fate
     f = player_fate(conn, cid)
     camp["fate"] = {"deathwatch": f["deathwatch"], "wiped": f["wiped"]}
+    from ..carousel import clock
+    m = camp["game_time_minutes"]
+    camp["clock"] = {"day": clock.day(m), "slot": clock.slot(m), "time": f"{clock.hour(m):02d}:{(clock.CLOCK_START + m) % 60:02d}"}
     return camp
 
 

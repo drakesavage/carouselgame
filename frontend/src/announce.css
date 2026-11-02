@@ -1,92 +1,48 @@
-/* Broadcast moments (views/Announce.tsx): the Dungeon Crawler World show cutting in over the story. One at a time,
-   skippable, never taking focus; every animation here is decoration and stops under reduced motion. */
+/* Title cards (views/Announce.tsx): a notice, a warning, or the Plot Cycle moving on. One at a time, skippable,
+   never taking focus; the only motion is a short fade, and it stops under reduced motion. */
 
 .announce { position: fixed; inset: 0; z-index: 90; display: grid; place-items: start center; padding-top: 13vh; pointer-events: none;
-  --tone: var(--red); --tone-rgb: var(--red-rgb); }
-.announce.achievement, .announce.loot, .announce.levelup { --tone: var(--gold); --tone-rgb: var(--gold-rgb); }
-.announce.broadcast { --tone: var(--cyan); --tone-rgb: var(--cyan-rgb); }
-.announce.tier-bronze { --tone: #d79a5c; --tone-rgb: 215, 154, 92; }
-.announce.tier-silver { --tone: #d6dde5; --tone-rgb: 214, 221, 229; }
-.announce.tier-platinum { --tone: #9fe3f2; --tone-rgb: 159, 227, 242; }
-.announce.tier-legendary { --tone: #c9a4ff; --tone-rgb: 201, 164, 255; }
-.announce.tier-celestial { --tone: #ffa4dc; --tone-rgb: 255, 164, 220; }
+  --tone: var(--brass); --tone-rgb: var(--brass-rgb); }
+.announce.warning { --tone: var(--blood); --tone-rgb: var(--blood-rgb); }
 
 .announce-band {
-  pointer-events: auto; cursor: pointer; width: min(720px, calc(100vw - 24px)); position: relative; overflow: hidden;
-  background:
-    radial-gradient(420px 160px at 12% 0%, rgba(var(--tone-rgb), 0.22), transparent 70%),
-    linear-gradient(180deg, #1c1e25, #121318);
-  border: 1px solid rgba(var(--tone-rgb), 0.6); border-radius: 3px;
-  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%);
-  box-shadow: 0 0 0 1px rgba(0,0,0,0.7), 0 0 60px rgba(var(--tone-rgb), 0.28), 0 30px 80px rgba(0,0,0,0.65);
-  animation: cut-in 0.5s cubic-bezier(.2, 1.2, .35, 1) both;
+  pointer-events: auto; cursor: pointer; width: min(620px, calc(100vw - 24px)); position: relative; overflow: hidden;
+  background: radial-gradient(500px 180px at 50% 0%, rgba(var(--tone-rgb), 0.10), transparent 70%), var(--panel-elevated);
+  border: 1px solid rgba(var(--tone-rgb), 0.45); border-radius: var(--radius);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.65); text-align: center;
+  animation: card-fade 0.45s ease-out both;
 }
+.announce-band::before, .announce-band::after { /* gilt rules above and below */
+  content: ""; position: absolute; left: 24px; right: 24px; height: 1px; background: linear-gradient(90deg, transparent, rgba(var(--tone-rgb), 0.6), transparent);
+}
+.announce-band::before { top: 6px; } .announce-band::after { bottom: 6px; }
 
-/* the channel strip: hazard stripes and the kind of moment */
-.announce-strip {
-  display: flex; gap: 9px; align-items: center; padding: 7px 12px 7px 14px; color: #160c02;
-  background:
-    repeating-linear-gradient(135deg, rgba(0,0,0,0.16) 0 8px, transparent 8px 16px),
-    linear-gradient(90deg, var(--tone), rgba(var(--tone-rgb), 0.75));
-}
-.announce.warning .announce-strip, .announce.critfail .announce-strip { color: #fff; }
-.announce.broadcast .announce-strip { color: #03131b; }
-.announce-type { font-family: var(--broadcast); font-size: 19px; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1; }
-.announce-more { font-family: var(--mono); font-size: 11px; opacity: 0.75; }
+.announce-strip { display: flex; gap: 8px; align-items: center; justify-content: center; padding: 14px 14px 0; color: var(--tone); position: relative; }
+.announce-type { font: 600 11px/1 var(--body); letter-spacing: 0.2em; text-transform: uppercase; }
+.announce-more { font: 600 10.5px var(--body); color: var(--fog); }
 .announce-skip {
-  margin-left: auto; display: inline-flex; gap: 4px; align-items: center; cursor: pointer; font: 600 11.5px var(--body);
-  color: inherit; background: rgba(0,0,0,0.18); border: 1px solid rgba(0,0,0,0.35); border-radius: 2px; padding: 2px 9px;
+  position: absolute; right: 12px; top: 10px; display: inline-flex; gap: 4px; align-items: center; cursor: pointer; font: 600 11px var(--body);
+  color: var(--fog); background: transparent; border: 1px solid var(--line-2); border-radius: var(--radius); padding: 2px 8px;
 }
-.announce-skip:hover, .announce-skip:focus-visible { background: rgba(0,0,0,0.32); }
+.announce-skip:hover, .announce-skip:focus-visible { color: var(--parchment); border-color: var(--brass); }
 
-.announce-main { display: flex; gap: 16px; align-items: center; padding: 14px 20px 20px; }
-.announce-copy { min-width: 0; flex: 1; }
-.announce-title {
-  font-family: var(--broadcast); font-size: clamp(28px, 5vw, 44px); line-height: 1.02; text-transform: uppercase; letter-spacing: 0.02em;
-  color: var(--tone); text-shadow: 3px 3px 0 rgba(0,0,0,0.75), 0 0 26px rgba(var(--tone-rgb), 0.35);
-  animation: title-slam 0.45s cubic-bezier(.2, 1.4, .4, 1) 0.15s both;
-}
-.announce-text { margin-top: 6px; font-size: 16px; color: var(--text); }
-.announce-text .narration { font-size: 16px; line-height: 1.55; }
+.announce-main { padding: 10px 28px 24px; }
+.announce-copy { min-width: 0; }
+.announce-title { font-family: var(--display); font-size: clamp(28px, 5vw, 42px); line-height: 1.05; letter-spacing: 0.06em; text-transform: uppercase; color: var(--parchment); }
+.announce.phase .announce-title { color: var(--brass); }
+.announce-text { font: 18px/1.5 var(--story); color: var(--parchment); }
 .announce-text p { margin: 0 0 0.5em; }
 .announce-text p:last-child { margin-bottom: 0; }
 .announce-text strong { color: var(--tone); }
-.announce.broadcast .announce-text { font-size: 15px; max-height: 46vh; overflow: auto; }
 
-/* loot and level-ups get an emblem */
-.announce-emblem {
-  flex-shrink: 0; width: 76px; height: 76px; display: grid; place-items: center; color: #160c02;
-  background: radial-gradient(circle at 35% 30%, #fff8, transparent 45%), var(--tone);
-  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
-  box-shadow: 0 0 30px rgba(var(--tone-rgb), 0.6);
-  animation: emblem-pop 0.8s cubic-bezier(.2, 1.5, .4, 1) 0.1s both;
-}
-.announce.loot .announce-emblem { animation: emblem-pop 0.6s cubic-bezier(.2, 1.5, .4, 1) 0.1s both, box-rattle 0.5s ease-in-out 0.7s 2; }
+.announce-timer { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: rgba(var(--tone-rgb), 0.6); transform-origin: left;
+  animation: announce-timer linear both; }
 
-/* a critical failure lands with a jolt */
-.announce.critfail .announce-band { animation: cut-in 0.35s ease-out both, jolt 0.4s ease-out 0.35s 1; }
-.announce.critfail .announce-title, .announce.warning .announce-title { color: #ff8a8a; }
-
-.announce-timer { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--tone); transform-origin: left;
-  animation: announce-timer linear both; opacity: 0.85; }
-
-@keyframes cut-in { 0% { transform: translateX(-40px) skewX(-8deg); } 100% { transform: none; } }  /* never starts invisible: a stalled animation still shows the panel */
-@keyframes title-slam { 0% { transform: scale(1.35); letter-spacing: 0.2em; } 100% { transform: none; } }
-@keyframes emblem-pop { 0% { transform: scale(0) rotate(-30deg); } 100% { transform: none; } }
-@keyframes box-rattle { 25% { transform: rotate(-8deg); } 75% { transform: rotate(8deg); } }
-@keyframes jolt { 20% { transform: translateX(-8px); } 40% { transform: translateX(7px); } 60% { transform: translateX(-4px); } 80% { transform: translateX(2px); } }
+@keyframes card-fade { from { opacity: 0.2; } to { opacity: 1; } }  /* never starts invisible: a stalled animation still shows the card */
 @keyframes announce-timer { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 
-@media (max-width: 600px) {
-  .announce { padding-top: 9vh; }
-  .announce-main { padding: 12px 14px 16px; gap: 12px; }
-  .announce-emblem { width: 56px; height: 56px; }
-  .announce-type { font-size: 16px; }
-}
-@media (prefers-reduced-motion: reduce) {
-  :root:not([data-motion="full"]) .announce-band, :root:not([data-motion="full"]) .announce-title,
-  :root:not([data-motion="full"]) .announce-emblem { animation: none; }
-}
+@media (max-width: 600px) { .announce { padding-top: 9vh; } .announce-main { padding: 8px 16px 18px; } }
+@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .announce-band { animation: none; } }
 
 /* device motion preference (prefs.ts): "reduce" stops all animation; "full" keeps it even when the system asks to reduce */
 :root[data-motion="reduce"] *, :root[data-motion="reduce"] *::before, :root[data-motion="reduce"] *::after { animation: none !important; transition: none !important; }

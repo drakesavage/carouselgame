@@ -132,6 +132,24 @@ export default function App() {
     d.camera = camera; d.fate = fate; d.safe = safe;
   }, [camera, fate, safe]);
 
+  // Camera and Plot Cycle changes are said out loud (live region) and a new phase gets a title card. Both come only from
+  // the story payload changing between two fetches of the same story, never from narration text.
+  const [status, setStatus] = useState("");
+  const seen = useRef<{ id: number; camera: string; phase: string } | null>(null);
+  useEffect(() => {
+    const was = seen.current;
+    seen.current = story ? { id: story.id, camera: story.camera, phase: story.phase } : null;
+    if (!story || !was || was.id !== story.id) return;
+    const said: string[] = [];
+    if (was.camera !== story.camera) said.push(story.camera === "on" ? "On screen. The camera is rolling." : "Off screen.");
+    if (was.phase !== story.phase) {
+      said.push(`Plot Cycle: ${story.phase}.`);
+      pushRef.current([{ text: story.phase, style: "phase" }]);
+    }
+    if (said.length) setStatus(said.join(" "));
+  }, [story]);
+  const openBehindTheScenes = () => { setTab("settings"); setTimeout(() => document.getElementById("behind-the-scenes")?.scrollIntoView({ block: "start" }), 50); };
+
   if (error) return <div className="view"><div className="error-box">Could not reach the Carousel server: {error}</div></div>;
   const clock = campaign?.clock;
   return (
@@ -185,8 +203,8 @@ export default function App() {
           <>
             {/* the Scene stays mounted while another screen is open: the draft, scroll position and a turn in flight survive */}
             <div className="scene-host" hidden={tab !== "scene"}>
-              <StoryView key={cid} campaign={campaign} onState={refresh} onNotices={pushNotices} openCharacter={setSheet}
-                openQuest={() => setTab("chronicle")} openSaves={() => setTab("settings")} />
+              <StoryView key={cid} campaign={campaign} story={story} onState={refresh} onNotices={pushNotices} openCharacter={setSheet}
+                openSaves={() => setTab("settings")} openBehindTheScenes={openBehindTheScenes} />
             </div>
             {tab !== "scene" && (
               <div className="view">
@@ -199,7 +217,7 @@ export default function App() {
                   pcName={campaign.roster.find((c) => c.id === campaign.active_character_id)?.name} />}
                 {tab === "settings" && <>
                   <SettingsView cid={cid} version={version} onChanged={refresh} onCampaign={chooseCampaign} />
-                  <section className="view-inner" aria-label="Behind the Scenes">
+                  <section className="view-inner" id="behind-the-scenes" aria-label="Behind the Scenes">
                     <h2 className="h2">Behind the Scenes</h2>
                     <RulesView cid={cid} />
                     <RecordsView cid={cid} />
@@ -218,6 +236,7 @@ export default function App() {
       )}
       {cid != null && <CharacterSheetDialog cid={cid} charId={sheet} onClose={() => setSheet(null)} onChanged={refresh} />}
       <AnnouncementStage queue={announcing} onDone={(id) => setAnnouncing((q) => q.filter((a) => a.id !== id))} />
+      <div className="sr-only" role="status" aria-live="polite">{status}</div>
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => <div key={t.id} className="toast" onClick={() => dismiss(t.id)} title="Click to dismiss"><SystemNotice text={t.text} style={t.style} /></div>)}
       </div>

@@ -22,12 +22,6 @@ export function Panel({ title, accent, right, children, className = "" }: { titl
   );
 }
 
-function hash(s: string) {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
-  return h >>> 0;
-}
-
 /** The map key of a place name, matching memory/places.py ('The Molting Pigeon' -> 'molting pigeon'). */
 export function placeKey(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9 ]+/g, "").replace(/^the\s+/, "").trim();
@@ -61,24 +55,11 @@ export function Portrait({ name, path, src, size = 52, crop }: { name: string; p
   if (url && crop) return <div className="portrait" role="img" aria-label={name} style={{ ...style, ...cropStyle(sized(url, size * crop.ar / (crop.k * Math.min(crop.ar, 1)))!, crop) }} />;
   // Default framing: tall pictures show their top (where the face usually is), not the middle.
   if (url) return <div className="portrait" style={style}><img src={sized(url, size)!} alt={name} loading="lazy" style={{ objectPosition: "50% 12%" }} /></div>;
-  const h = hash(name);
-  const hue = h % 360;
-  const initials = name.replace(/\(.*?\)/g, "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("");
-  const cells = Array.from({ length: 16 }, (_, i) => (h >> i) & 1);
+  // no picture: the first initial on a parchment square
+  const initial = name.replace(/\(.*?\)/g, "").trim().charAt(0).toUpperCase();
   return (
-    <div className="portrait" style={style} aria-label={`${name} (no portrait)`}>
-      <svg viewBox="0 0 64 64">
-        <defs>
-          <linearGradient id={`g${h}`} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor={`hsl(${hue} 60% 22%)`} />
-            <stop offset="1" stopColor={`hsl(${(hue + 60) % 360} 70% 9%)`} />
-          </linearGradient>
-        </defs>
-        <rect width="64" height="64" fill={`url(#g${h})`} />
-        {cells.map((on, i) => on ? <rect key={i} x={(i % 4) * 16 + 6} y={Math.floor(i / 4) * 16 + 6} width="4" height="4" fill={`hsl(${hue} 90% 70% / 0.18)`} /> : null)}
-        <path d="M32 6 54 19v26L32 58 10 45V19z" fill="none" stroke={`hsl(${hue} 90% 65% / 0.45)`} strokeWidth="1.2" />
-        <text x="32" y="38" textAnchor="middle" fontFamily="Chakra Petch, sans-serif" fontWeight="700" fontSize="18" fill={`hsl(${hue} 90% 82%)`}>{initials || "?"}</text>
-      </svg>
+    <div className="portrait portrait-initial" role="img" style={{ ...style, fontSize: Math.round(size * 0.46) }} aria-label={`${name} (no portrait)`}>
+      <span aria-hidden>{initial || "?"}</span>
     </div>
   );
 }

@@ -1,41 +1,54 @@
-/* The Plot Cycle strip above the story transcript (Phase 8 restyles it). */
-.storybar { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 8px 10px; margin: 0 0 8px; }
+/* The quiet strips above the transcript: the Plot Cycle, the opening, the venue and who is around.
+   Parchment on panel; brass labels; red only for On Screen and danger. */
+.storybar, .venuepanel {
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 8px 12px; margin: 0;
+}
 .storybar-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.storybar-title { font-family: var(--display); font-weight: 600; color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.storybar-camera { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
-  padding: 2px 6px; border-radius: var(--radius); border: 1px solid var(--line-2); color: var(--muted); }
-.storybar-camera.on { color: var(--red); border-color: var(--red); }
-.plot-cycle { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 3px; list-style: none; margin: 0; padding: 0; }
-.plot-cycle li { font-size: 10px; text-align: center; padding: 4px 2px; border-radius: 2px; background: var(--panel-2); color: var(--muted);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.plot-cycle li.past { color: var(--text-2); background: var(--panel-3); }
-.plot-cycle li.now { color: var(--bg); background: var(--amber); font-weight: 700; }
-.storybar-cast { margin-top: 6px; font-size: 11px; color: var(--text-2); }
-@media (max-width: 640px) { .plot-cycle { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-/* The new game's five-step opening bar (OpeningBar.tsx) reuses the Plot Cycle strip. */
+.storybar-title { font-family: var(--display); font-size: 16px; color: var(--parchment); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.storybar-cast { margin-top: 6px; font-size: 12.5px; color: var(--text-2); }
+
+/* the Plot Cycle */
+.storybar.plot { display: flex; align-items: center; gap: 14px; padding: 6px 12px; }
+.plot-label { font: 600 10.5px/1.2 var(--body); letter-spacing: 0.16em; text-transform: uppercase; color: var(--brass); white-space: nowrap; }
+.plot-cycle { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 0; list-style: none; margin: 0; padding: 0; flex: 1; min-width: 0; }
+.plot-cycle li {
+  position: relative; font: 600 10.5px/1.2 var(--body); letter-spacing: 0.08em; text-transform: uppercase; text-align: center;
+  padding: 16px 2px 2px; color: #6F6A6E; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.plot-cycle li::before { /* a node on the reel */
+  content: ""; position: absolute; top: 3px; left: 50%; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%;
+  border: 1px solid var(--line-2); background: var(--ink);
+}
+.plot-cycle li::after { content: ""; position: absolute; top: 7px; left: calc(50% + 6px); right: calc(-50% + 6px); height: 1px; background: var(--line-2); }
+.plot-cycle li:last-child::after { display: none; }
+.plot-cycle li.past { color: var(--fog); }
+.plot-cycle li.past::before { background: var(--line-2); }
+.plot-cycle li.now { color: var(--brass); }
+.plot-cycle li.now::before { background: var(--brass); border-color: var(--brass); box-shadow: 0 0 0 3px rgba(var(--brass-rgb), 0.18); }
+.storybar.plot.on .plot-cycle li.now { color: #E58C93; }
+.storybar.plot.on .plot-cycle li.now::before { background: var(--blood); border-color: var(--blood); box-shadow: 0 0 0 3px rgba(var(--blood-rgb), 0.22); }
+@media (max-width: 640px) {
+  .storybar.plot { flex-direction: column; align-items: stretch; gap: 4px; }
+  .plot-cycle li { font-size: 9px; letter-spacing: 0.02em; }
+}
+
+/* The new game's five-step opening reuses the reel. */
 .opening-steps { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .opening-steps li svg { vertical-align: -1px; }
-@media (max-width: 640px) { .opening-steps { grid-template-columns: repeat(5, minmax(0, 1fr)); } .opening-steps li { font-size: 9px; } }
 
 /* VenuePanel: the room the group is in and the ways on */
-.venuepanel { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 8px 10px; margin: 0 0 8px; }
-.venuepanel-here { font-family: var(--mono); font-size: 11px; color: var(--muted); }
-.venuepanel-ways { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 6px; }
+.venuepanel-here { font: 600 10.5px/1.4 var(--body); letter-spacing: 0.12em; text-transform: uppercase; color: var(--brass); }
+.venuepanel-ways { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 6px; }
 .venuepanel-ways .btn { display: inline-flex; align-items: center; gap: 4px; }
-.venuepanel-seen, .venuepanel-leave { font-size: 12px; color: var(--muted); }
-.venuepanel-msg { font-size: 12px; color: var(--red); margin-bottom: 4px; }
-
-/* DeathwatchBar: the player's character can't act (pace buttons), or the whole group is on the poster board (new group) */
-.deathwatch { border-color: var(--red); }
-.deathwatch .storybar-title svg { vertical-align: -2px; }
-.deathwatch .storybar-head { flex-wrap: wrap; }
-.deathwatch form .input { flex: 1; min-width: 160px; }
-.storybar-cast.error { color: var(--red); }
+.venuepanel-seen, .venuepanel-leave { font-size: 12.5px; color: var(--fog); }
+.venuepanel-msg { font-size: 12.5px; color: #E58C93; margin-bottom: 4px; }
 
 /* AroundPanel: met residents where the group stands, each with a Talk button */
 .aroundpanel .storybar-title svg { vertical-align: -2px; }
 .aroundpanel-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; }
 .aroundpanel-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
-.aroundpanel-name { font-weight: 600; font-size: 13px; }
-.aroundpanel-role { font-size: 12px; color: var(--muted); flex: 1 1 140px; min-width: 0; }
+.aroundpanel-name { font-family: var(--display); font-size: 16px; }
+.aroundpanel-role { font-size: 12.5px; color: var(--fog); flex: 1 1 140px; min-width: 0; }
 .aroundpanel-list .btn { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+
+.storybar-cast.error { color: #E58C93; }
