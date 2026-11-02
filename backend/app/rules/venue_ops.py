@@ -88,6 +88,9 @@ def _apply_move_zone(ctx: Ctx, op: MoveZone) -> dict:
                      (ctx.campaign_id, there["id"], ctx.game_time()))
     summary = f"The group moves to {there['label']}"
     ctx.event("zone_entered", summary, {"venue_id": venue_id, "zone": there["label"]})
+    if is_pc:
+        from ..carousel.residents import mark_seen
+        mark_seen(ctx.conn, ctx.campaign_id)
     node = one(ctx.conn, "SELECT node_id FROM campaigns WHERE id = ?", (ctx.campaign_id,))["node_id"]
     sighted = []
     for oid in venues.zone_omens(ctx.conn, there["id"]):

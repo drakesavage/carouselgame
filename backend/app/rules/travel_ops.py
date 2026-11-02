@@ -123,6 +123,8 @@ def _apply_travel(ctx: Ctx, op: Travel) -> dict:
         _apply_advance_time(ctx, AdvanceTime(op="advance_time", minutes=route.minutes, reason=op.reason or f"walking to {where}"))
     if place_id:
         _know(ctx, place_id, "visited")
+    from ..carousel.residents import mark_seen
+    mark_seen(ctx.conn, ctx.campaign_id)
     interrupted = None
     if stop:
         o = one(ctx.conn, "SELECT description FROM ref.omens WHERE id = ?", (stop.omen_id,))

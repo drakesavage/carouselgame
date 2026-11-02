@@ -8,6 +8,8 @@ Sections, in order:
                     overlays; then GM-ONLY the venue's Omen cues and where they sit
     OPENING         during the new-game flow: the stage, its job, what blocks the next stage, the lure, the friends, Silas's options
   3 PARTY           every group: location, activity, members (who is present vs elsewhere)
+    AROUND          Camp Dyer residents where the group is (carousel/residents.py): one line each, unmet ones by template id;
+                    their adaptation hooks go to GM-ONLY
   4 PRESENT         full sheets for the player character and everyone present (scene participants, the PC's group,
                     anyone named); GM-ONLY companion sheets and memories for them
   5 OBJECTIVES      quests, projects, crafting, commitments, reservations (details, due times, owners)
@@ -51,7 +53,7 @@ PROFILES: dict[str, dict] = {
 },
 }
 CATEGORIES = {"CAMPAIGN": "state", "PARTY": "state", "PRESENT": "state", "OBJECTIVES": "state", "SHARED STASH": "state",
-              "ACTIVE COMBAT": "state", "STORY": "state", "OMENS HERE": "state", "VENUE": "state", "OPENING": "state", "FATE": "state", "DEATHWATCH": "state", "LEDGER RECORDS": "ledger", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
+              "ACTIVE COMBAT": "state", "STORY": "state", "OMENS HERE": "state", "VENUE": "state", "OPENING": "state", "FATE": "state", "DEATHWATCH": "state", "AROUND": "state", "LEDGER RECORDS": "ledger", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
               "RULEBOOK": "rulebook", "RECENT TRANSCRIPT": "narrative", "RECENT ROLLS": "state", "GM-ONLY SECRETS": "gm_private"}
 STOP = set("the a an and or of to in on for with by is are be as at it this that from what how does do can when which who i we my our me us "
            "you your he she they them his her their then than into onto about there here just also will would should could".split())
@@ -363,6 +365,39 @@ def _firewall_line(conn: sqlite3.Connection, pc: dict | None) -> str | None:
     return f"{pc['name']} died at {d['phase']} in {d['title']}; {pronoun or 'they'} {verb} know what happened after that unless told"
 
 
+MAX_AROUND = 12
+
+
+def _around_section(conn: sqlite3.Connection, near: list[dict]) -> str:
+    """One line per resident around the group (met first); past MAX_AROUND, the rest as a count."""
+    out = []
+    for a in near[:MAX_AROUND]:
+        t = one(conn, """SELECT t.id, t.camp_role, c.bio FROM characters c JOIN npc_profiles p ON p.character_id = c.id
+                         JOIN ref.npc_templates t ON t.id = p.ref_id WHERE c.id = ?""", (a["id"],)) or {}
+        role = t.get("camp_role") or "no camp role recorded"
+        out.append(f"{a['name']} (met) — {role}" if a["met"] else
+                   f"Not yet met: {t.get('id')} — {t.get('bio') or 'no description recorded'}; {role}. "
+                   "Introduce with introduce_resident if they come into the scene.")
+    if len(near) > MAX_AROUND:
+        out.append(f"…and {len(near) - MAX_AROUND} more around (not listed)")
+    return "\n".join(out)
+
+
+def _around_hooks(conn: sqlite3.Connection, near: list[dict]) -> str:
+    """The companion sheet's adaptation_hook for each resident listed in AROUND, nothing else from it."""
+    out = []
+    for a in near[:MAX_AROUND]:
+        sheet = one(conn, """SELECT g.content, p.ref_id FROM gm_secrets g JOIN characters c ON c.slug = g.subject AND c.campaign_id = g.campaign_id
+                             JOIN npc_profiles p ON p.character_id = c.id WHERE c.id = ? AND g.kind = 'companion_sheet'""", (a["id"],))
+        try:
+            hook = ((json.loads(sheet["content"]) if sheet else {}).get("gm_only") or {}).get("adaptation_hook")
+        except (ValueError, AttributeError):
+            hook = None
+        if hook:
+            out.append(f"- {a['name']}: {hook}" if a["met"] else f"- {sheet['ref_id']} ({a['name']}, not yet met): {hook}")
+    return "Residents around (what they want; play it, never tell the players):\n" + "\n".join(out) if out else ""
+
+
 def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_window: int = 12, rule_conn: sqlite3.Connection | None = None,
                   budgets: dict | None = None) -> dict:
     B = {**DEFAULT_BUDGET, **(budgets or {})}
@@ -376,9 +411,11 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
 
     camp = one(conn, "SELECT * FROM campaigns WHERE id = ?", (cid,))
     now = camp["game_time_minutes"]
-    from ..carousel.residents import in_briefing
-    chars = in_briefing(conn, cid, rows(conn, "SELECT * FROM characters WHERE campaign_id = ? ORDER BY party_order, id", (cid,)))
+    from ..carousel import residents
+    chars = residents.in_briefing(conn, cid, rows(conn, "SELECT * FROM characters WHERE campaign_id = ? ORDER BY party_order, id", (cid,)))
     by_id = {c["id"]: c for c in chars}
+    unmet = residents.unmet_ids(conn, cid)
+    listable = [c for c in chars if c["id"] not in unmet]   # unmet residents appear only in AROUND, one line each
     pc = by_id.get(camp["active_character_id"])
     scene = one(conn, "SELECT * FROM scenes WHERE campaign_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1", (cid,))
     groups = rows(conn, "SELECT * FROM party_groups WHERE campaign_id = ? AND status = 'active' ORDER BY id", (cid,))
@@ -470,31 +507,35 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
         present.append(pc["id"])
     if scene:
         for ref in scene.get("participants") or []:
-            for c in chars:
+            for c in listable:
                 if str(ref).lower() in (c["name"].lower(), c["slug"], str(c["id"])) and c["id"] not in present:
                     present.append(c["id"])
     for gkey in {pc_group, scene["group_key"] if scene else None} - {None}:
-        present += [c["id"] for c in chars if c.get("assignment") == gkey and c["id"] not in present]
+        present += [c["id"] for c in listable if c.get("assignment") == gkey and c["id"] not in present]
     if not groups and not scene:  # no organization recorded: treat the in-party roster as together
         present += [c["id"] for c in chars if c["in_party"] and c["id"] not in present]
     here = (camp["current_location"] or "").strip().lower()
     if here and not pc_group:  # an NPC recorded at the PC's location (op npc) is in the room even if no scene lists them
-        present += [c["id"] for c in chars if not c["in_party"] and (c.get("location") or "").strip().lower() == here
+        present += [c["id"] for c in listable if not c["in_party"] and (c.get("location") or "").strip().lower() == here
                     and c["status"] not in GONE and c["id"] not in present]
-    named = [i for i in _named(chars, focus_text) if i != (pc or {}).get("id")]
+    named = [i for i in _named(listable, focus_text) if i != (pc or {}).get("id")]
     po = []
     for g in groups:
-        members = [c for c in chars if c.get("assignment") == g["key"]]
+        members = [c for c in listable if c.get("assignment") == g["key"]]
         tag = " ← PLAYER CHARACTER IS HERE" if g["key"] == pc_group else ""
         po.append(f"- [{g['key']}] {g['label']} @ {g['location'] or 'location not recorded'}{tag}" + (f" — {g['activity']}" if g["activity"] else ""))
         po.append("  members: " + ", ".join(f"{c['name']} (id {c['id']}, {_pa(conn, c)}, {c['status']})" for c in members))
-    loose = [c for c in chars if not c.get("assignment") and c["id"] != (pc or {}).get("id") and c["status"] not in GONE]
+    loose = [c for c in listable if not c.get("assignment") and c["id"] != (pc or {}).get("id") and c["status"] not in GONE]
     if loose and groups:
         po.append("- Not in a group: " + ", ".join(f"{c['name']} (id {c['id']}, {c['location'] or 'location unknown'})" for c in loose))
     if not groups:
         po.append("No party groups recorded: everyone in the active party is assumed together. Record splits with op group / move_group.")
     po.append("Only characters PRESENT below can act in this scene; others are elsewhere doing their activity (resolve offscreen per §15).")
     sections["PARTY"] = cut("PARTY", "\n".join(po), B["party"])
+
+    near = residents.around(conn, cid) if has_reference(conn) else []
+    if near:
+        sections["AROUND"] = _around_section(conn, near)
 
     # 4 PRESENT CHARACTERS (+ named elsewhere)
     full_ids = present[:B["max_present_full"]] + [i for i in named if i not in present][:B["max_named_absent"]]
@@ -605,7 +646,8 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
 
     # 8 GM-ONLY
     pres_words = _words(" ".join(by_id[i]["name"] + " " + by_id[i]["slug"] for i in present + named) + " " + (scene["title"] if scene else "") + " " + player_input)
-    secrets = rows(conn, "SELECT id, subject, kind, content FROM gm_secrets WHERE campaign_id = ? AND revealed = 0 AND kind != 'companion_sheet' ORDER BY id DESC", (cid,))
+    secrets = rows(conn, """SELECT id, subject, kind, content FROM gm_secrets WHERE campaign_id = ? AND revealed = 0
+                            AND kind NOT IN ('companion_sheet', 'resident_public') ORDER BY id DESC""", (cid,))
     ranked = sorted(((len(pres_words & _words(s["subject"] + " " + s["content"][:400])), -s["id"], s) for s in secrets), key=lambda x: (-x[0], x[1]))
     hi = [s for score, _, s in ranked if score > 0]
     chosen = hi[:max(B["max_secrets"] - 4, 0)] + [s for score, _, s in ranked if score == 0][:min(4, B["max_secrets"])]
@@ -630,6 +672,9 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     fate_secrets = _fate_secrets(conn, cid, story)
     if fate_secrets:
         sections["GM-ONLY SECRETS"] = (sections["GM-ONLY SECRETS"] + "\n" if "GM-ONLY SECRETS" in sections else "") + fate_secrets
+    hooks = _around_hooks(conn, near)
+    if hooks:
+        sections["GM-ONLY SECRETS"] = (sections["GM-ONLY SECRETS"] + "\n" if "GM-ONLY SECRETS" in sections else "") + hooks
 
     # transcript
     if recent:

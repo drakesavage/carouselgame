@@ -102,7 +102,7 @@ def in_briefing(conn: sqlite3.Connection, cid: int, chars: list[dict]) -> list[d
     unmet = unmet_ids(conn, cid)
     if not unmet:
         return chars
-    near: set[int] = set()
+    near = {a["id"] for a in around(conn, cid)}
     return [c for c in chars if c["id"] not in unmet or c["id"] in near]
 
 
@@ -244,3 +244,33 @@ def where(conn: sqlite3.Connection, cid: int, character_id: int) -> dict | None:
             return _at(pick["place"], pick["zone"], "hangout")
     h = home(conn, tpl)
     return _at(h["place"], h["zone"], "home")
+
+
+def around(conn: sqlite3.Connection, cid: int) -> list[dict]:
+    """[{id, name, met, why}]: residents (met or not, never party members) whose where() is the group's place, and its zone
+    when the group is in a venue and the resident has one. Met first, then by name."""
+    node, zone = _group_position(conn, cid)
+    if not node:
+        return []
+    out = []
+    for r in rows(conn, """SELECT c.id, c.name, p.met FROM characters c JOIN npc_profiles p ON p.character_id = c.id
+                           WHERE c.campaign_id = ? AND p.ref_id IS NOT NULL AND c.in_party = 0 ORDER BY p.met DESC, c.name""", (cid,)):
+        w = where(conn, cid, r["id"])
+        if w and w["place_id"] == node and (not zone or not w["zone_id"] or w["zone_id"] == zone):
+            out.append({"id": r["id"], "name": r["name"], "met": bool(r["met"]), "why": w["why"]})
+    return out
+
+
+def mark_seen(conn: sqlite3.Connection, cid: int) -> None:
+    """After the group arrives somewhere or enters a zone: every met resident around was last seen here, now."""
+    from . import venues
+    node, zone = _group_position(conn, cid)
+    place = one(conn, "SELECT name FROM ref.places WHERE id = ?", (node,)) if node else None
+    if not place:
+        return
+    now = one(conn, "SELECT game_time_minutes FROM campaigns WHERE id = ?", (cid,))["game_time_minutes"]
+    label = venues.label(conn, zone) if zone else None
+    text = f"{place['name']}{', ' + label if label else ''} at day {clock.day(now)} {clock.slot(now)}"
+    for a in around(conn, cid):
+        if a["met"]:
+            conn.execute("UPDATE npc_profiles SET last_seen = ? WHERE character_id = ?", (text, a["id"]))
