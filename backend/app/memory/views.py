@@ -10,6 +10,7 @@ import re
 import sqlite3
 
 from ..carousel.fate import GONE_SQL
+from ..carousel.residents import unmet_clause
 from ..db import one, rows
 
 PUBLIC_CHAR_COLUMNS = """id, campaign_id, slug, name, kind, roster_category, species, status, location, in_party, party_order,
@@ -82,7 +83,7 @@ def campaign_summary(conn: sqlite3.Connection, cid: int) -> dict | None:
     camp["scene"] = one(conn, """SELECT id, title, location, group_key, situation, conditions, threats, participants_json, started_game_minutes
                                  FROM scenes WHERE campaign_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1""", (cid,))
     groups = rows(conn, "SELECT key, label, location, activity FROM party_groups WHERE campaign_id = ? AND status = 'active' ORDER BY id", (cid,))
-    cards = {c["id"]: c for c in (character_card(conn, x) for x in rows(conn, f"SELECT {PUBLIC_CHAR_COLUMNS} FROM characters WHERE campaign_id = ? AND status NOT IN {GONE_SQL} ORDER BY party_order, name", (cid,)))}
+    cards = {c["id"]: c for c in (character_card(conn, x) for x in rows(conn, f"SELECT {PUBLIC_CHAR_COLUMNS} FROM characters WHERE campaign_id = ? AND status NOT IN {GONE_SQL} AND {unmet_clause('characters')} ORDER BY party_order, name", (cid,)))}
     for g in groups:
         g["members"] = [c for c in cards.values() if c.get("assignment") == g["key"]]
     camp["groups"] = groups
@@ -108,11 +109,11 @@ def campaign_summary(conn: sqlite3.Connection, cid: int) -> dict | None:
 
 
 def list_characters(conn: sqlite3.Connection, cid: int) -> list[dict]:
-    return [character_card(conn, c) for c in rows(conn, f"SELECT {PUBLIC_CHAR_COLUMNS} FROM characters WHERE campaign_id = ? ORDER BY in_party DESC, party_order, name", (cid,))]
+    return [character_card(conn, c) for c in rows(conn, f"SELECT {PUBLIC_CHAR_COLUMNS} FROM characters WHERE campaign_id = ? AND {unmet_clause('characters')} ORDER BY in_party DESC, party_order, name", (cid,))]
 
 
 def character_sheet(conn: sqlite3.Connection, cid: int, char_id: int) -> dict | None:
-    c = one(conn, f"SELECT {PUBLIC_CHAR_COLUMNS}, bio, sheet_json FROM characters WHERE campaign_id = ? AND id = ?", (cid, char_id))
+    c = one(conn, f"SELECT {PUBLIC_CHAR_COLUMNS}, bio, sheet_json FROM characters WHERE campaign_id = ? AND id = ? AND {unmet_clause('characters')}", (cid, char_id))
     if not c:
         return None
     c = character_card(conn, c)
@@ -145,7 +146,7 @@ def npcs(conn: sqlite3.Connection, cid: int) -> list[dict]:
     from .dossier import _flat, _mentions
     out = rows(conn, f"""SELECT {PUBLIC_CHAR_COLUMNS}, c.sheet_json, n.personality, n.voice, n.known_motivation, n.attitude, n.last_seen
                          FROM characters c LEFT JOIN npc_profiles n ON n.character_id = c.id
-                         WHERE c.campaign_id = ? AND c.id != COALESCE((SELECT active_character_id FROM campaigns WHERE id = ?), -1)
+                         WHERE c.campaign_id = ? AND c.id != COALESCE((SELECT active_character_id FROM campaigns WHERE id = ?), -1) AND {unmet_clause('c')}
                          ORDER BY c.roster_category, c.name""", (cid, cid))
     groups = {g["key"]: g for g in rows(conn, "SELECT key, label, location, activity FROM party_groups WHERE campaign_id = ? AND status = 'active'", (cid,))}
     quests = rows(conn, """SELECT id, kind, title, description, progress, giver, details_json FROM quests

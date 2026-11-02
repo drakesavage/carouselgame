@@ -76,7 +76,8 @@ def test_introducing_a_resident(conn, cid):
     c = conn.execute("""SELECT c.name, c.bio, c.roster_category, c.in_party, c.mettle, p.personality, p.ref_id FROM characters c
                         JOIN npc_profiles p ON p.character_id = c.id WHERE p.ref_id = 'CAR-NPC-003'""").fetchone()
     assert tuple(c) == ("Valerie Choi", "Wiry, in a patched field jacket.", "core_party", 1, None, "Dry, watchful, quick to laugh.", "CAR-NPC-003")
-    [sheet] = conn.execute("SELECT content FROM gm_secrets WHERE campaign_id = ? AND kind = 'companion_sheet'", (cid,)).fetchall()
+    [sheet] = conn.execute("SELECT content FROM gm_secrets WHERE campaign_id = ? AND kind = 'companion_sheet' AND subject = 'valerie-choi'",
+                           (cid,)).fetchall()
     assert "MINI-NPC-SECRET-2" in sheet[0]
     [ev] = events(conn, cid, "npc_met")
     assert ev["visibility"] == "player" and "Valerie Choi" in ev["summary"] and "MINI-NPC-SECRET" not in json.dumps(ev)

@@ -187,6 +187,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         settings.gm_token()  # make sure data/gm_token.txt exists for the GM-only API
         c = state.conn()
         init_db(c)
+        _ensure_residents(c)
         if (n := recover_interrupted_turns(c)):
             print(f"[startup] marked {n} interrupted turn(s) as failed")
         secure_dir(settings.codex_jobs_dir)
@@ -997,6 +998,16 @@ def _start_index(state: AppState, directory: Path) -> None:
             state.index_status = {"state": "failed", "error": str(exc)}
 
     threading.Thread(target=work, daemon=True, name="rulebook-index").start()
+
+
+def _ensure_residents(c) -> None:
+    """Every campaign holds every resident template (carousel/residents.py): a re-import that adds one reaches each
+    campaign on the next server start."""
+    from .carousel import residents
+    for (cid,) in c.execute("SELECT id FROM campaigns").fetchall():
+        with transaction(c):
+            if (n := residents.ensure(c, cid)):
+                print(f"[startup] campaign {cid}: {n} resident(s) added")
 
 
 def _quietly(fn, *args) -> None:

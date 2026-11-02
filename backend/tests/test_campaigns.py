@@ -53,7 +53,7 @@ def test_delete_needs_the_exact_name_backs_up_first_and_removes_only_that_campai
     r = client.post(f"/api/campaigns/{cid}/delete", json={"confirm_name": "Second Crawl"})
     assert r.status_code == 200, r.text
     out = r.json()
-    assert out["pictures_moved"] == 2 and out["rows"]["characters"] == 1
+    assert out["pictures_moved"] == 2 and out["rows"]["characters"] == 3   # the player character and the two mini residents
 
     assert not one(conn, "SELECT id FROM campaigns WHERE id = ?", (cid,))
     for t in [x["name"] for x in rows(conn, "SELECT name FROM sqlite_master WHERE type = 'table' AND sql NOT LIKE 'CREATE VIRTUAL%'")]:

@@ -685,6 +685,7 @@ COLUMN_MIGRATIONS = [
     *[(t, "group_no", "INTEGER NOT NULL DEFAULT 1") for t in ("campaigns", "stories")],
     ("stories", "rescue_json", "TEXT"),              # GM-only: {"character_id", "ticket_ref", "poster_ids"}
     ("stories", "deathwatch_pace", "TEXT NOT NULL DEFAULT 'full'"),
+    ("npc_profiles", "met", "INTEGER NOT NULL DEFAULT 1"),   # 0 = a resident the group hasn't met (carousel/residents.py)
     ("characters", "role_evidence_json", "TEXT"),   # {"quotes": [...], "contextual_reason": str} from silas_assigns             # NULL = the player's own words; arrival | arrival_omen (map_api.py travel)  # ordered quest ids that make up the immediate objective  # {cx, cy, k, ar}: square crop of the portrait image (null = default)  # comfy | codex (art/codex_image.py)  # staged tool calls and roll records while a turn is in flight
 ]
 

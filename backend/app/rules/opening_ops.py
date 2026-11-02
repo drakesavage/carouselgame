@@ -1,13 +1,12 @@
 """Validated new-game ops (registered into engine.CHANGE_OPS by rules/__init__.py; the flow is carousel/opening.py).
 
 `set_lure` records why the group came (the belief is the players', the truth is GM-only), `drop_friend` is the player's
-veto on a GM-made friend in the car, `introduce_resident` brings a Camp Dyer resident template into the campaign (Phase 7
-reuses it), `silas_assigns` is Silas dealing a character's Archetype and two starter tickets from quoted evidence,
+veto on a GM-made friend in the car, `introduce_resident` meets one of the campaign's Camp Dyer residents (carousel/residents.py),
+`silas_assigns` is Silas dealing a character's Archetype and two starter tickets from quoted evidence,
 `pay_off_lure` closes the lure at the Lodge, `advance_opening` moves the stage forward once blockers() is empty."""
 from __future__ import annotations
 
 import json
-import re
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -85,7 +84,7 @@ def _template(ctx: Ctx, rid: str) -> dict:
 
 
 def _resident_in_campaign(ctx: Ctx, rid: str) -> dict | None:
-    return one(ctx.conn, """SELECT c.* FROM characters c JOIN npc_profiles p ON p.character_id = c.id
+    return one(ctx.conn, """SELECT c.*, p.met FROM characters c JOIN npc_profiles p ON p.character_id = c.id
                             WHERE c.campaign_id = ? AND p.ref_id = ?""", (ctx.campaign_id, rid))
 
 
@@ -120,28 +119,25 @@ def _apply_drop_friend(ctx: Ctx, op: DropFriend) -> dict:
 
 
 def _apply_introduce_resident(ctx: Ctx, op: IntroduceResident) -> dict:
+    """Meets a resident the campaign already holds (carousel/residents.py); a campaign that lacks them gets them first."""
+    from ..carousel import residents
     require_reference(ctx.conn)
     t = _template(ctx, op.resident)
-    if _resident_in_campaign(ctx, op.resident):
-        raise ChangeError(f"{t['name']} is already in this campaign")
-    public = t["player"]   # the template's player-visible part; gm_only is t["gm"]
-    base = re.sub(r"[^a-z0-9]+", "-", t["name"].lower()).strip("-") or "resident"
-    slug, n = base, 2
-    while one(ctx.conn, "SELECT id FROM characters WHERE campaign_id = ? AND slug = ?", (ctx.campaign_id, slug)):
-        slug, n = f"{base}-{n}", n + 1
-    sheet = {"narrative": {"current_role": t["camp_role"]}} if t["camp_role"] else {}
-    char_id = ctx.conn.execute(
-        """INSERT INTO characters (campaign_id, slug, name, kind, roster_category, status, location, in_party, bio, sheet_json, provenance)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (ctx.campaign_id, slug, t["name"], "npc", "core_party" if op.in_party else "allied_npcs", "active", op.location,
-         int(op.in_party), public.get("appearance"), json.dumps(sheet), f"resident {op.resident}")).lastrowid
-    ctx.conn.execute("INSERT INTO npc_profiles (character_id, personality, last_seen, ref_id) VALUES (?,?,?,?)",
-                     (char_id, public.get("personality"), op.location, op.resident))
-    ctx.conn.execute("INSERT INTO gm_secrets (campaign_id, subject, kind, content, source, created_at) VALUES (?,?,?,?,?,?)",
-                     (ctx.campaign_id, slug, "companion_sheet", json.dumps(t["gm"], ensure_ascii=False), "resident template", now_iso()))
+    if not _resident_in_campaign(ctx, op.resident):
+        residents.ensure(ctx.conn, ctx.campaign_id)
+    c = _resident_in_campaign(ctx, op.resident)
+    if c["met"]:
+        raise ChangeError(f"{t['name']} is already met")
+    ctx.conn.execute("UPDATE characters SET in_party = ?, roster_category = ?, location = COALESCE(?, location) WHERE id = ?",
+                     (int(op.in_party), "core_party" if op.in_party else "allied_npcs", op.location, c["id"]))
+    ctx.conn.execute("UPDATE npc_profiles SET met = 1, last_seen = COALESCE(?, last_seen) WHERE character_id = ?", (op.location, c["id"]))
+    now = now_iso()
+    for line in residents.known_lines(ctx.conn, ctx.campaign_id, c["slug"]):
+        ctx.conn.execute("""INSERT INTO lore_facts (campaign_id, subject, fact, certainty, visibility, source, created_at)
+                            VALUES (?,?,?,?,?,?,?)""", (ctx.campaign_id, t["name"], line, "canonical", "player", "introduction", now))
     summary = f"Met {t['name']}" + (f", {t['camp_role']}" if t["camp_role"] else "")
-    ctx.event("npc_met", summary, {"character_id": char_id, "role": t["camp_role"]})
-    return {"summary": summary, "character_id": char_id}
+    ctx.event("npc_met", summary, {"character_id": c["id"], "role": t["camp_role"]})
+    return {"summary": summary, "character_id": c["id"]}
 
 
 def _apply_silas_assigns(ctx: Ctx, op: SilasAssigns) -> dict:
@@ -184,7 +180,7 @@ def _apply_pay_off_lure(ctx: Ctx, op: PayOffLure) -> dict:
         raise ChangeError("the lure is already paid off")
     if camp["node_id"] != opening.LODGE:
         raise ChangeError("the lure pays off at Dyer's Lodge; the group isn't there yet")
-    if camp["lure_resident"] and not _resident_in_campaign(ctx, camp["lure_resident"]):
+    if camp["lure_resident"] and not (_resident_in_campaign(ctx, camp["lure_resident"]) or {}).get("met"):
         raise ChangeError(f"introduce {_template(ctx, camp['lure_resident'])['name']} (introduce_resident) before paying off the lure")
     ctx.conn.execute("UPDATE campaigns SET lure_paid_off = ? WHERE id = ?", (op.how, ctx.campaign_id))
     summary = f"Why we came, answered: {op.how}"

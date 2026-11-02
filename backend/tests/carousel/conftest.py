@@ -61,3 +61,17 @@ def real_ref_conn(ref_real):
     attach_reference(c, path)
     yield c
     c.close()
+
+
+@pytest.fixture
+def real_campaign(ref_real, tmp_path):
+    """(campaign connection, campaign id): a new campaign on the real reference data, created as the game creates one."""
+    from app.campaigns import create
+    from app.carousel.refdata import attach_reference
+    from app.db import connect, init_db
+    c = connect(tmp_path / "campaign.db")
+    attach_reference(c, ref_real.execute("PRAGMA database_list").fetchone()[2])
+    init_db(c)
+    cid = create(c, name="Real town", character="Mara")
+    yield c, cid
+    c.close()

@@ -376,7 +376,8 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
 
     camp = one(conn, "SELECT * FROM campaigns WHERE id = ?", (cid,))
     now = camp["game_time_minutes"]
-    chars = rows(conn, "SELECT * FROM characters WHERE campaign_id = ? ORDER BY party_order, id", (cid,))
+    from ..carousel.residents import in_briefing
+    chars = in_briefing(conn, cid, rows(conn, "SELECT * FROM characters WHERE campaign_id = ? ORDER BY party_order, id", (cid,)))
     by_id = {c["id"]: c for c in chars}
     pc = by_id.get(camp["active_character_id"])
     scene = one(conn, "SELECT * FROM scenes WHERE campaign_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1", (cid,))

@@ -66,7 +66,8 @@ JOURNAL_KINDS = (("quest", "Quests"), ("commitment", "Promises & commitments"), 
 
 
 def _people(conn: sqlite3.Connection, cid: int) -> list[dict]:
-    return rows(conn, "SELECT id, name, slug FROM characters WHERE campaign_id = ?", (cid,))
+    from ..carousel.residents import unmet_clause
+    return rows(conn, f"SELECT id, name, slug FROM characters WHERE campaign_id = ? AND {unmet_clause('characters')}", (cid,))
 
 
 def _mentioned(text: str, people: list[dict]) -> list[dict]:
@@ -216,8 +217,9 @@ def search(conn: sqlite3.Connection, cid: int, q: str, limit: int = 40) -> list[
         phrase = 0.5 if q.lower().strip() in (title + " " + text).lower() else 0.0
         found.append({"type": kind, **ref, "title": title, "snippet": _snippet(text or title, words), "score": round(hit / len(words) + phrase + boost, 3)})
 
-    for c in rows(conn, """SELECT c.id, c.name, c.status, n.personality, n.known_motivation FROM characters c
-                           LEFT JOIN npc_profiles n ON n.character_id = c.id WHERE c.campaign_id = ?""", (cid,)):
+    from ..carousel.residents import unmet_clause
+    for c in rows(conn, f"""SELECT c.id, c.name, c.status, n.personality, n.known_motivation FROM characters c
+                            LEFT JOIN npc_profiles n ON n.character_id = c.id WHERE c.campaign_id = ? AND {unmet_clause('c')}""", (cid,)):
         consider("person", {"id": c["id"]}, c["name"], " ".join(filter(None, [c["personality"], c["known_motivation"], c["status"]])), 0.3)
     for q_ in journal(conn, cid)["quests"]:
         consider("quest", {"id": q_["id"], "status": q_["status"], "kind": q_["kind"]}, q_["title"],

@@ -29,10 +29,11 @@ def slug(name: str) -> str:
 
 def summary(conn: sqlite3.Connection) -> list[dict]:
     """Every campaign with what the manager shows: size, last play, archived."""
-    return rows(conn, """SELECT c.id, c.name, c.is_demo, c.data_source, c.current_location, c.archived, c.created_at, c.updated_at,
+    from .carousel.residents import unmet_clause
+    return rows(conn, f"""SELECT c.id, c.name, c.is_demo, c.data_source, c.current_location, c.archived, c.created_at, c.updated_at,
                                 (SELECT COUNT(*) FROM turns t WHERE t.campaign_id = c.id AND t.status = 'completed') AS turns,
                                 (SELECT MAX(t.created_at) FROM turns t WHERE t.campaign_id = c.id) AS last_played,
-                                (SELECT COUNT(*) FROM characters h WHERE h.campaign_id = c.id) AS characters,
+                                (SELECT COUNT(*) FROM characters h WHERE h.campaign_id = c.id AND {unmet_clause("h")}) AS characters,
                                 (SELECT name FROM characters h WHERE h.id = c.active_character_id) AS character
                          FROM campaigns c ORDER BY c.archived, c.id""")
 
@@ -53,6 +54,8 @@ def create(conn: sqlite3.Connection, *, name: str, character: str, location: str
         pc = conn.execute("""INSERT INTO characters (campaign_id, slug, name, kind, roster_category, status, in_party, party_order, sheet_json, provenance)
                              VALUES (?,?,?,?,?,?,?,?,?,?)""", (cid, slug(character), character, "pc", "player_character", "active", 1, 0, "{}", "manual")).lastrowid
         conn.execute("UPDATE campaigns SET active_character_id = ? WHERE id = ?", (pc, cid))
+        from .carousel import residents
+        residents.ensure(conn, cid)
         if opening:
             _start_opening(conn, cid)
         else:
@@ -126,6 +129,8 @@ def new_group(conn: sqlite3.Connection, cid: int, character: str) -> int:
                                                                 1, 0, "{}", "manual")).lastrowid
         conn.execute("UPDATE campaigns SET active_character_id = ? WHERE id = ?", (new, cid))
         conn.execute("UPDATE characters SET in_party = 0 WHERE campaign_id = ? AND in_party = 1 AND id != ?", (cid, new))
+        from .carousel import residents
+        residents.unmeet_all(conn, cid)
         for t in ("known_places", "omen_states", "zone_visits"):   # what the group knows; the town itself is unchanged
             conn.execute(f"DELETE FROM {t} WHERE campaign_id = ?", (cid,))
         _start_opening(conn, cid)

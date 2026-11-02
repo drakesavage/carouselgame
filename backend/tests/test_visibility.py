@@ -126,6 +126,10 @@ def test_no_gm_material_in_any_player_response(client, conn, campaign_id):
         text = r.text
         for s in SECRETS:
             assert s not in text, f"{s} leaked via {url}"
+    # the seeded campaign holds Valerie (mini CAR-NPC-003) unmet: her name, looks and introduction stay unseen there
+    for url in _player_urls(client, cid):
+        for s in ("Valerie", "Wiry, in a patched", "MINI-INTRO-LINE"):
+            assert s not in client.get(url).text, f"unmet resident {s!r} leaked via {url}"
 
 
 def test_gm_endpoints_require_token(client, settings, campaign_id):
