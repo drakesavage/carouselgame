@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BookOpen, Clapperboard, Map as MapIcon, ScrollText, Search, Settings2, Ticket, Users } from "lucide-react";
+import { BookOpen, Clapperboard, Map as MapIcon, MoreHorizontal, NotebookText, ScrollText, Search, Settings2, Ticket, Users, UsersRound } from "lucide-react";
 import { api, ActiveStory, Campaign, CampaignListItem, Manifest } from "./api";
 import { ManifestContext } from "./views/Hud";
 import { StoryView, SystemNotice } from "./views/Story";
@@ -28,6 +28,9 @@ type Tab = (typeof TABS)[number]["id"];
 /** Tab ids an older build stored, mapped onto the seven screens. */
 const OLD_TABS: Record<string, Tab> = { story: "scene", timeline: "chronicle", people: "lodge", characters: "lodge", world: "map" };
 const storedTab = (t: string | null): Tab => (t && TABS.some((x) => x.id === t) ? (t as Tab) : (t && OLD_TABS[t]) || "scene");
+
+/** Phone bottom navigation: four screens and More (the rest). */
+const BOTTOM: Tab[] = ["scene", "map", "wallpaper", "lodge"];
 
 type Toast = { id: number; text: string; style: string };
 
@@ -158,6 +161,17 @@ export default function App() {
     if (lastFate.current !== fate && fate === "deathwatch") setStatus("Your character has left the scene. Spectator view.");
     lastFate.current = fate;
   }, [fate]);
+  // narrower screens: the cast and the production notes open as drawers from the status strip (CSS decides when they're drawers)
+  const [drawer, setDrawer] = useState<"cast" | "notes" | null>(null);
+  const [more, setMore] = useState(false);
+  useEffect(() => { document.documentElement.dataset.drawer = drawer ?? ""; }, [drawer]);
+  useEffect(() => { setDrawer(null); setMore(false); }, [tab]);
+  useEffect(() => {
+    if (!drawer && !more) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setDrawer(null); setMore(false); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawer, more]);
   const openBehindTheScenes = () => { setTab("settings"); setTimeout(() => document.getElementById("behind-the-scenes")?.scrollIntoView({ block: "start" }), 50); };
 
   if (error) return <div className="view"><div className="error-box">Could not reach the Carousel server: {error}</div></div>;
@@ -195,6 +209,12 @@ export default function App() {
             {campaign.last_save ? `Saved at camp, ${ago(campaign.last_save.created_at)}` : "Not saved since leaving camp"}
           </span>
           <span className="spacer" />
+          {tab === "scene" && <>
+            <button className="btn small ghost drawer-btn cast-btn" aria-expanded={drawer === "cast"} onClick={() => setDrawer(drawer === "cast" ? null : "cast")}>
+              <UsersRound size={13} aria-hidden /> Cast</button>
+            <button className="btn small ghost drawer-btn notes-btn" aria-expanded={drawer === "notes"} onClick={() => setDrawer(drawer === "notes" ? null : "notes")}>
+              <NotebookText size={13} aria-hidden /> Production notes</button>
+          </>}
           {campaigns && campaigns.length > 0 && (
             <select className="select" value={cid ?? ""} aria-label="Campaign" onChange={(e) => {
               if (e.target.value === "manage") { setTab("settings"); setTimeout(() => document.getElementById("campaigns")?.scrollIntoView({ block: "start" }), 50); return; }
@@ -239,6 +259,25 @@ export default function App() {
       )}
       {cid != null && <CharacterSheetDialog cid={cid} charId={sheet} onClose={() => setSheet(null)} onChanged={refresh} />}
       <AnnouncementStage queue={announcing} onDone={(id) => setAnnouncing((q) => q.filter((a) => a.id !== id))} />
+      {drawer && <div className="drawer-scrim" onClick={() => setDrawer(null)} aria-hidden />}
+      {campaign && (
+        <nav className="bottom-nav" aria-label="Screens">
+          {BOTTOM.map((id) => { const t = TABS.find((x) => x.id === id)!; return (
+            <button key={id} className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} onClick={() => setTab(id)}>
+              <t.icon size={18} aria-hidden /><span>{id === "wallpaper" ? "Wallpaper" : t.label}</span>
+            </button>); })}
+          <button className={!BOTTOM.includes(tab) ? "active" : ""} aria-expanded={more} aria-haspopup="menu" onClick={() => setMore((m) => !m)}>
+            <MoreHorizontal size={18} aria-hidden /><span>More</span>
+          </button>
+          {more && (
+            <div className="more-menu" role="menu">
+              {TABS.filter((t) => !BOTTOM.includes(t.id)).map((t) => (
+                <button key={t.id} role="menuitem" className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)}><t.icon size={15} aria-hidden /> {t.label}</button>
+              ))}
+            </div>
+          )}
+        </nav>
+      )}
       <div className="sr-only" role="status" aria-live="polite">{status}</div>
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => <div key={t.id} className="toast" onClick={() => dismiss(t.id)} title="Click to dismiss"><SystemNotice text={t.text} style={t.style} /></div>)}

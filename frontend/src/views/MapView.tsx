@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { Footprints, Image as ImageIcon, Loader2, Map as MapIcon, X } from "lucide-react";
+import { Footprints, Image as ImageIcon, List, Loader2, Map as MapIcon, X } from "lucide-react";
 import { api, ApiError, Campaign, MapPlace, newKey, PlayerMap, TravelResult, TurnStatus } from "../api";
 import { Markdown } from "../ui";
+import { reducedMotion } from "../prefs";
 import { ArtLibrary } from "./ArtLibrary";
 import { PlaceDossier } from "./PlaceDossier";
 import "../map.css";
@@ -67,6 +68,7 @@ function TownMap({ cid, data, version, reload, onChanged }: {
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [shot, setShot] = useState<Shot | null>(null);
+  const [listOpen, setListOpen] = useState(false);   // narrow screens: the layers and place list are a drawer over the map
   const [layer, setLayer] = useState<Layer>(() => {
     try { const v = sessionStorage.getItem(`map-filters:${cid}`); return LAYERS.some((l) => l.id === v) ? (v as Layer) : "all"; } catch { return "all"; }
   });
@@ -83,7 +85,7 @@ function TownMap({ cid, data, version, reload, onChanged }: {
     : layer === "safe" ? p.safe : withOmen.has(p.id)));
 
   const select = (p: MapPlace, pan = false) => {
-    setMsg(null); setWalkTo(null); setSelected(p.id);
+    setMsg(null); setWalkTo(null); setSelected(p.id); setListOpen(false);
     if (pan) map.current?.panTo(ll(p.px, p.py));
   };
 
@@ -167,7 +169,7 @@ function TownMap({ cid, data, version, reload, onChanged }: {
   const walk = (t: TravelResult) => new Promise<void>((done) => {
     const pts = t.geometry_px, mk = party.current, m = map.current;
     if (!mk || !m || pts.length < 2) return done();
-    if (document.documentElement.dataset.motion === "reduce") { mk.setLatLng(ll(...pts[pts.length - 1])); return done(); }
+    if (reducedMotion()) { mk.setLatLng(ll(...pts[pts.length - 1])); return done(); }
     const seg = pts.slice(1).map((p, i) => Math.hypot(p[0] - pts[i][0], p[1] - pts[i][1]));
     const total = seg.reduce((a, b) => a + b, 0) || 1;
     const ms = Math.min(4000, t.minutes * 50);
@@ -190,7 +192,7 @@ function TownMap({ cid, data, version, reload, onChanged }: {
   const sel = selected ? data.known.find((p) => p.id === selected) : null;
 
   return (
-    <div className={`atlas ${sel ? "has-dossier" : ""}`}>
+    <div className={`atlas ${sel ? "has-dossier" : ""} ${listOpen ? "list-open" : ""}`}>
       <aside className="atlas-rail" aria-label="Map layers and places">
         <h3 className="rail-head">Map layers</h3>
         <div className="layers" role="radiogroup" aria-label="Show">
@@ -216,6 +218,8 @@ function TownMap({ cid, data, version, reload, onChanged }: {
       </aside>
       <div className="town-frame">
         <div ref={el} className="town-map" aria-label="Town map" />
+        <button className="btn small atlas-toggle" aria-expanded={listOpen} onClick={() => setListOpen((o) => !o)}>
+          {listOpen ? <X size={13} aria-hidden /> : <List size={13} aria-hidden />} Places</button>
         <div className="legend" aria-hidden>
           <span><i className="lg you" /> the group</span><span><i className="lg place" /> known place</span>
           <span><i className="lg safe" /> safe place</span><span><i className="lg omen" /> Omen seen</span>

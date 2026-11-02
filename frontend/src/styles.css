@@ -276,13 +276,7 @@ mark { background: rgba(var(--amber-rgb), 0.25); color: var(--text); border-radi
   .nav-label { display: none; }
   .nav button { padding: 7px 10px; }
 }
-@media (max-width: 1180px) {
-  .story-layout { grid-template-columns: 250px minmax(0, 1fr); }
-  .story-layout .side.right { display: none; }
-}
 @media (max-width: 820px) {
-  .story-layout { grid-template-columns: 1fr; padding: 8px; }
-  .story-layout .side.left { display: none; }
   .topbar { flex-wrap: wrap; padding: 8px; }
   .nav { order: 3; flex-basis: 100%; }
   .top-right { flex-wrap: wrap; min-width: 0; max-width: 100%; }

@@ -110,3 +110,5 @@
 .lib-pic.wide { width: 100%; height: 100px; cursor: default; }
 .lib-pic img { width: 100%; height: 100%; object-fit: cover; }
 .lib-name { font-size: 12.5px; font-weight: 600; }
+.atlas-toggle { display: none; position: absolute; z-index: 650; top: 10px; left: 54px; }
+.atlas.list-open .atlas-toggle { left: auto; right: 10px; }
