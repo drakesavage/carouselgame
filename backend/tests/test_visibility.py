@@ -14,7 +14,8 @@ SECRETS = ["GMSECRET-ALPHA-1", "GMSECRET-BRAVO-2", "GMSECRET-CHARLIE-3", "GMSECR
            "LURE-TRUTH-KILO-11", "MINI-NPC-SECRET-2",   # a new game's lure truth and its introduced resident's gm_only (mini CAR-NPC-003)
            "MINI-HIDDEN-ROOM", "OM-005", "open:cellar_door",   # an unreached farm room, and the Omen placed in a room not yet entered
            "CAUSE-SECRET-LIMA-7", "rescue_eligibility", "rescue_json", "poster_ids",   # a death cause, rescue eligibility, a Rescue's posters
-           "WHEREABOUTS-MIKE-12", "HOOK-NOVEMBER-13", "camp_leadership"]   # a whereabouts note's reason, a resident's hook, a GM-only relationship
+           "WHEREABOUTS-MIKE-12", "HOOK-NOVEMBER-13", "camp_leadership",   # a whereabouts note's reason, a resident's hook, a GM-only relationship
+           "SPOILERPLACE-OSCAR-14"]   # the spoiler place's gazetteer description (mini CAR-099)
 
 
 def _plant(conn, cid):
@@ -105,6 +106,8 @@ def _player_urls(client, cid):
         urls.append(f"/api/campaigns/{cid}/characters/{ch['id']}/dossier")
     for rec in client.get(f"/api/campaigns/{cid}/records").json():
         urls.append(f"/api/campaigns/{cid}/records/{rec['id']}")
+    for place in client.get(f"/api/campaigns/{cid}/map").json()["known"]:   # the dossier of every known place
+        urls.append(f"/api/campaigns/{cid}/places/{place['id']}")
     return urls
 
 
@@ -128,6 +131,10 @@ def test_no_gm_material_in_any_player_response(client, conn, campaign_id):
         text = r.text
         for s in SECRETS:
             assert s not in text, f"{s} leaked via {url}"
+    # an unknown place's dossier is a bare 404 (mini CAR-099, a spoiler place the group doesn't know)
+    for c in (cid, other, lost):
+        r = client.get(f"/api/campaigns/{c}/places/CAR-099")
+        assert r.status_code == 404 and not any(s in r.text for s in [*SECRETS, "UNKNOWNPLACE"])
     # the seeded campaign holds Valerie (mini CAR-NPC-003) unmet: her name, looks and introduction stay unseen there
     for url in _player_urls(client, cid):
         for s in ("Valerie", "Wiry, in a patched", "MINI-INTRO-LINE"):

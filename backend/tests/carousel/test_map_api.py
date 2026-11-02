@@ -89,6 +89,7 @@ def test_map_shows_only_known_places(client, conn, campaign_id):
     assert {p["id"] for p in m["known"]} == {"CAR-047", "CAR-002", "CAR-006"}
     square = next(p for p in m["known"] if p["id"] == "CAR-002")
     assert square["safe"] is True and square["image"] == "/location-art/identity_images/CAR-002_identity_v001.png"
+    assert square["how"] == "start"   # how the group knows it: start | visited | told (the town map's filters)
     assert m["position"]["node_id"] == "CAR-002" and m["position"]["place_id"] == "CAR-002" and m["position"]["label"] == "Town Square"
     assert m["omens"] == [] and m["last_route"] is None
     assert m["tiles"]["template"] == "/tiles/{z}/{x}/{y}.webp" and m["tiles"]["size"] == 12000
@@ -100,10 +101,11 @@ def test_travel_reveals_the_farm_and_its_omen(client, conn, campaign_id):
     assert seen_before["omens"] == []
     travel(client, campaign_id, to="CAR-086")
     m = get_map(client, campaign_id)
-    assert "CAR-086" in {p["id"] for p in m["known"]}
+    assert next(p for p in m["known"] if p["id"] == "CAR-086")["how"] == "visited"
     assert m["position"]["node_id"] == "CAR-086"
     sighted = {o["id"]: o for o in m["omens"]}
     assert "OM-001" in sighted and sighted["OM-001"]["description"] == "A scarecrow facing the wrong way" and sighted["OM-001"]["stage"] == "visible"
+    assert sighted["OM-001"]["place_id"] == "CAR-086"   # its place, now known: the town map files the Omen under it
     assert m["last_route"]["geometry_px"] and m["last_route"]["interrupted"]["omen_id"] in sighted
     assert "UNKNOWNPLACE-HOTEL-8" not in client.get(f"/api/campaigns/{campaign_id}/map").text
 
@@ -114,3 +116,10 @@ def test_old_known_world_route_is_gone(client, campaign_id):
 
 def test_location_art_is_served_read_only(client):
     assert client.get("/location-art/%2e%2e/data/review_reference_index.json").status_code == 404
+
+
+def test_an_omen_names_its_place_only_once_the_place_is_known(client, conn, campaign_id):
+    from tests.conftest import apply
+    apply(conn, campaign_id, {"op": "sight_omen", "omen": "OM-001", "how": "seen"})   # the farm isn't known yet
+    om = next(o for o in get_map(client, campaign_id)["omens"] if o["id"] == "OM-001")
+    assert om["place_id"] is None and "CAR-086" not in client.get(f"/api/campaigns/{campaign_id}/map").text

@@ -65,13 +65,14 @@ def player_map(conn, cid: int, levels: list) -> dict:
             px, py = _px(n["north"], n["west"]) if n else (None, None)
             out["position"] = {"node_id": camp["node_id"], "place_id": n["location_id"] if n else None, "px": px, "py": py,
                                "label": camp["current_location"]}
-        for p in rows(conn, """SELECT p.id, p.name, p.category, p.north, p.west FROM known_places k JOIN ref.places p ON p.id = k.place_id
+        for p in rows(conn, """SELECT p.id, p.name, p.category, p.north, p.west, k.how FROM known_places k JOIN ref.places p ON p.id = k.place_id
                                WHERE k.campaign_id = ? ORDER BY p.name""", (cid,)):
             px, py = _px(p["north"], p["west"])
             img = place_image(conn, p["id"])
-            out["known"].append({"id": p["id"], "name": p["name"], "category": p["category"], "px": px, "py": py,
+            out["known"].append({"id": p["id"], "name": p["name"], "category": p["category"], "px": px, "py": py, "how": p["how"],
                                  "safe": p["id"] in SAFE_PLACE_IDS, "image": f"/location-art/{img}" if img else None})
-        for o in rows(conn, """SELECT s.omen_id, s.stage, s.seen_at_node, o.description, p.north, p.west FROM omen_states s
+        known = {k["id"] for k in out["known"]}
+        for o in rows(conn, """SELECT s.omen_id, s.stage, s.seen_at_node, o.description, o.place_id, p.north, p.west FROM omen_states s
                                JOIN ref.omens o ON o.id = s.omen_id LEFT JOIN ref.places p ON p.id = o.place_id
                                WHERE s.campaign_id = ? ORDER BY s.omen_id""", (cid,)):
             north, west = o["north"], o["west"]
@@ -79,7 +80,9 @@ def player_map(conn, cid: int, levels: list) -> dict:
                 n = one(conn, "SELECT north, west FROM ref.graph_nodes WHERE id = ?", (o["seen_at_node"],))
                 north, west = (n["north"], n["west"]) if n else (north, west)
             px, py = _px(north, west)
-            out["omens"].append({"id": o["omen_id"], "description": o["description"], "px": px, "py": py, "stage": o["stage"]})
+            # its place only once the group knows that place: the map files the Omen there, never names an unknown one
+            out["omens"].append({"id": o["omen_id"], "description": o["description"], "px": px, "py": py, "stage": o["stage"],
+                                 "place_id": o["place_id"] if o["place_id"] in known else None})
     e = one(conn, "SELECT payload_json FROM events WHERE campaign_id = ? AND type = 'travel' AND rolled_back = 0 ORDER BY id DESC LIMIT 1", (cid,))
     if e:
         out["last_route"] = {"geometry_px": e["payload"].get("geometry_px") or [], "interrupted": e["payload"].get("interrupted")}

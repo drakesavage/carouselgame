@@ -126,11 +126,17 @@ export type RuleBrowse = { books?: { id: number; title: string; entry_count: num
   book?: { id: number; title: string; page_offset: number } | null; chapters?: { title: string; page: number; sections: { title: string; page: number }[] }[];
   entries?: { name: string; page: number; chapter: string | null }[] };
 /** The player's map (map_api.py): only known places and sighted Omens. Pixels are on the 12000² panel master. */
-export type MapPlace = { id: string; name: string; category: string | null; px: number; py: number; safe: boolean; image: string | null };
+export type MapPlace = { id: string; name: string; category: string | null; px: number; py: number; safe: boolean; image: string | null;
+  how: "start" | "visited" | "told" | null };
+/** A known place's dossier (place_api.py): never an unseen Omen, an unmet resident, a story's packet, or a spoiler place's text. */
+export type PlaceDossier = { id: string; name: string; category: string | null; region: string | null; image: string | null; safe: boolean;
+  known: { how: string | null; minutes: number | null }; description: string | null; visits: { count: number; last_minutes: number | null };
+  omens: { id: string; description: string; stage: string; seen_minutes: number | null }[];
+  stories: { title: string; ending: string; ended_minutes: number | null }[]; people: string[] };
 export type TileLevel = { zoom: number; image_width: number; image_height: number; columns: number; rows: number; master_pixels_per_level_pixel: number };
 export type PlayerMap = {
   position: { node_id: string; place_id: string | null; px: number; py: number; label: string | null } | null;
-  known: MapPlace[]; omens: { id: string; description: string; px: number; py: number; stage: string }[];
+  known: MapPlace[]; omens: { id: string; description: string; px: number; py: number; stage: string; place_id: string | null }[];
   last_route: { geometry_px: [number, number][]; interrupted: { omen_id: string; description: string } | null } | null;
   tiles: { template: string; levels: TileLevel[]; size: number };
 };
@@ -221,6 +227,7 @@ export const api = {
     items: string[]; items_total: number; quests: string[]; characters: string[]; messages_hidden: number; note: string }>(`api/campaigns/${cid}/saves/${saveId}/preview`),
   problemReport: (cid: number, turnId: number | null, note: string) => post<{ path: string; markdown: string; turn_id: number | null }>(`api/campaigns/${cid}/reports`, { turn_id: turnId, note }),
   map: (id: number) => req<PlayerMap>(`api/campaigns/${id}/map`),
+  place: (id: number, placeId: string) => req<PlaceDossier>(`api/campaigns/${id}/places/${encodeURIComponent(placeId)}`),
   story: (id: number) => req<{ active: ActiveStory | null }>(`api/campaigns/${id}/story`),
   stories: (id: number) => req<StoryHistory[]>(`api/campaigns/${id}/stories`),
   spendStatPoint: (id: number, charId: number, stat: string) => post<{ summary: string }>(`api/campaigns/${id}/characters/${charId}/stat-point`, { stat }),
@@ -308,5 +315,11 @@ export const api = {
   },
 };
 
+/** "Day 2 · 21:40" from game minutes (carousel/clock.py: minute 0 is 08:00 on day 1). */
+export const fmtClock = (m: number | null | undefined) => {
+  if (m == null) return "unknown";
+  const t = 480 + m;
+  return `Day ${Math.floor(t / 1440) + 1} · ${String(Math.floor(t / 60) % 24).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+};
 export const fmtMinutes = (m: number | null | undefined) => (m == null ? "?" : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m`);
 export const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);

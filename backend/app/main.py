@@ -964,6 +964,8 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     register_fate(app, state, write_lock)
     from .resident_api import register as register_residents
     register_residents(app, state)
+    from .place_api import register as register_places
+    register_places(app, state)
 
     # ------------------------------------------------------------------ frontend
     if FRONTEND_DIST.exists():

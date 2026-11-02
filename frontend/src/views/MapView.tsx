@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { Footprints, Image as ImageIcon, Loader2, Map as MapIcon, ShieldCheck, X } from "lucide-react";
+import { Footprints, Image as ImageIcon, Loader2, Map as MapIcon, X } from "lucide-react";
 import { api, ApiError, Campaign, MapPlace, newKey, PlayerMap, TravelResult, TurnStatus } from "../api";
 import { Markdown } from "../ui";
 import { ArtLibrary } from "./ArtLibrary";
+import { PlaceDossier } from "./PlaceDossier";
 import "../map.css";
 
 /**
@@ -13,9 +14,16 @@ import "../map.css";
  */
 const ll = (px: number, py: number) => L.latLng(-py, px);
 const INSET = 220;
+const LABEL_LEVEL = 2;   // pin labels show from this tile level up
 
-type Card = { kind: "place"; place: MapPlace } | { kind: "walk"; px: number; py: number };
 type Shot = { travel: TravelResult; place: MapPlace | null; turn: TurnStatus };
+type Layer = "all" | "visited" | "told" | "safe" | "omens";
+const LAYERS: { id: Layer; label: string }[] = [
+  { id: "all", label: "All known places" }, { id: "visited", label: "Visited" }, { id: "told", label: "Heard of" },
+  { id: "safe", label: "Safe places" }, { id: "omens", label: "Omens seen" },
+];
+
+const TENT = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 3 2 20h20L12 3Zm0 6 5 9H7l5-9Z" fill="currentColor"/></svg>';
 
 export function MapView({ cid, campaign, version, onChanged, openCharacter }: {
   cid: number; campaign: Campaign; version: number; onChanged: () => void; openCharacter: (id: number) => void;
@@ -27,32 +35,59 @@ export function MapView({ cid, campaign, version, onChanged, openCharacter }: {
   useEffect(() => { reload(); }, [cid, version]);
   return (
     <div className="view-inner mapview">
-      <div className="h1">Map</div>
-      <nav className="tabs" role="tablist" aria-label="Map sections">
-        <button role="tab" aria-selected={tab === "map"} className={tab === "map" ? "active" : ""} onClick={() => setTab("map")}><MapIcon size={13} /> Town</button>
-        <button role="tab" aria-selected={tab === "art"} className={tab === "art" ? "active" : ""} onClick={() => setTab("art")}><ImageIcon size={13} /> Art library</button>
-      </nav>
+      <div className="map-head">
+        <div><div className="kicker">The town map</div><div className="h1">A place full of unfinished stories.</div></div>
+        <nav className="tabs" role="tablist" aria-label="Map sections">
+          <button role="tab" aria-selected={tab === "map"} className={tab === "map" ? "active" : ""} onClick={() => setTab("map")}><MapIcon size={13} aria-hidden /> Town</button>
+          <button role="tab" aria-selected={tab === "art"} className={tab === "art" ? "active" : ""} onClick={() => setTab("art")}><ImageIcon size={13} aria-hidden /> Art library</button>
+        </nav>
+      </div>
       {error && <div className="sub">{error}</div>}
-      {tab === "map" && (data ? <TownMap cid={cid} data={data} reload={reload} onChanged={onChanged} /> : !error && <div className="muted">Loading…</div>)}
+      {tab === "map" && (data ? <TownMap cid={cid} data={data} version={version} reload={reload} onChanged={onChanged} /> : !error && <div className="muted">Loading…</div>)}
       {tab === "art" && <ArtLibrary cid={cid} campaign={campaign} places={data?.known ?? []} onChanged={onChanged} openCharacter={openCharacter} />}
     </div>
   );
 }
 
-function TownMap({ cid, data, reload, onChanged }: { cid: number; data: PlayerMap; reload: () => Promise<PlayerMap | null>; onChanged: () => void }) {
+/** Known places with a sighted Omen (map_api.py names an Omen's place only once the group knows it). */
+function omenPlaces(data: PlayerMap): Set<string> {
+  return new Set(data.omens.map((o) => o.place_id).filter((id): id is string => !!id));
+}
+
+function TownMap({ cid, data, version, reload, onChanged }: {
+  cid: number; data: PlayerMap; version: number; reload: () => Promise<PlayerMap | null>; onChanged: () => void;
+}) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const pins = useRef<L.LayerGroup | null>(null);
   const party = useRef<L.Marker | null>(null);
   const route = useRef<L.Polyline | null>(null);
-  const [card, setCard] = useState<Card | null>(null);
-  const [cardMsg, setCardMsg] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [walkTo, setWalkTo] = useState<{ px: number; py: number } | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [shot, setShot] = useState<Shot | null>(null);
+  const [layer, setLayer] = useState<Layer>(() => {
+    try { const v = sessionStorage.getItem(`map-filters:${cid}`); return LAYERS.some((l) => l.id === v) ? (v as Layer) : "all"; } catch { return "all"; }
+  });
+  useEffect(() => { try { sessionStorage.setItem(`map-filters:${cid}`, layer); } catch { /* storage unavailable */ } }, [cid, layer]);
   const top = data.tiles.levels.length ? data.tiles.levels[data.tiles.levels.length - 1].zoom : 5;
   const bottom = data.tiles.levels.length ? data.tiles.levels[0].zoom : 0;
 
-  // the map itself, once
+  const withOmen = useMemo(() => omenPlaces(data), [data]);
+  const counts: Record<Layer, number> = {
+    all: data.known.length, visited: data.known.filter((p) => p.how === "visited").length, told: data.known.filter((p) => p.how === "told").length,
+    safe: data.known.filter((p) => p.safe).length, omens: withOmen.size,
+  };
+  const shown = data.known.filter((p) => layer === "all" || (layer === "visited" ? p.how === "visited" : layer === "told" ? p.how === "told"
+    : layer === "safe" ? p.safe : withOmen.has(p.id)));
+
+  const select = (p: MapPlace, pan = false) => {
+    setMsg(null); setWalkTo(null); setSelected(p.id);
+    if (pan) map.current?.panTo(ll(p.px, p.py));
+  };
+
+  // the map itself, once: selection, zoom and centre survive every data refresh
   useEffect(() => {
     if (!el.current || map.current) return;
     const size = data.tiles.size;
@@ -63,60 +98,76 @@ function TownMap({ cid, data, reload, onChanged }: { cid: number; data: PlayerMa
     pins.current = L.layerGroup().addTo(m);
     const p = data.position;
     m.setView(p ? ll(p.px, p.py) : bounds.getCenter(), -2);
+    const labels = () => el.current?.classList.toggle("labels-on", m.getZoom() + top >= LABEL_LEVEL);
+    m.on("zoomend", labels);
+    labels();
     m.on("click", (e: L.LeafletMouseEvent) => {
       if (!(e.originalEvent as MouseEvent).altKey) return;
-      setCardMsg(null);
-      setCard({ kind: "walk", px: e.latlng.lng, py: -e.latlng.lat });
+      setMsg(null); setSelected(null);
+      setWalkTo({ px: e.latlng.lng, py: -e.latlng.lat });
     });
     map.current = m;
     return () => { m.remove(); map.current = null; };
   }, []);
 
-  // pins, party marker and the last walk
+  // pins (shape and label as well as colour), the group's ring and the last walk
   useEffect(() => {
     const m = map.current, g = pins.current;
     if (!m || !g) return;
     g.clearLayers();
-    for (const p of data.known) {
-      L.circleMarker(ll(p.px, p.py), { radius: p.safe ? 8 : 6, className: `pin ${p.safe ? "safe" : ""}`, weight: 2 })
-        .bindTooltip(p.name, { direction: "top", offset: [0, -6] })
-        .on("click", () => { setCardMsg(null); setCard({ kind: "place", place: p }); })
+    for (const p of shown) {
+      const omen = withOmen.has(p.id);
+      const kind = omen ? "omen" : p.safe ? "safe" : "place";
+      const html = omen ? "<span>!</span>" : p.safe ? TENT : "";
+      const label = `${p.name}${omen ? " (Omen seen)" : p.safe ? " (safe place)" : ""}`;
+      const mk = L.marker(ll(p.px, p.py), { icon: L.divIcon({ className: `pin-${kind}${p.id === selected ? " selected" : ""}`, html, iconSize: [22, 22] }),
+        keyboard: true, title: label })
+        .bindTooltip(p.name, { permanent: true, direction: "top", offset: [0, -12], className: "pin-label" })
+        .on("click", () => select(p))
         .addTo(g);
+      mk.getElement()?.setAttribute("aria-label", label);
     }
-    for (const o of data.omens) {
-      L.marker(ll(o.px, o.py), { icon: L.divIcon({ className: "omen-pin", html: "<span>!</span>", iconSize: [22, 22] }), keyboard: false })
-        .bindTooltip(o.description, { direction: "top" }).addTo(g);
+    // an Omen whose place the group doesn't know: a pin where it was seen, with no place name
+    if (layer === "all" || layer === "omens") {
+      for (const o of data.omens) {
+        if (o.place_id) continue;
+        const mk = L.marker(ll(o.px, o.py), { icon: L.divIcon({ className: "pin-omen", html: "<span>!</span>", iconSize: [22, 22] }), keyboard: false, title: o.description })
+          .bindTooltip(o.description, { direction: "top" }).addTo(g);
+        mk.getElement()?.setAttribute("aria-label", `Omen: ${o.description}`);
+      }
     }
     if (data.position) {
       const at = ll(data.position.px, data.position.py);
-      if (!party.current) party.current = L.marker(at, { icon: L.divIcon({ className: "party-pin", iconSize: [18, 18] }), zIndexOffset: 1000 }).addTo(m);
+      if (!party.current) party.current = L.marker(at, { icon: L.divIcon({ className: "party-pin", iconSize: [20, 20] }), zIndexOffset: 1000, keyboard: false }).addTo(m);
       else if (!shot) party.current.setLatLng(at);
       party.current.bindTooltip(`You: ${data.position.label ?? ""}`);
+      party.current.getElement()?.setAttribute("aria-label", `The group: ${data.position.label ?? ""}`);
     }
     route.current?.remove();
     if (data.last_route?.geometry_px.length) {
       route.current = L.polyline(data.last_route.geometry_px.map(([x, y]) => ll(x, y)), { className: "walked", weight: 3, dashArray: "6 6", interactive: false }).addTo(m);
     }
-  }, [data]);
+  }, [data, layer, selected, withOmen]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const go = async (to: { to: string } | { north: number; west: number }) => {
-    setBusy(true); setCardMsg(null);
+    setBusy(true); setMsg(null);
     try {
       const r = await api.travel(cid, to, newKey());
-      setCard(null);
+      setWalkTo(null);
       await walk(r.travel);
       const fresh = await reload();
       const place = fresh?.known.find((p) => p.id === r.travel.arrived) ?? null;
       setShot({ travel: r.travel, place, turn: r.turn });
     } catch (e) {
-      setCardMsg(e instanceof ApiError && e.status === 409 ? "The GM is still resolving a turn." : e instanceof ApiError ? e.message : String(e));
+      setMsg(e instanceof ApiError && e.status === 409 ? "The GM is still resolving a turn." : e instanceof ApiError ? e.message : String(e));
     } finally { setBusy(false); }
   };
 
-  /** Move the party marker along the route (the narration is already being written meanwhile). */
+  /** Move the group's marker along the route (the narration is already being written meanwhile). */
   const walk = (t: TravelResult) => new Promise<void>((done) => {
     const pts = t.geometry_px, mk = party.current, m = map.current;
     if (!mk || !m || pts.length < 2) return done();
+    if (document.documentElement.dataset.motion === "reduce") { mk.setLatLng(ll(...pts[pts.length - 1])); return done(); }
     const seg = pts.slice(1).map((p, i) => Math.hypot(p[0] - pts[i][0], p[1] - pts[i][1]));
     const total = seg.reduce((a, b) => a + b, 0) || 1;
     const ms = Math.min(4000, t.minutes * 50);
@@ -134,37 +185,55 @@ function TownMap({ cid, data, reload, onChanged }: { cid: number; data: PlayerMa
     requestAnimationFrame(step);
   });
 
-  const toWalk = (c: Extract<Card, { kind: "walk" }>) => ({ north: 1000 - c.py / 12, west: 1000 - c.px / 12 });
+  const toWalk = (c: { px: number; py: number }) => ({ north: 1000 - c.py / 12, west: 1000 - c.px / 12 });
   const here = data.position?.place_id;
+  const sel = selected ? data.known.find((p) => p.id === selected) : null;
 
   return (
-    <div className="town">
-      <div className="legend">
-        <span><i className="lg party" /> you</span><span><i className="lg pin" /> known place</span><span><i className="lg pin safe" /> safe place</span>
-        <span><i className="lg omen" /> something wrong</span><span className="muted">Click a place to go there; Alt-click a road to walk to it.</span>
-      </div>
+    <div className={`atlas ${sel ? "has-dossier" : ""}`}>
+      <aside className="atlas-rail" aria-label="Map layers and places">
+        <h3 className="rail-head">Map layers</h3>
+        <div className="layers" role="radiogroup" aria-label="Show">
+          {LAYERS.map((l) => (
+            <button key={l.id} role="radio" aria-checked={layer === l.id} className={`layer ${layer === l.id ? "on" : ""}`} onClick={() => setLayer(l.id)}>
+              <span>{l.label}</span><span className="count">{counts[l.id]}</span>
+            </button>
+          ))}
+        </div>
+        <h3 className="rail-head">Places</h3>
+        <ul className="place-list">
+          {[...shown].sort((a, b) => a.name.localeCompare(b.name)).map((p) => (
+            <li key={p.id}>
+              <button className={p.id === selected ? "on" : ""} aria-current={p.id === selected ? "true" : undefined} onClick={() => select(p, true)}>
+                <i className={`lg ${withOmen.has(p.id) ? "omen" : p.safe ? "safe" : "place"}`} aria-hidden />{p.name}
+                {p.id === here && <span className="here">you</span>}
+              </button>
+            </li>
+          ))}
+          {shown.length === 0 && <li className="muted small">No places on this layer.</li>}
+        </ul>
+        <p className="rail-note">Alt-click a road to walk to it.</p>
+      </aside>
       <div className="town-frame">
         <div ref={el} className="town-map" aria-label="Town map" />
+        <div className="legend" aria-hidden>
+          <span><i className="lg you" /> the group</span><span><i className="lg place" /> known place</span>
+          <span><i className="lg safe" /> safe place</span><span><i className="lg omen" /> Omen seen</span>
+        </div>
         <Inset data={data} pan={(px, py) => map.current?.panTo(ll(px, py))} />
-        {card && (
-          <div className="map-card" role="dialog" aria-label={card.kind === "place" ? card.place.name : "Walk here"}>
-            <button className="icon-btn close" onClick={() => setCard(null)} aria-label="Close"><X size={14} /></button>
-            {card.kind === "place" ? (<>
-              {card.place.image && <img className="card-art" src={card.place.image} alt="" loading="lazy" />}
-              <div className="card-name">{card.place.name}{card.place.safe && <span className="safe-tag"><ShieldCheck size={12} /> safe</span>}</div>
-              {card.place.category && <div className="muted small">{card.place.category}</div>}
-              {card.place.id === here ? <div className="muted small">You are here.</div>
-                : <button className="btn" disabled={busy} onClick={() => go({ to: card.place.id })}>{busy ? <Loader2 size={13} className="spin" /> : <Footprints size={13} />} Go here</button>}
-            </>) : (<>
-              <div className="card-name">Walk here?</div>
-              <div className="row"><button className="btn" disabled={busy} onClick={() => go(toWalk(card))}>{busy ? <Loader2 size={13} className="spin" /> : <Footprints size={13} />} Walk</button>
-                <button className="btn ghost" onClick={() => setCard(null)}>Cancel</button></div>
-            </>)}
-            {cardMsg && <div className="card-msg">{cardMsg}</div>}
+        {walkTo && (
+          <div className="map-card" role="dialog" aria-label="Walk here">
+            <button className="icon-btn close" onClick={() => setWalkTo(null)} aria-label="Close"><X size={14} /></button>
+            <div className="card-name">Walk here?</div>
+            <div className="row"><button className="btn" disabled={busy} onClick={() => go(toWalk(walkTo))}>{busy ? <Loader2 size={13} className="spin" /> : <Footprints size={13} />} Walk</button>
+              <button className="btn ghost" onClick={() => setWalkTo(null)}>Cancel</button></div>
+            {msg && <div className="card-msg">{msg}</div>}
           </div>
         )}
         {shot && <EstablishingShot shot={shot} onDone={() => { setShot(null); onChanged(); }} />}
       </div>
+      {sel && <PlaceDossier cid={cid} placeId={sel.id} version={version} here={sel.id === here} busy={busy} message={msg}
+        onTravel={() => go({ to: sel.id })} onClose={() => setSelected(null)} />}
     </div>
   );
 }
@@ -211,7 +280,7 @@ function EstablishingShot({ shot, onDone }: { shot: Shot; onDone: () => void }) 
         <div className="shot-title">{title}</div>
         <div className="shot-sub">{shot.travel.minutes} minutes on foot{shot.travel.interrupted ? <> · <b>{shot.travel.interrupted.description}</b></> : null}</div>
         {turn.status === "completed" && turn.result ? <div className="shot-text narration"><Markdown text={turn.result.narration} /></div>
-          : turn.status === "failed" ? <div className="shot-text">The GM couldn't narrate the arrival: {turn.error}. Retry from the Story tab.</div>
+          : turn.status === "failed" ? <div className="shot-text">The GM couldn't narrate the arrival: {turn.error}. Retry from the Scene.</div>
           : <div className="shot-text muted"><Loader2 size={14} className="spin" /> {turn.progress?.stage ?? "The GM is setting the scene"}…</div>}
         <button className="btn" onClick={onDone} disabled={turn.status === "processing"}>Continue</button>
       </div>
