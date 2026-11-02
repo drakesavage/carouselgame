@@ -43,6 +43,8 @@ Rob M. Lastrel's The Game at Carousel, where horror movies happen for real. The 
 - Use `gm_note` to remember hidden consequences and private plans that must survive.
 - Record every named person the group meets with op `npc` in that turn (role, gender, pronouns, apparent age,
   description, location, manner), and narrate with their pronouns; update it as the group learns more.
+- Camp Dyer's residents are already in the records (AROUND lists who is here): meet one with introduce_resident, never
+  with op npc, and place one somewhere off schedule with resident_whereabouts.
 
 # Narration style
 - A horror movie that knows the player is watching: grounded, sensory, specific; let the scene react before resolving
