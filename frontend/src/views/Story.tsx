@@ -7,7 +7,7 @@ import { StoryBar } from "./StoryBar";
 import { VenuePanel } from "./VenuePanel";
 import { AroundPanel } from "./AroundPanel";
 import { OpeningBar } from "./OpeningBar";
-import { DeathwatchBar } from "./DeathwatchBar";
+import { SPECTATOR_QUICK, SpectatorFrame, WipedScreen } from "./Spectator";
 import { startOpening } from "./Campaigns";
 import { SceneRail } from "./SceneRail";
 import { Decision, DiscoveryCards, IMPORTANT_CARDS, portraitSrc, RosterPanel, SceneBanner, splitDecision, StoryText, useManifest } from "./Hud";
@@ -31,9 +31,9 @@ const unreachable = (e: unknown) => (e instanceof ApiError && [502, 503, 504].in
 
 const PAGE = 80;  // the server's default page of messages
 
-export function StoryView({ campaign, story, onState, onNotices, openCharacter, openSaves, openBehindTheScenes }: {
+export function StoryView({ campaign, story, onState, onNotices, openCharacter, openSaves, openBehindTheScenes, openChronicle }: {
   campaign: Campaign; story: ActiveStory | null; onState: () => void; onNotices: (n: { text: string; style: string }[]) => void;
-  openCharacter: (id: number) => void; openSaves?: () => void; openBehindTheScenes?: () => void;
+  openCharacter: (id: number) => void; openSaves?: () => void; openBehindTheScenes?: () => void; openChronicle?: () => void;
 }) {
   const cid = campaign.id;
   const [messages, setMessages] = useState<Message[] | null>(null);
@@ -158,6 +158,9 @@ export function StoryView({ campaign, story, onState, onNotices, openCharacter, 
   const busy = !!pending && pending.status !== "failed";
   const lastGm = messages ? [...messages].reverse().find((x) => x.role === "gm")?.id : undefined;
   const first = pc?.name.split(" ")[0];
+  const spectating = !!campaign.fate?.deathwatch;
+  if (campaign.fate?.wiped) return <WipedScreen campaign={campaign} onChanged={onState} openSaves={openSaves} />;
+  const quick = spectating ? SPECTATOR_QUICK : QUICK.filter((q) => !q.safeOnly || campaign.safe_room);
   return (
     <div className="story-layout">
       <aside className="side left" aria-label="Cast">
@@ -165,11 +168,12 @@ export function StoryView({ campaign, story, onState, onNotices, openCharacter, 
       </aside>
       <div className="story-col">
         <div className="viewfinder" aria-hidden><i /><i /><i /><i /></div>
-        {story && <CameraLine camera={story.camera} />}
-        <StoryBar story={story} />
+        {spectating ? <SpectatorFrame campaign={campaign} story={story} onChanged={onState} openChronicle={openChronicle} /> : <>
+          {story && <CameraLine camera={story.camera} />}
+          <StoryBar story={story} />
+        </>}
         <SceneBanner campaign={campaign} onArt={onState} openCharacter={openCharacter} />
         <OpeningBar campaign={campaign} />
-        <DeathwatchBar campaign={campaign} onChanged={onState} openSaves={openSaves} />
         <VenuePanel cid={cid} version={campaign} onTurn={serverTurn} />
         <AroundPanel cid={cid} version={campaign} onTurn={serverTurn} />
         <div className="transcript" ref={scroller} onScroll={onScroll} role="log" aria-label="Story transcript">
@@ -225,8 +229,8 @@ export function StoryView({ campaign, story, onState, onNotices, openCharacter, 
             onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(draft); } }} />
           <div className="row wrap">
             <div className="quick">
-              <button className="btn small" disabled={busy} onClick={() => send(RECAP_PROMPT)} title="Ask the GM for a recap and scene-setting"><Sparkles size={13} /> Previously on…</button>
-              {QUICK.filter((q) => !q.safeOnly || campaign.safe_room).map((q) => (
+              {!spectating && <button className="btn small" disabled={busy} onClick={() => send(RECAP_PROMPT)} title="Ask the GM for a recap and scene-setting"><Sparkles size={13} aria-hidden /> Previously on…</button>}
+              {quick.map((q) => (
                 <button key={q.label} className="btn small ghost" disabled={busy} onClick={() => { setDraft((d) => (d ? d + " " : "") + q.text); textarea.current?.focus(); }}>
                   <q.icon size={13} aria-hidden /> {q.label}
                 </button>

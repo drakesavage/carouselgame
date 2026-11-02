@@ -95,3 +95,33 @@
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-motion="full"]) .story-col, :root:not([data-motion="full"]) .viewfinder, :root:not([data-motion="full"]) .establishing { transition: none; }
 }
+
+/* ------------------------------------------------------------------ Death Spectator (views/Spectator.tsx) */
+:root[data-fate="deathwatch"] .viewfinder { display: none; }
+.spectator {
+  position: relative; text-align: center; padding: 22px 24px 14px; border-radius: var(--radius);
+  background: radial-gradient(80% 120% at 50% 0%, rgba(var(--blood-rgb), 0.16), transparent 65%), #141217; border: 1px solid var(--line);
+  display: grid; gap: 10px; justify-items: center;
+}
+.spectator-corners { position: absolute; inset: 6px; pointer-events: none; }
+.spectator-corners i { position: absolute; width: 18px; height: 18px; border: 0 solid var(--fog); opacity: 0.7; }
+.spectator-corners i:nth-child(1) { top: 0; left: 0; border-width: 2px 0 0 2px; }
+.spectator-corners i:nth-child(2) { top: 0; right: 0; border-width: 2px 2px 0 0; }
+.spectator-corners i:nth-child(3) { bottom: 0; left: 0; border-width: 0 0 2px 2px; }
+.spectator-corners i:nth-child(4) { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
+.spectator-kicker { font: 600 11px/1 var(--body); letter-spacing: 0.2em; text-transform: uppercase; color: #E58C93; }
+.spectator-title { font-family: var(--display); font-weight: 600; font-size: clamp(28px, 4vw, 44px); line-height: 1.05; letter-spacing: 0.04em; text-transform: uppercase; color: var(--parchment); margin: 0; }
+.spectator-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; }
+.spectator .storybar.plot { width: 100%; background: transparent; border-color: var(--line); }
+.spectator-error { color: #E58C93; font-size: 13px; }
+:root[data-fate="deathwatch"] .transcript { animation: spectate-dim 600ms ease-in-out 1; }
+@keyframes spectate-dim { 50% { opacity: 0.7; } }
+
+/* the end card */
+.wiped { height: 100%; overflow: auto; padding: 6vh 20px 40px; display: grid; gap: 22px; align-content: start; justify-items: center; }
+.end-card { text-align: center; padding: 40px 48px; border: 1px solid rgba(var(--brass-rgb), 0.4); border-radius: var(--radius);
+  background: radial-gradient(70% 90% at 50% 0%, rgba(var(--blood-rgb), 0.18), transparent 70%), #141217; width: min(720px, 100%); }
+.end-title { font-family: var(--display); font-weight: 600; font-size: clamp(48px, 9vw, 96px); letter-spacing: 0.12em; color: var(--parchment); line-height: 1; }
+.end-line { font: italic 19px/1.5 var(--story); color: var(--text-2); margin: 14px 0 0; }
+.wiped > section, .end-form { width: min(960px, 100%); }
+.end-form .input { flex: 1; min-width: 180px; }

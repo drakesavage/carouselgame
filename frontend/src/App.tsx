@@ -148,6 +148,11 @@ export default function App() {
     }
     if (said.length) setStatus(said.join(" "));
   }, [story]);
+  const lastFate = useRef(fate);
+  useEffect(() => {
+    if (lastFate.current !== fate && fate === "deathwatch") setStatus("Your character has left the scene. Spectator view.");
+    lastFate.current = fate;
+  }, [fate]);
   const openBehindTheScenes = () => { setTab("settings"); setTimeout(() => document.getElementById("behind-the-scenes")?.scrollIntoView({ block: "start" }), 50); };
 
   if (error) return <div className="view"><div className="error-box">Could not reach the Carousel server: {error}</div></div>;
@@ -204,7 +209,7 @@ export default function App() {
             {/* the Scene stays mounted while another screen is open: the draft, scroll position and a turn in flight survive */}
             <div className="scene-host" hidden={tab !== "scene"}>
               <StoryView key={cid} campaign={campaign} story={story} onState={refresh} onNotices={pushNotices} openCharacter={setSheet}
-                openSaves={() => setTab("settings")} openBehindTheScenes={openBehindTheScenes} />
+                openSaves={() => setTab("settings")} openBehindTheScenes={openBehindTheScenes} openChronicle={() => setTab("chronicle")} />
             </div>
             {tab !== "scene" && (
               <div className="view">
