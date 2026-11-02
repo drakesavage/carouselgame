@@ -13,6 +13,7 @@ import { PeopleView } from "./views/People";
 import { RecordsView, RulesView } from "./views/Reference";
 import { SettingsView } from "./views/Settings";
 import { Wallpaper } from "./views/Wallpaper";
+import { TicketsView } from "./views/Tickets";
 
 const TABS = [
   { id: "scene", label: "Scene", icon: Clapperboard },
@@ -229,7 +230,7 @@ export default function App() {
               <div className={`view ${tab === "wallpaper" ? "wp-view" : ""}`}>
                 {tab === "map" && <MapView cid={cid} campaign={campaign} version={version} onChanged={refresh} openCharacter={setSheet} />}
                 {tab === "wallpaper" && <Wallpaper campaign={campaign} story={story} version={version} onChanged={refresh} openTickets={() => setTab("tickets")} />}
-                {tab === "tickets" && <div className="view-inner muted">No tickets to show yet.</div>}
+                {tab === "tickets" && <TicketsView campaign={campaign} version={version} />}
                 {tab === "chronicle" && <ChronicleView cid={cid} version={version} openCharacter={setSheet} />}
                 {tab === "lodge" && <PeopleView cid={cid} version={version} openCharacter={setSheet} openQuest={() => setTab("chronicle")}
                   pcAssignment={campaign.roster.find((c) => c.id === campaign.active_character_id)?.assignment}
