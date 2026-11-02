@@ -8,18 +8,15 @@ importers:
 
   .:
     dependencies:
-      '@fontsource/chakra-petch':
+      '@fontsource/cabin':
         specifier: 5.1.0
         version: 5.1.0
-      '@fontsource/ibm-plex-sans':
+      '@fontsource/eb-garamond':
         specifier: 5.1.0
         version: 5.1.0
       '@fontsource/jetbrains-mono':
         specifier: 5.1.1
         version: 5.1.1
-      '@fontsource/literata':
-        specifier: 5.1.0
-        version: 5.1.0
       '@radix-ui/react-dialog':
         specifier: 1.1.2
         version: 1.1.2(@types/react-dom@18.3.1)(@types/react@18.3.12)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -302,17 +299,14 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
-  '@fontsource/chakra-petch@5.1.0':
-    resolution: {integrity: sha512-xKSWOLEJyNOejn/ZQDyQwL+oz6cQXtoTaVCxjszEGUKZQnJMv9QpYj+dyPD/wEjbEbje6a0TergWsahQCclOIw==}
+  '@fontsource/cabin@5.1.0':
+    resolution: {integrity: sha512-jKaPgLy+MXAQVGPop/RjRFvQGl8dtuUyN9DHZLZG1Ibxv1QVx44hiUiJmIA7qTBcOA1i0YlwyYG1s3vR3kcLKg==}
 
-  '@fontsource/ibm-plex-sans@5.1.0':
-    resolution: {integrity: sha512-v2aFHGh33ogG+At6dVNUCX6vWlNAhQ6STWj5WrBKPxVWX1SsAnHNq8sXQBa7WHEt29Irmozuk7GTp6GzFlpwdQ==}
+  '@fontsource/eb-garamond@5.1.0':
+    resolution: {integrity: sha512-FEIWkPgBY9CEhZP1YmA36k/f5Hj4z1Tv2FxIiG8aYHmkKGZNVCVIeO345lCVtpG32ZVQKs8te+JpVtg/GCHXyg==}
 
   '@fontsource/jetbrains-mono@5.1.1':
     resolution: {integrity: sha512-5rwvmdQQpXev4LlBX1P+7h2dguu6iwW/9Npjde4+DEq+HgpVJI/7QY8DI1NVVFdvLtXZNP+vO2L/5BQED6FUhA==}
-
-  '@fontsource/literata@5.1.0':
-    resolution: {integrity: sha512-tua4CzPKfoKTrHUaSdsfMyaNwvAWATdqYtQO7qampM++XPiQ1mQV/XBwa5vHGBmdXobp2NSfcMy7O4z1t6nxHQ==}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -1489,13 +1483,11 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@fontsource/chakra-petch@5.1.0': {}
+  '@fontsource/cabin@5.1.0': {}
 
-  '@fontsource/ibm-plex-sans@5.1.0': {}
+  '@fontsource/eb-garamond@5.1.0': {}
 
   '@fontsource/jetbrains-mono@5.1.1': {}
-
-  '@fontsource/literata@5.1.0': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:

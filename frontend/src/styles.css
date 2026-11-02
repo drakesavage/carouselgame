@@ -1,27 +1,19 @@
 :root {
-  --bg: #06080c;
-  --bg-2: #0a0e14;
-  --panel: #0d1219;
-  --panel-2: #121a23;
-  --panel-3: #18222d;
-  --line: #1f2c39;
-  --line-2: #2b3c4d;
-  --text: #dbe5ec;
-  --text-2: #aab8c4;
-  --muted: #71828f;
-  --cyan: #3ef0c8;
-  --cyan-dim: #1d7f6c;
-  --magenta: #ff3d7f;
-  --magenta-dim: #7a1f40;
-  --amber: #ffb547;
-  --red: #ff5257;
-  --hp: #46e38f;
-  --mana: #5aa9ff;
-  --violet: #b48cff;
-  --display: "Chakra Petch", "Segoe UI", sans-serif;
-  --body: "IBM Plex Sans", "Segoe UI", sans-serif;
+  /* the Carousel palette and faces live in theme-carousel.css; these are only the fallbacks before it loads */
+  --bg: #0E0E12;
+  --bg-2: #121217;
+  --panel: #171820;
+  --panel-2: #242027;
+  --panel-3: #2B262E;
+  --line: #2E2A31;
+  --line-2: #3D3640;
+  --text: #E8DECF;
+  --text-2: #CFC5B6;
+  --muted: #A5A0A1;
+  --display: "EB Garamond", Georgia, serif;
+  --body: "Cabin", "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", Consolas, monospace;
-  --radius: 4px;
+  --radius: 2px;
   color-scheme: dark;
 }
 

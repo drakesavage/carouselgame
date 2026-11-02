@@ -237,7 +237,7 @@ export function StoryView({ campaign, onState, onNotices, openCharacter, openQue
         </div>
         {unseen && <button className="btn small to-latest" onClick={toLatest}><ArrowDown size={13} /> New narration</button>}
         <div className="composer">
-          <textarea ref={textarea} value={draft} onChange={(e) => setDraft(e.target.value)} disabled={busy}
+          <textarea id="composer" ref={textarea} value={draft} onChange={(e) => setDraft(e.target.value)} disabled={busy}
             placeholder={campaign.fate?.deathwatch ? "Ask for a cut, a pace, or a summary"
               : `What does ${pc?.name.split(" ")[0] ?? "your crawler"} do? Describe actions, dialogue, plans — anything.`}
             onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(draft); } }} />

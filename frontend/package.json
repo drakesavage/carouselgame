@@ -9,10 +9,9 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
-    "@fontsource/chakra-petch": "5.1.0",
-    "@fontsource/ibm-plex-sans": "5.1.0",
+    "@fontsource/cabin": "5.1.0",
+    "@fontsource/eb-garamond": "5.1.0",
     "@fontsource/jetbrains-mono": "5.1.1",
-    "@fontsource/literata": "5.1.0",
     "@radix-ui/react-dialog": "1.1.2",
     "@radix-ui/react-tooltip": "1.1.3",
     "leaflet": "1.9.4",

@@ -1,60 +1,74 @@
-import { useCallback, useEffect, useState } from "react";
-import { Backpack, BookOpen, Clock3, FileText, Flag, Map as MapIcon, MessageSquareText, Search, Settings2, UserRound, Users } from "lucide-react";
-import { api, Campaign, CampaignListItem, Manifest } from "./api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { BookOpen, Clapperboard, Map as MapIcon, ScrollText, Search, Settings2, Ticket, Users } from "lucide-react";
+import { api, ActiveStory, Campaign, CampaignListItem, Manifest } from "./api";
 import { ManifestContext } from "./views/Hud";
-import { Chip } from "./ui";
 import { StoryView, SystemNotice } from "./views/Story";
 import { CharacterSheetDialog } from "./views/Sheet";
-import { CharactersView } from "./views/Journals";
-import { ChronicleView, QuestsView } from "./views/Journal";
+import { ChronicleView } from "./views/Journal";
 import { SearchDialog } from "./views/Search";
 import { MapView } from "./views/MapView";
 import { Announcement, AnnouncementStage, THEATRICAL } from "./views/Announce";
 import { applyMotion, getPrefs, play } from "./prefs";
-import { InventoryView } from "./views/Inventory";
 import { PeopleView } from "./views/People";
 import { RecordsView, RulesView } from "./views/Reference";
 import { SettingsView } from "./views/Settings";
 
 const TABS = [
-  { id: "story", label: "Story", icon: MessageSquareText },
-  { id: "characters", label: "Characters", icon: UserRound },
-  { id: "inventory", label: "Inventory", icon: Backpack },
-  { id: "quests", label: "Quests", icon: Flag },
-  { id: "people", label: "People", icon: Users },
-  { id: "timeline", label: "Chronicle", icon: Clock3 },
-  { id: "map", label: "Map", icon: MapIcon },
-  { id: "rules", label: "Rules", icon: BookOpen },
-  { id: "records", label: "Records", icon: FileText },
+  { id: "scene", label: "Scene", icon: Clapperboard },
+  { id: "map", label: "Town Map", icon: MapIcon },
+  { id: "wallpaper", label: "Red Wallpaper", icon: ScrollText },
+  { id: "tickets", label: "Tickets", icon: Ticket },
+  { id: "chronicle", label: "Chronicle", icon: BookOpen },
+  { id: "lodge", label: "Lodge", icon: Users },
   { id: "settings", label: "Saves & Settings", icon: Settings2 },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
+/** Tab ids an older build stored, mapped onto the seven screens. */
+const OLD_TABS: Record<string, Tab> = { story: "scene", timeline: "chronicle", people: "lodge", characters: "lodge", world: "map" };
+const storedTab = (t: string | null): Tab => (t && TABS.some((x) => x.id === t) ? (t as Tab) : (t && OLD_TABS[t]) || "scene");
 
 type Toast = { id: number; text: string; style: string };
+
+/** "14 min ago" from an ISO timestamp. */
+export function ago(iso: string, now = Date.now()) {
+  const m = Math.max(0, Math.round((now - Date.parse(iso)) / 60000));
+  if (Number.isNaN(m)) return "";
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  return h < 24 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
+}
 
 export default function App() {
   const [campaigns, setCampaigns] = useState<CampaignListItem[] | null>(null);
   const [cid, setCid] = useState<number | null>(null);
   const [campaign, setCampaign] = useState<Campaign | null>(null);
-  const [tab, setTab] = useState<Tab>(() => {
-    try { const t = localStorage.getItem("tab"); return t === "world" ? "map" : TABS.some((x) => x.id === t) ? (t as Tab) : "story"; } catch { return "story"; }
-  });
+  const [tab, setTab] = useState<Tab>(() => { try { return storedTab(localStorage.getItem("tab")); } catch { return "scene"; } });
   const [version, setVersion] = useState(0);
+  const [story, setStory] = useState<ActiveStory | null>(null);
   const [sheet, setSheet] = useState<number | null>(null);
-  const [focusQuest, setFocusQuest] = useState<number | null>(null);
   const [searching, setSearching] = useState(false);
   const [announcing, setAnnouncing] = useState<Announcement[]>([]);
+  const [, setTick] = useState(0);  // re-renders the "saved … ago" line
+  useEffect(() => { const iv = setInterval(() => setTick((t) => t + 1), 60000); return () => clearInterval(iv); }, []);
   useEffect(() => applyMotion(), []);
-  useEffect(() => { // Ctrl+K anywhere, or "/" when not typing, opens search
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement)?.tagName ?? "") || (e.target as HTMLElement)?.isContentEditable;
-      if ((e.key.toLowerCase() === "k" && (e.ctrlKey || e.metaKey)) || (e.key === "/" && !typing)) { e.preventDefault(); setSearching(true); }
+      // Ctrl+K anywhere, or "/" when not typing, opens search
+      if ((e.key.toLowerCase() === "k" && (e.ctrlKey || e.metaKey)) || (e.key === "/" && !typing && !e.ctrlKey && !e.metaKey)) { e.preventDefault(); setSearching(true); return; }
+      // Alt+1…Alt+7 switch screens
+      if (e.altKey && !e.ctrlKey && /^[1-7]$/.test(e.key)) { e.preventDefault(); setTab(TABS[Number(e.key) - 1].id); return; }
+      // Ctrl+/ goes to the composer
+      if (e.key === "/" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault(); setTab("scene");
+        setTimeout(() => document.getElementById("composer")?.focus(), 0);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [provider, setProvider] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [manifest, setManifest] = useState<Manifest>({ locations: {}, characters: {} });
   useEffect(() => { api.manifest().then((m) => setManifest({ locations: m.locations ?? {}, characters: m.characters ?? {} })).catch(() => {}); }, []);
@@ -62,7 +76,6 @@ export default function App() {
   useEffect(() => {
     Promise.all([api.campaigns(), api.settings()]).then(([list, prefs]) => {
       setCampaigns(list);
-      setProvider(prefs.gm_provider);
       const preferred = list.find((c) => c.id === prefs.active_campaign_id) ?? list.find((c) => !c.is_demo) ?? list[0];
       setCid(preferred?.id ?? null);
     }).catch((e) => setError(String(e)));
@@ -74,8 +87,14 @@ export default function App() {
     setCampaign(await api.campaign(cid));
     setVersion((v) => v + 1);
   }, [cid]);
-  useEffect(() => { setCampaign(null); refresh().catch((e) => setError(String(e))); }, [refresh]);
-  useEffect(() => { const iv = setInterval(() => api.health().then((h) => setProvider(h.provider)).catch(() => {}), 15000); return () => clearInterval(iv); }, []);
+  useEffect(() => { setCampaign(null); setStory(null); refresh().catch((e) => setError(String(e))); }, [refresh]);
+  // the running story (camera, Plot Cycle) comes from the engine on every state change
+  useEffect(() => {
+    if (cid == null) return;
+    let live = true;
+    api.story(cid).then((s) => { if (live) setStory(s.active); }).catch(() => { if (live) setStory(null); });
+    return () => { live = false; };
+  }, [cid, version]);
 
   const chooseCampaign = async (id: number | null) => {  // null: the open campaign was deleted and none is left
     if (id == null) { setCid(null); setCampaign(null); setCampaigns(await api.campaigns()); return; }
@@ -95,52 +114,59 @@ export default function App() {
     setToasts((t) => [...t, ...add].slice(-4));
     add.forEach((t) => setTimeout(() => setToasts((all) => all.filter((x) => x.id !== t.id)), 9000));
   };
-  const openQuest = (id?: number) => { setFocusQuest(id ?? null); setTab("quests"); };
+  const pushRef = useRef(pushNotices);
+  pushRef.current = pushNotices;
   useEffect(() => { // any component can announce: window.dispatchEvent(new CustomEvent("crawler:announce", { detail: { text, style } }))
-    const on = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.text) pushNotices([{ text: String(d.text), style: String(d.style ?? "notice") }]); };
+    const on = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.text) pushRef.current([{ text: String(d.text), style: String(d.style ?? "notice") }]); };
     window.addEventListener("crawler:announce", on);
     return () => window.removeEventListener("crawler:announce", on);
-  });
-  const dismiss = (id: number) => {
-    setToasts((all) => all.filter((x) => x.id !== id));
-  };
+  }, []);
+  const dismiss = (id: number) => setToasts((all) => all.filter((x) => x.id !== id));
 
-  // atmosphere: the whole HUD reads the situation (theme-dcc.css): warm in a saferoom, cold while exploring, red in a
-  // fight, and more urgent as the floor runs out of time. Only CSS listens to these; nothing else changes.
-  const mood = !campaign ? "explore" : campaign.encounter ? "combat" : campaign.safe_room ? "safe" : "explore";
-  const left = campaign?.floor_clock?.remaining_minutes;
-  const urgency = left == null ? "calm" : left < 6 * 60 ? "critical" : left < 24 * 60 ? "warn" : "calm";
+  // the mood comes from engine state only: CSS listens to these, no component invents camera or fate
+  const camera = story ? story.camera : "none";
+  const fate = campaign?.fate?.wiped ? "wiped" : campaign?.fate?.deathwatch ? "deathwatch" : "alive";
+  const safe = campaign?.safe_room ? "1" : "0";
   useEffect(() => {
-    document.documentElement.dataset.mood = mood;
-    document.documentElement.dataset.urgency = urgency;
-  }, [mood, urgency]);
+    const d = document.documentElement.dataset;
+    d.camera = camera; d.fate = fate; d.safe = safe;
+  }, [camera, fate, safe]);
 
-  if (error) return <div className="view"><div className="error-box">Could not reach the Crawler Console server: {error}</div></div>;
+  if (error) return <div className="view"><div className="error-box">Could not reach the Carousel server: {error}</div></div>;
+  const clock = campaign?.clock;
   return (
     <ManifestContext.Provider value={manifest}>
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-show">Dungeon Crawler World</span>
-          <span className="brand-word">Crawler Console</span>
+          <span className="brand-word">CAROUSEL</span>
+          <span className="brand-line">A game of horror movies</span>
         </div>
-        <nav className="nav" aria-label="Views">
+        <nav className="nav" aria-label="Screens">
           {/* icon-only at narrower widths: the label stays the accessible name and shows as a tooltip on hover or focus */}
-          {TABS.map((t) => (
-            <button key={t.id} className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)} aria-current={tab === t.id ? "page" : undefined} data-tip={t.label}>
+          {TABS.map((t, i) => (
+            <button key={t.id} className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)} aria-current={tab === t.id ? "page" : undefined}
+              data-tip={t.label} title={`${t.label} (Alt+${i + 1})`}>
               <t.icon size={15} aria-hidden /><span className="nav-label">{t.label}</span>
             </button>
           ))}
         </nav>
         <div className="top-right">
-          {campaign && <button className="btn small ghost top-search" onClick={() => setSearching(true)} title="Search what the party knows (Ctrl+K)"><Search size={14} /> Search</button>}
-          {campaign && (
-            <>
-              {campaign.is_demo ? <span className="demo-ribbon">DEMO DATA</span> : null}
-            </>
-          )}
-          <Chip tone={provider === "codex" ? "cyan" : "amber"} title="Runtime GM provider (change in Saves & Settings)">GM: {provider || "…"}</Chip>
-          <span className="live-bug" title="The Syndicate is watching. Every second of it."><i aria-hidden /> Live</span>
+          {campaign && <button className="btn small ghost top-search" onClick={() => setSearching(true)} title="Search what the group knows (Ctrl+K)"><Search size={14} aria-hidden /> Search</button>}
+          {campaign?.is_demo ? <span className="demo-ribbon">DEMO DATA</span> : null}
+        </div>
+      </header>
+      {campaign && (
+        <div className="status-strip" aria-label="Where things stand">
+          <span>
+            <span className="chapter-kicker">{story ? "Now playing" : "Location"}</span>
+            <span className="chapter">{story ? story.title : campaign.current_location ?? "Somewhere in Carousel"}</span>
+          </span>
+          {clock && <span className="clock">Day {clock.day} · {clock.time}</span>}
+          <span className={`save-note${campaign.last_save ? "" : " unsaved"}`}>
+            {campaign.last_save ? `Saved at camp, ${ago(campaign.last_save.created_at)}` : "Not saved since leaving camp"}
+          </span>
+          <span className="spacer" />
           {campaigns && campaigns.length > 0 && (
             <select className="select" value={cid ?? ""} aria-label="Campaign" onChange={(e) => {
               if (e.target.value === "manage") { setTab("settings"); setTimeout(() => document.getElementById("campaigns")?.scrollIntoView({ block: "start" }), 50); return; }
@@ -151,34 +177,43 @@ export default function App() {
             </select>
           )}
         </div>
-      </header>
+      )}
       <main className="main">
         {!campaigns ? <div className="view muted">Loading…</div> : campaigns.length === 0 || cid == null ? (
           <div className="view"><div className="view-inner"><SettingsView cid={0} version={version} onChanged={refresh} onCampaign={chooseCampaign} /></div></div>
-        ) : !campaign ? <div className="view muted">Loading campaign…</div> : tab === "story" ? (
-          <StoryView key={cid} campaign={campaign} onState={refresh} onNotices={pushNotices} openCharacter={setSheet} openQuest={openQuest}
-            openSaves={() => setTab("settings")} />
-        ) : (
-          <div className="view">
-            {tab === "characters" && <CharactersView cid={cid} version={version} openCharacter={setSheet} />}
-            {tab === "inventory" && <InventoryView cid={cid} version={version} openQuest={openQuest} />}
-            {tab === "quests" && <QuestsView cid={cid} version={version} focus={focusQuest} openCharacter={setSheet} />}
-            {tab === "people" && <PeopleView cid={cid} version={version} openCharacter={setSheet} openQuest={openQuest}
-              pcAssignment={campaign.roster.find((c) => c.id === campaign.active_character_id)?.assignment}
-              pcName={campaign.roster.find((c) => c.id === campaign.active_character_id)?.name} />}
-            {tab === "timeline" && <ChronicleView cid={cid} version={version} openCharacter={setSheet} />}
-            {tab === "map" && <MapView cid={cid} campaign={campaign} version={version} onChanged={refresh} openCharacter={setSheet} />}
-            {tab === "rules" && <RulesView cid={cid} />}
-            {tab === "records" && <RecordsView cid={cid} />}
-            {tab === "settings" && <SettingsView cid={cid} version={version} onChanged={refresh} onCampaign={chooseCampaign} />}
-          </div>
+        ) : !campaign ? <div className="view muted">Loading campaign…</div> : (
+          <>
+            {/* the Scene stays mounted while another screen is open: the draft, scroll position and a turn in flight survive */}
+            <div className="scene-host" hidden={tab !== "scene"}>
+              <StoryView key={cid} campaign={campaign} onState={refresh} onNotices={pushNotices} openCharacter={setSheet}
+                openQuest={() => setTab("chronicle")} openSaves={() => setTab("settings")} />
+            </div>
+            {tab !== "scene" && (
+              <div className="view">
+                {tab === "map" && <MapView cid={cid} campaign={campaign} version={version} onChanged={refresh} openCharacter={setSheet} />}
+                {tab === "wallpaper" && <div className="view-inner muted">The Red Wallpaper is not open yet.</div>}
+                {tab === "tickets" && <div className="view-inner muted">No tickets to show yet.</div>}
+                {tab === "chronicle" && <ChronicleView cid={cid} version={version} openCharacter={setSheet} />}
+                {tab === "lodge" && <PeopleView cid={cid} version={version} openCharacter={setSheet} openQuest={() => setTab("chronicle")}
+                  pcAssignment={campaign.roster.find((c) => c.id === campaign.active_character_id)?.assignment}
+                  pcName={campaign.roster.find((c) => c.id === campaign.active_character_id)?.name} />}
+                {tab === "settings" && <>
+                  <SettingsView cid={cid} version={version} onChanged={refresh} onCampaign={chooseCampaign} />
+                  <section className="view-inner" aria-label="Behind the Scenes">
+                    <h2 className="h2">Behind the Scenes</h2>
+                    <RulesView cid={cid} />
+                    <RecordsView cid={cid} />
+                  </section>
+                </>}
+              </div>
+            )}
+          </>
         )}
       </main>
       {cid != null && (
         <SearchDialog cid={cid} open={searching} onClose={() => setSearching(false)} go={(h) => {
-          if (h.type === "quest" && h.id != null) openQuest(h.id);
-          else if (h.type === "person" && h.id != null) setSheet(h.id);
-          else setTab(h.type === "item" ? "inventory" : h.type === "record" ? "records" : h.type === "story" || h.type === "group" ? "story" : "timeline");
+          if (h.type === "person" && h.id != null) setSheet(h.id);
+          else setTab(h.type === "record" ? "settings" : h.type === "story" || h.type === "group" ? "scene" : "chronicle");
         }} />
       )}
       {cid != null && <CharacterSheetDialog cid={cid} charId={sheet} onClose={() => setSheet(null)} onChanged={refresh} />}

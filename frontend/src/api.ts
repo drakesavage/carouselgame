@@ -71,6 +71,8 @@ export type Campaign = {
   opening?: { stage: OpeningStage; belief: string | null; paid_off: string | null } | null;
   /** Fate (fate_api.py): Deathwatch while the player's character can't act; wiped once the group is on the poster board. */
   fate?: { deathwatch: { pace: DeathwatchPace } | null; wiped: boolean };
+  /** The in-game clock (carousel/clock.py): "Day 2 · 21:40 · evening". */
+  clock?: { day: number; slot: string; time: string };
 };
 export type DeathwatchPace = "full" | "condensed";
 /** A missing poster on the board outside the Diner: never the cause of death or whether a rescue is possible. */
