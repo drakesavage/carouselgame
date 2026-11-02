@@ -3,7 +3,7 @@ from app.carousel.refdb import count
 
 
 def test_real_location_art(ref_real):
-    assert count(ref_real, "place_images") == 184               # 201 index rows; 17 are provisional PROV-LOC-* art
+    assert count(ref_real, "place_images") == 187               # 201 index rows; 17 are provisional PROV-LOC-* art
     assert count(ref_real, "import_report", "category = 'art_unmatched'") == 17
     rel = ref_real.execute("SELECT rel_path FROM place_images WHERE place_id = 'CAR-002' AND kind = 'identity'").fetchone()[0]
     assert rel.endswith(".png") and not rel.startswith("assets/")   # relative to Location_Art_Production/assets (the /location-art mount)

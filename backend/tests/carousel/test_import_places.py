@@ -5,16 +5,16 @@ from app.carousel.refdb import count
 
 
 def test_place_counts(ref_real):
-    assert count(ref_real, "places") == 236   # the 2026-10-31 audit resolution added the bowling alley and the Strings Attached mansion
-    assert count(ref_real, "places", "in_town_map = 1") == 193
-    assert count(ref_real, "graph_nodes") == 513
-    assert count(ref_real, "graph_edges") == 548
+    assert count(ref_real, "places") == 238   # the 2026-10-31 audit added the bowling alley and the Strings Attached mansion; then the stadium and the EEK house
+    assert count(ref_real, "places", "in_town_map = 1") == 195
+    assert count(ref_real, "graph_nodes") == 515
+    assert count(ref_real, "graph_edges") == 552
     assert count(ref_real, "place_aliases") == 8
 
 
 def test_rejected_and_alias_records_are_kept(ref_real):
     got = dict(ref_real.execute("SELECT status, COUNT(*) FROM places GROUP BY status").fetchall())
-    assert got == {"active": 223, "alias": 8, "rejected": 5}
+    assert got == {"active": 225, "alias": 8, "rejected": 5}
 
 
 def test_aliases_resolve(ref_real):
@@ -42,7 +42,7 @@ def test_flags_preserved(ref_real):
 
 def test_pixels_match_handoff(ref_real, real_files):
     anchors = real_files["pixel_anchors"].data["locations"]
-    assert len(anchors) == 193
+    assert len(anchors) == 195
     for a in anchors:
         px, py = ref_real.execute("SELECT px, py FROM places WHERE id = ?", (a["id"],)).fetchone()
         assert abs(px - a["image_px"][0]) < 0.5 and abs(py - a["image_px"][1]) < 0.5, a["id"]
