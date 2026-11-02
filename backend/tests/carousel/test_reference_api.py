@@ -48,6 +48,14 @@ def test_gm_reference_requires_token(client_ref, ref_settings):
     assert [o["id"] for o in omens] == ["OM-001", "OM-002", "OM-003", "OM-005", "OM-009"]   # every record type, hubs included
 
 
+def test_asset_audit_remains_director_only(client_ref, ref_settings):
+    assert client_ref.get("/api/gm/assets/audit").status_code == 403
+    body = client_ref.get("/api/gm/assets/audit", headers=gm(ref_settings)).json()
+    assert body["human_approval_inferred"] is False
+    assert body["illustrated_submaps_installed"] is False
+    assert body["relationships"] and body["findings"]
+
+
 def test_gm_reference_one_record_includes_gm_material(client_ref, ref_settings):
     npc = client_ref.get("/api/gm/reference/npcs/CAR-NPC-001", headers=gm(ref_settings)).json()
     assert npc["gm"]["gm_only"]["canonical_secret"] == "MINI-NPC-SECRET"

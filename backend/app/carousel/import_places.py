@@ -13,8 +13,15 @@ from .text import norm_name
 
 def import_places(ref: sqlite3.Connection, files: dict[str, SourceFile]) -> None:
     town = {r["id"]: r for r in files["locations"].data}
-    for g in files["gazetteer"].data:
+    additions = files.get("reconciliation")
+    extra = additions.data.get("places", []) if additions else []
+    patches = additions.data.get("place_patches", {}) if additions else {}
+    node_patches = additions.data.get("graph_node_patches", {}) if additions else {}
+    edge_patches = additions.data.get("graph_edge_patches", {}) if additions else {}
+    original_ids = {g["id"] for g in files["gazetteer"].data}
+    for g in [*files["gazetteer"].data, *(g for g in extra if g["id"] not in original_ids)]:
         rec = {**g, **town.get(g["id"], {})}
+        rec.update(patches.get(g["id"], {}))
         coords = rec.get("coordinates") or [None, None]
         north, west = coords[0], coords[1]
         px, py = to_pixel(north, west) if north is not None and west is not None else (None, None)
@@ -22,17 +29,28 @@ def import_places(ref: sqlite3.Connection, files: dict[str, SourceFile]) -> None
                                            in_town_map, raw_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (rec["id"], rec.get("name"), rec.get("category"), rec.get("region"), rec.get("map_id"), north, west, px, py,
                      json.dumps(rec.get("requires") or []), json.dumps(rec.get("spoiler")), rec.get("status"),
-                     int(rec["id"] in town), json.dumps(rec, ensure_ascii=False)))
+                     int(rec["id"] in town and north is not None and west is not None), json.dumps(rec, ensure_ascii=False)))
         if rec.get("name"):
             ref.execute("INSERT OR IGNORE INTO place_names (name, place_id) VALUES (?,?)", (norm_name(rec["name"]), rec["id"]))
     graph = files["travel_graph"].data
+    if set(node_patches) - {n["id"] for n in graph["nodes"]} or set(edge_patches) - {e["id"] for e in graph["edges"]}:
+        raise ValueError("reconciled navigation override names an unknown saved graph ID")
     for alias, target in (graph.get("aliases") or {}).items():
         ref.execute("INSERT INTO place_aliases (alias_id, target_id) VALUES (?,?)", (alias, target))
     for n in graph["nodes"]:
+        n = {**n, **{k: v for k, v in node_patches.get(n["id"], {}).items() if k in {"coordinates", "map_id"}}}
         c = n.get("coordinates") or [None, None]
+        requirements = list(n.get("requires") or [])
+        if patches.get(n.get("location_id"), {}).get("navigable") is False:
+            # Preserve saved IDs, but retire a superseded normal-town arrival.
+            requirements.append("source_topology_pending:" + n["location_id"])
         ref.execute("INSERT INTO graph_nodes (id, location_id, map_id, north, west, requires_json) VALUES (?,?,?,?,?,?)",
-                    (n["id"], n.get("location_id"), n.get("map_id"), c[0], c[1], json.dumps(n.get("requires") or [])))
+                    (n["id"], n.get("location_id"), n.get("map_id"), c[0], c[1], json.dumps(requirements)))
     for e in graph["edges"]:
+        patch = edge_patches.get(e["id"], {})
+        if patch and e.get("kind") != "approach":
+            raise ValueError("reconciled edge overrides are limited to private approach spurs")
+        e = {**e, **{k: v for k, v in patch.items() if k in {"geometry", "cost", "length_units", "reconciliation_basis"}}}
         ref.execute("""INSERT INTO graph_edges (id, from_id, to_id, kind, directed, requires_json, cost, length_units, geometry_json, raw_json)
                        VALUES (?,?,?,?,?,?,?,?,?,?)""",
                     (e["id"], e["from"], e["to"], e.get("kind"), int(bool(e.get("directed"))), json.dumps(e.get("requires") or []),

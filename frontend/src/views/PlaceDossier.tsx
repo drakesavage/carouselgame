@@ -7,9 +7,9 @@ const HOW: Record<string, string> = { start: "Known from the start", visited: "V
 
 /** The selected place on the town map: what the group knows about it, and Travel here (the real travel op; a refusal
  * shows the server's reason and never moves the marker). Everything comes from GET /places/{id}, known places only. */
-export function PlaceDossier({ cid, placeId, version, here, busy, message, onTravel, onClose }: {
+export function PlaceDossier({ cid, placeId, version, here, busy, message, onTravel, onClose, unplaced = false }: {
   cid: number; placeId: string; version: unknown; here: boolean; busy: boolean; message: string | null;
-  onTravel: () => void; onClose: () => void;
+  onTravel: () => void; onClose: () => void; unplaced?: boolean;
 }) {
   const [d, setD] = useState<Dossier | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -22,7 +22,8 @@ export function PlaceDossier({ cid, placeId, version, here, busy, message, onTra
   }, [cid, placeId, version]);
   if (err) return <aside className="dossier-panel" aria-label="Place"><p className="muted">{err}</p></aside>;
   if (!d || d.id !== placeId) return <aside className="dossier-panel" aria-label="Place" aria-busy><p className="muted">Opening the file…</p></aside>;
-  const visits = d.visits.count === 1 ? "visited once" : d.visits.count ? `visited ${d.visits.count} times` : "not visited";
+  const visits = d.visits.count === 1 ? "visited once" : d.visits.count ? `visited ${d.visits.count} times`
+    : here ? "currently here" : d.known.how === "visited" ? "visited before" : "not visited";
   return (
     <aside className="dossier-panel" aria-label={`Place: ${d.name}`}>
       <button className="icon-btn dossier-close" onClick={onClose} aria-label="Close the place file"><X size={14} /></button>
@@ -51,7 +52,7 @@ export function PlaceDossier({ cid, placeId, version, here, busy, message, onTra
           <ul>{d.stories.map((s, i) => <li key={i}><span>{s.title}</span> — <i>{humanize(s.ending)}</i></li>)}</ul>
         </section>
       )}
-      {here ? <p className="muted small">You are here.</p> : (
+      {unplaced ? <p className="muted small">You have heard of this place, but its exact location is not yet on your map.</p> : here ? <p className="muted small">You are here.</p> : (
         <button className="btn primary travel-btn" disabled={busy} onClick={onTravel}>
           {busy ? <Loader2 size={13} className="spin" aria-hidden /> : <Footprints size={13} aria-hidden />} Travel here
         </button>

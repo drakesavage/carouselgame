@@ -122,6 +122,7 @@ export type TileLevel = { zoom: number; image_width: number; image_height: numbe
 export type PlayerMap = {
   position: { node_id: string; place_id: string | null; px: number; py: number; label: string | null } | null;
   known: MapPlace[]; omens: { id: string; description: string; px: number; py: number; stage: string; place_id: string | null }[];
+  unplaced?: { id: string; name: string; image: string | null; how: string | null }[];
   last_route: { geometry_px: [number, number][]; interrupted: { omen_id: string; description: string } | null } | null;
   tiles: { template: string; levels: TileLevel[]; size: number };
 };
@@ -132,6 +133,9 @@ export type ActiveStory = { id: number; title: string; premise: string | null; p
 export type StoryHistory = { id: number; title: string; ending: string; started_minutes: number | null; ended_minutes: number | null;
   novelty: number | null; cast: string[] };
 export type PlayerVenue = { venue_id: string; title: string; zone: { id: string; label: string };
+  plan?: { mode: "schematic"; current_level: number; zones: { id: string; label: string; level: number;
+    bounds: [number, number, number, number]; current: boolean; visited: boolean; can_move: boolean; blocked: string | null }[] } | null;
+  departure_blocked?: string | null;
   ways: { id: string; label: string; blocked: string | null }[]; seen: { id: string; label: string }[]; entry: string; exit: string };
 /** Camp Dyer residents the group has met (resident_api.py): never an unmet resident, a hook or a GM note. */
 export type AroundResident = { id: number; name: string; role: string | null };

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { DoorOpen, Lock } from "lucide-react";
 import { api, ApiError, newKey, PlayerVenue, TurnStatus } from "../api";
 import "../storybar.css";
+import { VenuePlan } from "./VenuePlan";
 
 /** Inside a venue: the room the group is in, the ways on (blocked ones disabled with the reason) and the rooms seen.
  * Only what venue_api.py hands the player. A way click moves the group and starts the GM's turn, like a map click;
@@ -39,6 +40,8 @@ export function VenuePanel({ cid, version, onTurn }: { cid: number; version: unk
         ))}
       </div>
       {msg && <div className="venuepanel-msg">{msg}</div>}
+      {venue.departure_blocked && <div className="venuepanel-msg" role="status">Exit blocked: {venue.departure_blocked}</div>}
+      {venue.plan && <VenuePlan plan={venue.plan} busy={busy} onMove={go} />}
       <div className="venuepanel-seen">Seen: {venue.seen.map((z) => z.label).join(" · ")}</div>
       <div className="venuepanel-leave">Leave by {venue.entry === venue.exit ? venue.entry : `${venue.entry} / ${venue.exit}`} (from the map)</div>
     </section>

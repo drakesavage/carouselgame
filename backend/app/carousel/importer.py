@@ -27,7 +27,9 @@ from .import_places import import_places
 from .import_roles import import_roles
 from .import_venues import import_venues
 from .refs import referenced_ids, unresolved
-from .sources import load_sources, verify_unchanged
+from .sources import SourceFile, load_sources, verify_unchanged
+import hashlib
+from .validate_assets import validate_assets
 
 IMPORTERS = [import_places, import_omens, import_roles, import_npcs, import_art, import_venues]
 COUNTED = ("places", "place_aliases", "graph_nodes", "graph_edges", "omens", "omen_beats", "roles", "tickets", "start_profiles",
@@ -51,6 +53,14 @@ def run_import(settings: Settings) -> ImportResult:
     sources: dict = {}
     try:
         files = load_sources(settings.source_dir)
+        quarantine_path = settings.data_dir / "reference_quarantine.json"
+        quarantined = set()
+        if quarantine_path.exists():
+            raw = quarantine_path.read_bytes()
+            data = json.loads(raw.decode("utf-8-sig"))
+            quarantined = set(data["hidden_test_ticket_refs"])
+            files["legacy_fixture_quarantine"] = SourceFile("legacy_fixture_quarantine", quarantine_path,
+                                                            hashlib.sha256(raw).hexdigest(), data)
         sources = {k: {"path": str(f.path), "sha256": f.sha256} for k, f in files.items()}
         new.unlink(missing_ok=True)
         ref = refdb.connect(new)
@@ -59,6 +69,10 @@ def run_import(settings: Settings) -> ImportResult:
             with ref:
                 for fn in IMPORTERS:
                     fn(ref, files)
+                validate_assets(ref)
+                for ticket in sorted(quarantined):
+                    refdb.report(ref, "legacy_fixture_quarantine", ticket,
+                                 "Preserved hidden source=test fixture, including saves; definition remains unavailable. No real ticket exempted.")
                 ref.executemany("INSERT INTO manifest (key, path, sha256, imported_at) VALUES (?,?,?,?)",
                                 [(k, str(f.path), f.sha256, started.isoformat(timespec="seconds")) for k, f in files.items()])
             result.counts = {t: refdb.count(ref, t) for t in COUNTED}
@@ -66,7 +80,7 @@ def run_import(settings: Settings) -> ImportResult:
             if settings.campaign_db.exists():
                 camp = sqlite3.connect(str(settings.campaign_db))
                 try:
-                    result.missing = unresolved(ref, referenced_ids(camp))
+                    result.missing = unresolved(ref, referenced_ids(camp, quarantined))
                 finally:
                     camp.close()
         finally:

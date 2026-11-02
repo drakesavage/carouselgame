@@ -24,25 +24,31 @@ def venue(conn: sqlite3.Connection, venue_id: str) -> dict | None:
     return dict(row) if row else None
 
 
-def zone(conn: sqlite3.Connection, zone_id: str) -> dict | None:
+def zone(conn: sqlite3.Connection, zone_id: str, cid: int | None = None) -> dict | None:
     """A reference zone, or a live story-added one (`story_only` = 1)."""
     row = conn.execute("SELECT id, venue_id, node_id, label, area_type, floor, story_only FROM ref.venue_zones WHERE id = ?",
                        (zone_id,)).fetchone()
     if row:
         return dict(row)
     row = conn.execute("""SELECT a AS id, venue_id, NULL AS node_id, label, 'story' AS area_type, NULL AS floor, 1 AS story_only
-                          FROM venue_overlays WHERE kind = 'add_zone' AND a = ? AND lifted = 0""", (zone_id,)).fetchone()
+                          FROM venue_overlays WHERE kind = 'add_zone' AND a = ? AND lifted = 0
+                          AND (? IS NULL OR campaign_id=?)""", (zone_id, cid, cid)).fetchone()
     return dict(row) if row else None
 
 
-def label(conn: sqlite3.Connection, zone_id: str | None) -> str | None:
-    z = zone(conn, zone_id) if zone_id else None
+def label(conn: sqlite3.Connection, zone_id: str | None, cid: int | None = None) -> str | None:
+    z = zone(conn, zone_id, cid) if zone_id else None
     return z["label"] if z else None
 
 
 def _blocks(conn: sqlite3.Connection, cid: int) -> dict[frozenset, str]:
     return {frozenset((r["a"], r["b"])): r["reason"] for r in conn.execute(
         "SELECT a, b, reason FROM venue_overlays WHERE campaign_id = ? AND kind = 'block' AND lifted = 0 ORDER BY id", (cid,))}
+
+
+def departure_block(conn: sqlite3.Connection, cid: int, zone_id: str | None) -> str | None:
+    """A story can close an exterior portal without changing its world anchor."""
+    return _blocks(conn, cid).get(frozenset((zone_id,))) if zone_id else None
 
 
 def neighbours(conn: sqlite3.Connection, cid: int, zone_id: str) -> list[dict]:
@@ -53,7 +59,20 @@ def neighbours(conn: sqlite3.Connection, cid: int, zone_id: str) -> list[dict]:
                                           UNION SELECT b FROM venue_overlays WHERE campaign_id = ? AND kind = 'add_zone' AND lifted = 0 AND a = ?""",
                                        (cid, zone_id, cid, zone_id))}
     blocks = _blocks(conn, cid)
-    return [{"zone_id": z, "label": label(conn, z), "blocked_reason": blocks.get(frozenset((zone_id, z)))} for z in sorted(ids)]
+    for r in conn.execute("SELECT venue_id,a,b,source_lock FROM ref.venue_links WHERE source_lock IS NOT NULL AND source_lock!='' AND (a=? OR b=?)",
+                          (zone_id, zone_id)):
+        rule = r["source_lock"]
+        reason = "There is no usable way through here yet."
+        if rule.startswith("entry_story:"):
+            _, outside, lock = rule.split(":", 2)
+            if zone_id != r["venue_id"] + ":" + outside:
+                continue  # Always allow leaving; story overlays may independently block it.
+            active = conn.execute("SELECT 1 FROM stories WHERE campaign_id=? AND status='active' AND story_lock=?", (cid, lock)).fetchone()
+            if active:
+                continue
+            reason = "The door is closed."
+        blocks.setdefault(frozenset((r["a"], r["b"])), reason)
+    return [{"zone_id": z, "label": label(conn, z, cid), "blocked_reason": blocks.get(frozenset((zone_id, z)))} for z in sorted(ids)]
 
 
 def position(conn: sqlite3.Connection, cid: int) -> tuple[str | None, str | None]:

@@ -29,10 +29,13 @@ def player_venue(conn, cid: int) -> dict | None:
     if not v or not here:
         return None
     visible = set(venues.visible_zones(conn, cid))
-    return {"venue_id": v["id"], "title": v["title"], "zone": {"id": here, "label": venues.label(conn, here)},
+    from .carousel.venue_plans import player_plan
+    return {"venue_id": v["id"], "title": v["title"], "zone": {"id": here, "label": venues.label(conn, here, cid)},
+            "plan": player_plan(conn, cid, v, here),
+            "departure_blocked": venues.departure_block(conn, cid, here),
             "ways": [{"id": n["zone_id"], "label": n["label"], "blocked": n["blocked_reason"]}
                      for n in venues.neighbours(conn, cid, here) if n["zone_id"] in visible],
-            "seen": [{"id": z, "label": venues.label(conn, z)} for z in venues.visited(conn, cid, v["id"])],
+            "seen": [{"id": z, "label": venues.label(conn, z, cid)} for z in venues.visited(conn, cid, v["id"])],
             "entry": venues.label(conn, v["entry_zone"]), "exit": venues.label(conn, v["exit_zone"])}
 
 

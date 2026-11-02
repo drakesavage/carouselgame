@@ -58,17 +58,26 @@ def _px(north, west) -> tuple[float, float] | tuple[None, None]:
 def player_map(conn, cid: int, levels: list) -> dict:
     camp = one(conn, "SELECT node_id, current_location FROM campaigns WHERE id = ?", (cid,))
     out = {"position": None, "known": [], "omens": [], "last_route": None,
+           "unplaced": [],
            "tiles": {"template": "/tiles/{z}/{x}/{y}.webp", "levels": levels, "size": MASTER_PIXELS}}
     if has_reference(conn):
         if camp["node_id"]:
             n = one(conn, "SELECT id, location_id, north, west FROM ref.graph_nodes WHERE id = ?", (camp["node_id"],))
             px, py = _px(n["north"], n["west"]) if n else (None, None)
-            out["position"] = {"node_id": camp["node_id"], "place_id": n["location_id"] if n else None, "px": px, "py": py,
-                               "label": camp["current_location"]}
+            source_place = one(conn, "SELECT north,west FROM ref.places WHERE id=?", (n["location_id"],)) if n and n["location_id"] else None
+            if source_place and (source_place["north"] is None or source_place["west"] is None):
+                px, py = None, None
+            if px is not None and py is not None:
+                out["position"] = {"node_id": camp["node_id"], "place_id": n["location_id"] if n else None, "px": px, "py": py,
+                                   "label": camp["current_location"]}
         for p in rows(conn, """SELECT p.id, p.name, p.category, p.north, p.west, k.how FROM known_places k JOIN ref.places p ON p.id = k.place_id
                                WHERE k.campaign_id = ? ORDER BY p.name""", (cid,)):
             px, py = _px(p["north"], p["west"])
             img = place_image(conn, p["id"])
+            if px is None or py is None:
+                out["unplaced"].append({"id": p["id"], "name": p["name"], "how": p["how"],
+                                        "image": f"/location-art/{img}" if img else None})
+                continue
             out["known"].append({"id": p["id"], "name": p["name"], "category": p["category"], "px": px, "py": py, "how": p["how"],
                                  "safe": p["id"] in SAFE_PLACE_IDS, "image": f"/location-art/{img}" if img else None})
         known = {k["id"] for k in out["known"]}
@@ -80,6 +89,8 @@ def player_map(conn, cid: int, levels: list) -> dict:
                 n = one(conn, "SELECT north, west FROM ref.graph_nodes WHERE id = ?", (o["seen_at_node"],))
                 north, west = (n["north"], n["west"]) if n else (north, west)
             px, py = _px(north, west)
+            if px is None or py is None:
+                continue  # A source identity without a parcel must not become a false (0,0) pin.
             # its place only once the group knows that place: the map files the Omen there, never names an unknown one
             out["omens"].append({"id": o["omen_id"], "description": o["description"], "px": px, "py": py, "stage": o["stage"],
                                  "place_id": o["place_id"] if o["place_id"] in known else None})

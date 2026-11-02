@@ -39,9 +39,17 @@ class AddZone(BaseModel):
     reason: str = Field(min_length=1, max_length=300)
 
 
+class ExitChange(BaseModel):
+    op: Literal["block_venue_exit", "open_venue_exit"]
+    zone: str
+    reason: str = Field(min_length=1, max_length=300)
+
+
 def _target(ctx: Ctx, venue_id: str, to: str) -> dict:
     """A zone of this venue by ID or exact label (reference or live story-added)."""
-    z = venues.zone(ctx.conn, to)
+    z = venues.zone(ctx.conn, to, ctx.campaign_id)
+    if z and z.get("area_type") == "retired_reference":
+        raise ChangeError("that archived layout needs position review")
     if z and z["venue_id"] == venue_id:
         return z
     zid = one(ctx.conn, "SELECT id FROM ref.venue_zones WHERE venue_id = ? AND label = ?", (venue_id, to))
@@ -50,7 +58,10 @@ def _target(ctx: Ctx, venue_id: str, to: str) -> dict:
                                AND lifted = 0 AND label = ?""", (ctx.campaign_id, venue_id, to))
     if not zid:
         raise ChangeError(f"unknown zone {to!r} in this venue")
-    return venues.zone(ctx.conn, zid["id"])
+    resolved = venues.zone(ctx.conn, zid["id"], ctx.campaign_id)
+    if resolved and resolved.get("area_type") == "retired_reference":
+        raise ChangeError("that archived layout needs position review")
+    return resolved
 
 
 def _group(ctx: Ctx, key: str | None) -> dict | None:
@@ -74,10 +85,22 @@ def _apply_move_zone(ctx: Ctx, op: MoveZone) -> dict:
     venue_id, here = venues.position(ctx.conn, ctx.campaign_id) if is_pc else (g["venue_id"], g["zone_id"])
     if not venue_id or not here:
         raise ChangeError("the group is not in a venue")
-    there = _target(ctx, venue_id, op.to)
+    active_venue = venues.venue(ctx.conn, venue_id)
+    if not active_venue or not active_venue["enterable"]:
+        raise ChangeError("this venue's layout is awaiting reconciliation; the group stays at its current location")
+    current_zone = venues.zone(ctx.conn, here, ctx.campaign_id)
+    if current_zone and current_zone.get("area_type") == "retired_reference":
+        raise ChangeError("this saved position uses an archived layout and needs review; the group stays in place")
+    unavailable = f"no way from {venues.label(ctx.conn, here, ctx.campaign_id)} to that destination"
+    try:
+        there = _target(ctx, venue_id, op.to)
+    except ChangeError:
+        if is_pc:
+            raise ChangeError(unavailable) from None
+        raise
     way = next((n for n in venues.neighbours(ctx.conn, ctx.campaign_id, here) if n["zone_id"] == there["id"]), None)
     if way is None:
-        raise ChangeError(f"no way from {venues.label(ctx.conn, here)} to {there['label']}")
+        raise ChangeError(unavailable)
     if way["blocked_reason"]:
         raise ChangeError(f"{there['label']} is blocked: {way['blocked_reason']}")
     if is_pc:
@@ -177,6 +200,31 @@ def _apply_add_zone(ctx: Ctx, op: AddZone) -> dict:
     return {"summary": summary, "zone_id": zid}
 
 
+def _apply_exit(ctx: Ctx, op: ExitChange) -> dict:
+    s = _story(ctx)
+    vid = _here_venue(ctx)
+    v = venues.venue(ctx.conn, vid)
+    z = _target(ctx, vid, op.zone)
+    if z["id"] not in (v["entry_zone"], v["exit_zone"]):
+        raise ChangeError("only an exterior entry or exit portal can be closed this way")
+    held = _block(ctx, z["id"], z["id"])
+    if op.op == "block_venue_exit":
+        if held:
+            raise ChangeError("this exit is already blocked")
+        ctx.conn.execute("""INSERT INTO venue_overlays (campaign_id,story_id,venue_id,kind,a,b,reason,created_minutes)
+            VALUES (?,?,?,'block',?,?,?,?)""", (ctx.campaign_id, s["id"], vid, z["id"], z["id"], op.reason, ctx.game_time()))
+        state = "blocked"
+    else:
+        if not held or held["story_id"] != s["id"]:
+            raise ChangeError("this exit is not blocked by the active story")
+        ctx.conn.execute("UPDATE venue_overlays SET lifted=1 WHERE id=?", (held["id"],))
+        state = "opened"
+    shown = _shown(ctx, z)
+    summary = f"The exit at {shown} is {state}: {op.reason}"
+    ctx.event(f"venue_exit_{state}", summary, {"venue_id": vid, "zone": shown, "reason": op.reason})
+    return {"summary": summary}
+
+
 def lift_overlays(ctx: Ctx, story_id: int) -> int:
     """Lift every overlay the story made. A group standing in a room that goes with it is put back in the zone that room
     joined (following story rooms back to a reference zone), with a logged event."""
@@ -210,4 +258,6 @@ def register(ops: dict) -> None:
         "block_passage": (Passage, _apply_passage),
         "open_passage": (Passage, _apply_passage),
         "add_zone": (AddZone, _apply_add_zone),
+        "block_venue_exit": (ExitChange, _apply_exit),
+        "open_venue_exit": (ExitChange, _apply_exit),
     })

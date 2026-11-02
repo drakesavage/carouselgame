@@ -187,6 +187,9 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         settings.gm_token()  # make sure data/gm_token.txt exists for the GM-only API
         c = state.conn()
         init_db(c)
+        from .carousel.migrate_assets import backfill_map_positions
+        if (migrated := backfill_map_positions(c)):
+            print(f"[startup] map references initialized from existing location names for campaigns {migrated}")
         _ensure_residents(c)
         if (n := recover_interrupted_turns(c)):
             print(f"[startup] marked {n} interrupted turn(s) as failed")
@@ -892,7 +895,7 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
 
 
     # ------------------------------------------------------------------ GM only
-    gm = {"secrets": views.gm_secrets, "messages": views.gm_messages, "events": views.gm_events, 
+    gm = {"secrets": views.gm_secrets, "messages": views.gm_messages, "events": views.gm_events,
           "lore": views.gm_lore, "turns": views.gm_turns}
     for route, fn in gm.items():
         def make_gm(fn=fn):

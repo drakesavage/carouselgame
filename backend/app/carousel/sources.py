@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,11 +24,37 @@ SOURCE_FILES: dict[str, str] = {
     "location_art": "Location_Art_Production/data/review_reference_index.json",
     "venues": "sublocations/Carousel_Codex_Submap_Package_v1.1/Carousel_Codex_Submap_Spec_v1.json",
     "npcs": "npcs/Carousel_Camp_NPC_Package_v1/Carousel_Camp_NPC_Database_v1.json",
+    "reconciliation": "Asset_Reconciliation/game_reference.json",
 }
 
 
 class SourceError(RuntimeError):
     pass
+
+
+def _verify_reconciliation(f: "SourceFile") -> None:
+    root = f.path.parent.parent
+    for rel, expected in f.data.get("inputs", {}).items():
+        path = root / rel
+        if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            raise SourceError(f"reconciliation input changed: {rel}; run scripts/reconcile_assets.py")
+    if f.data.get("studio_state_sha256"):
+        path = root / "Location_Art_Production/data/studio.sqlite3"
+        with sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True) as db:
+            db.execute("BEGIN")
+            state = {
+                "locations": db.execute("SELECT id,current_asset_id,approved_asset_id,record_json,identity_json,release_eligible FROM locations ORDER BY id").fetchall(),
+                "assets": db.execute("SELECT id,sha256,review_status FROM assets ORDER BY id").fetchall(),
+            }
+        if hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest() != f.data["studio_state_sha256"]:
+            raise SourceError("studio selections or reviews changed; run scripts/reconcile_assets.py")
+    assets = (root / "Location_Art_Production/assets").resolve()
+    for row in f.data.get("references", []):
+        if not row.get("sha256"):
+            continue
+        path = (root / "Location_Art_Production" / row["relative_image_path"]).resolve()
+        if assets not in path.parents or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != row["sha256"]:
+            raise SourceError(f"selected image missing or changed: {row['location_id']}")
 
 
 @dataclass(frozen=True)
@@ -53,6 +80,8 @@ def load_sources(source_dir: Path) -> dict[str, SourceFile]:
             problems.append(f"{key}: unreadable ({path}): {exc}")
     if problems:
         raise SourceError("Carousel source packages not usable: " + "; ".join(problems))
+    # A reconciliation export is meaningful only against its recorded inputs.
+    _verify_reconciliation(out["reconciliation"])
     return out
 
 
@@ -68,3 +97,6 @@ def verify_unchanged(files: dict[str, SourceFile]) -> None:
             changed.append(f.key)
     if changed:
         raise SourceError(f"source files changed during the import: {', '.join(changed)}")
+    reconciled = files.get("reconciliation")
+    if reconciled:
+        _verify_reconciliation(reconciled)

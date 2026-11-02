@@ -9,8 +9,9 @@ def playable(ref, where="1=1"):
 
 def test_playable_omen_resolution(ref_real):
     assert playable(ref_real) == 93
-    assert playable(ref_real, "anchor_method = 'gazetteer_id'") == 39
-    assert playable(ref_real, "anchor_method = 'anchor_name'") == 54
+    assert playable(ref_real, "anchor_method = 'gazetteer_id'") == 38
+    assert playable(ref_real, "anchor_method = 'anchor_name'") == 17
+    assert playable(ref_real, "anchor_method = 'source_identity_reconciliation'") == 38
     assert playable(ref_real, "place_id IS NULL") == 0
     assert count(ref_real, "import_report", "category = 'omen_unplaced'") == 0
 
@@ -27,7 +28,7 @@ def test_spawn_modes(ref_real):
 
 
 def test_area_placement(ref_real):
-    assert playable(ref_real, "placement = 'area'") == 45
+    assert playable(ref_real, "placement = 'area'") == 11
     assert ref_real.execute("SELECT placement FROM omens WHERE id = 'OM-001'").fetchone()[0] == "place"
 
 

@@ -55,8 +55,9 @@ def test_not_enterable_venues_are_reported(ref_mini):
 
 def test_real_venue_counts(ref_real):
     assert count(ref_real, "venues") == 108
-    assert count(ref_real, "venue_zones") == 718
-    assert count(ref_real, "venue_links") == 610   # 648 edges minus 38 optional shortcuts; no pair repeats
+    assert count(ref_real, "venue_zones") == 802  # Five corrected floor graphs; old IDs retained.
+    assert count(ref_real, "venue_links") == 659
+    assert ref_real.execute("SELECT COUNT(*) FROM venue_links WHERE source_lock IS NOT NULL").fetchone()[0] == 38
 
 
 def test_real_venue_places_resolve(ref_real):
@@ -73,5 +74,8 @@ def test_real_placed_omens_are_fixed_and_in_a_member_place(ref_real):
         assert mode == "fixed" and place in members, omen_id
 
 
-def test_real_choice_mismatch_is_reported(ref_real):
-    assert any("choice" in m.lower() for m in reports(ref_real, "OM-110"))
+def test_real_operator_only_choice_is_retained(ref_real):
+    expected = "take_box_to_geist_house_and_set_up_seance_deck"
+    assert ref_real.execute("SELECT choice_trigger FROM omens WHERE id = 'OM-110'").fetchone()[0] == expected
+    assert ref_real.execute("SELECT choice_action FROM venue_omens WHERE omen_id = 'OM-110'").fetchone()[0] == expected
+    assert not any("gives Choice" in m for m in reports(ref_real, "OM-110"))

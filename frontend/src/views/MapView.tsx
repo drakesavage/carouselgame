@@ -45,7 +45,7 @@ export function MapView({ cid, campaign, version, onChanged, openCharacter }: {
       </div>
       {error && <div className="sub">{error}</div>}
       {tab === "map" && (data ? <TownMap cid={cid} data={data} version={version} reload={reload} onChanged={onChanged} /> : !error && <div className="muted">Loading…</div>)}
-      {tab === "art" && <ArtLibrary cid={cid} campaign={campaign} places={data?.known ?? []} onChanged={onChanged} openCharacter={openCharacter} />}
+      {tab === "art" && <ArtLibrary cid={cid} campaign={campaign} places={[...(data?.known ?? []), ...(data?.unplaced ?? [])]} onChanged={onChanged} openCharacter={openCharacter} />}
     </div>
   );
 }
@@ -143,6 +143,10 @@ function TownMap({ cid, data, version, reload, onChanged }: {
       if (!party.current) party.current = L.marker(at, { icon: L.divIcon({ className: "party-pin", iconSize: [20, 20] }), zIndexOffset: 1000, keyboard: false }).addTo(m);
       else if (!shot) party.current.setLatLng(at);
       party.current.bindTooltip(`You: ${data.position.label ?? ""}`);
+      party.current.off("click").on("click", () => {
+        const place = data.known.find((p) => p.id === data.position?.place_id);
+        if (place) select(place);
+      });
       party.current.getElement()?.setAttribute("aria-label", `The group: ${data.position.label ?? ""}`);
     }
     route.current?.remove();
@@ -189,7 +193,7 @@ function TownMap({ cid, data, version, reload, onChanged }: {
 
   const toWalk = (c: { px: number; py: number }) => ({ north: 1000 - c.py / 12, west: 1000 - c.px / 12 });
   const here = data.position?.place_id;
-  const sel = selected ? data.known.find((p) => p.id === selected) : null;
+  const sel = selected ? [...data.known, ...(data.unplaced ?? [])].find((p) => p.id === selected) : null;
 
   return (
     <div className={`atlas ${sel ? "has-dossier" : ""} ${listOpen ? "list-open" : ""}`}>
@@ -215,6 +219,12 @@ function TownMap({ cid, data, version, reload, onChanged }: {
           {shown.length === 0 && <li className="muted small">No places on this layer.</li>}
         </ul>
         <p className="rail-note">Alt-click a road to walk to it.</p>
+        {!!data.unplaced?.length && <>
+          <h3 className="rail-head">Not yet located</h3>
+          <ul className="place-list">{data.unplaced.map((p) => <li key={p.id}>
+            <button className={p.id === selected ? "on" : ""} onClick={() => { setSelected(p.id); setWalkTo(null); setMsg(null); setListOpen(false); }}>{p.name}</button>
+          </li>)}</ul>
+        </>}
       </aside>
       <div className="town-frame">
         <div ref={el} className="town-map" aria-label="Town map" />
@@ -237,6 +247,7 @@ function TownMap({ cid, data, version, reload, onChanged }: {
         {shot && <EstablishingShot shot={shot} onDone={() => { setShot(null); onChanged(); }} />}
       </div>
       {sel && <PlaceDossier cid={cid} placeId={sel.id} version={version} here={sel.id === here} busy={busy} message={msg}
+        unplaced={!data.known.some((p) => p.id === sel.id)}
         onTravel={() => go({ to: sel.id })} onClose={() => setSelected(null)} />}
     </div>
   );

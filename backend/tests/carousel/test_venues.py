@@ -39,6 +39,12 @@ def test_an_added_zone_is_a_neighbour_and_resolves(conn, campaign_id):
     assert venues.zone(conn, "SM-T01:story-1-1")["label"] == "A second cellar"
 
 
+def test_story_zone_lookup_is_scoped_to_campaign(conn, campaign_id):
+    overlay(conn, campaign_id, "add_zone", "SM-T01:story-1-1", CELLAR, label="PRIVATE-OTHER-CAMPAIGN")
+    assert venues.zone(conn, "SM-T01:story-1-1", campaign_id)["label"] == "PRIVATE-OTHER-CAMPAIGN"
+    assert venues.zone(conn, "SM-T01:story-1-1", campaign_id + 1) is None
+
+
 def test_venue_at_and_visible_zones(conn, campaign_id):
     assert venues.venue_at(conn, "CAR-086")["id"] == "SM-T01"
     assert venues.venue_at(conn, "CAR-016") is None   # a story-instance venue is not entered from the street

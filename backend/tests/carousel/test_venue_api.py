@@ -37,6 +37,9 @@ def test_a_move_with_no_way_is_422(client, conn, campaign_id):
     before = turns(conn, campaign_id)
     r = move(client, campaign_id, HIDDEN)
     assert r.status_code == 422 and "no way from" in r.json()["detail"]
+    unknown = move(client, campaign_id, "SM-T01:n99_NONEXISTENT")
+    assert unknown.status_code == 422 and unknown.json() == r.json()
+    assert "MINI-HIDDEN-ROOM" not in r.text and HIDDEN not in r.text
     assert turns(conn, campaign_id) == before
 
 

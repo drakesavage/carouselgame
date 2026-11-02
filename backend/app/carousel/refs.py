@@ -18,16 +18,23 @@ REFERENCE_COLUMNS: dict[str, tuple[str, str]] = {"place": ("locations", "ref_id"
                                                   "whereabouts_zone": ("resident_whereabouts", "zone_id")}
 
 
-def referenced_ids(campaign_conn: sqlite3.Connection) -> dict[str, set[str]]:
+def referenced_ids(campaign_conn: sqlite3.Connection, quarantined_test_tickets: set[str] | None = None) -> dict[str, set[str]]:
     """IDs in live state and in every save point (restoring a save must not bring back an ID the import dropped)."""
     def has(table: str, col: str) -> bool:   # a campaign.db from before a phase lacks that phase's tables (it gains them on next server start)
         return any(r[1] == col for r in campaign_conn.execute(f"PRAGMA table_info({table})"))
     out = {kind: {r[0] for r in campaign_conn.execute(f"SELECT DISTINCT {col} FROM {table} WHERE {col} IS NOT NULL")} if has(table, col) else set()
            for kind, (table, col) in REFERENCE_COLUMNS.items()}
+    quarantine = quarantined_test_tickets or set()
+    if quarantine and has("character_tickets", "source"):
+        # Only explicitly listed, hidden test fixtures qualify. A normal owned
+        # ticket using the same ID still blocks the import.
+        out["ticket"] = {r[0] for r in campaign_conn.execute("SELECT ticket_ref,source,hidden FROM character_tickets WHERE ticket_ref IS NOT NULL")
+                         if not (r[0] in quarantine and r[1] == "test" and r[2])}
     for (snap,) in campaign_conn.execute("SELECT snapshot_json FROM save_points"):
         tables = json.loads(snap)
         for kind, (table, col) in REFERENCE_COLUMNS.items():
-            out[kind].update(r[col] for r in tables.get(table, []) if r.get(col))
+            out[kind].update(r[col] for r in tables.get(table, []) if r.get(col)
+                             and not (kind == "ticket" and r[col] in quarantine and r.get("source") == "test" and r.get("hidden")))
     return out
 
 

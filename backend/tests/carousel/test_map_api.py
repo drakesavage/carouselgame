@@ -19,6 +19,15 @@ def turns(conn, cid):
     return conn.execute("SELECT COUNT(*) FROM turns WHERE campaign_id = ?", (cid,)).fetchone()[0]
 
 
+def test_source_only_place_does_not_create_a_false_map_pin(client, conn, campaign_id):
+    with transaction(conn):
+        conn.execute("INSERT INTO ref.places (id,name,status,raw_json) VALUES ('UNPLACED','Unplaced shop','source_only','{}')")
+        conn.execute("INSERT INTO known_places (campaign_id,place_id,how,known_at_minutes) VALUES (?,'UNPLACED','told',0)", (campaign_id,))
+    data = client.get(f"/api/campaigns/{campaign_id}/map").json()
+    assert "UNPLACED" not in {p["id"] for p in data["known"]}
+    assert data["unplaced"] == [{"id": "UNPLACED", "name": "Unplaced shop", "how": "told", "image": None}]
+
+
 def travel(client, cid, key=None, **body):
     return client.post(f"/api/campaigns/{cid}/travel", json={**body, "idempotency_key": key or uuid.uuid4().hex})
 

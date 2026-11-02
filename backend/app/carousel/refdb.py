@@ -39,11 +39,14 @@ CREATE TABLE IF NOT EXISTS venues (
 CREATE TABLE IF NOT EXISTS venue_zones (
   id TEXT PRIMARY KEY, venue_id TEXT NOT NULL, node_id TEXT NOT NULL, label TEXT, area_type TEXT, floor INTEGER,
   story_only INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS venue_links (venue_id TEXT NOT NULL, a TEXT NOT NULL, b TEXT NOT NULL, mode TEXT, PRIMARY KEY (a, b));
+CREATE TABLE IF NOT EXISTS venue_links (venue_id TEXT NOT NULL, a TEXT NOT NULL, b TEXT NOT NULL, mode TEXT, source_lock TEXT, PRIMARY KEY (a, b));
 CREATE TABLE IF NOT EXISTS venue_places (place_id TEXT PRIMARY KEY, venue_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS venue_omens (
   omen_id TEXT NOT NULL, venue_id TEXT NOT NULL, zone_id TEXT, placed INTEGER NOT NULL, choice_action TEXT, PRIMARY KEY (omen_id, venue_id));
 CREATE TABLE IF NOT EXISTS import_report (id INTEGER PRIMARY KEY, category TEXT NOT NULL, item_id TEXT, message TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS asset_relationships (
+  venue_id TEXT NOT NULL, omen_id TEXT NOT NULL, relationship TEXT NOT NULL,
+  source_location TEXT, basis TEXT, PRIMARY KEY (venue_id, omen_id));
 """
 
 

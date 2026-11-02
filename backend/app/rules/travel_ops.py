@@ -91,6 +91,9 @@ def _apply_travel(ctx: Ctx, op: Travel) -> dict:
         if v and camp["zone_id"] not in (v["entry_zone"], v["exit_zone"]):
             ways = dict.fromkeys(venues.label(ctx.conn, z) for z in (v["entry_zone"], v["exit_zone"]))
             raise ChangeError(f"leave by {' or '.join(ways)}")
+        closed = venues.departure_block(ctx.conn, ctx.campaign_id, camp["zone_id"])
+        if closed:
+            raise ChangeError(f"the exit is blocked: {closed}")
     if op.to:
         goal = resolve_place(ctx.conn, op.to) or op.to
     else:

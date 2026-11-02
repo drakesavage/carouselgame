@@ -33,7 +33,7 @@ def test_import_builds_reference_db(real_source, tmp_path):
     s.ensure_dirs()
     r = run_import(s)
     assert r.ok, (r.error, r.missing)
-    assert r.counts["places"] == 238 and r.counts["omens"] == 111 and r.counts["npc_templates"] == 70
+    assert r.counts["places"] == 311 and r.counts["omens"] == 111 and r.counts["npc_templates"] == 70
     assert s.reference_db.exists() and not s.reference_db.with_suffix(".db.new").exists()
     assert json.loads(r.report_path.read_text(encoding="utf-8"))["ok"] is True
 
@@ -60,6 +60,28 @@ def test_reimport_accepts_alias(settings_mini, campaign_conn):
     campaign_conn.execute("UPDATE locations SET ref_id = 'CAR-017'")   # alias of CAR-016
     campaign_conn.commit()
     assert run_import(settings_mini).ok
+
+
+def test_explicit_quarantine_preserves_hidden_test_fixture_and_save_but_never_real_ticket(settings_mini, campaign_conn):
+    from app.memory.snapshots import create_save_point
+    ref = "trope:ABSENT-LEGACY"
+    char = campaign_conn.execute("INSERT INTO characters (campaign_id,slug,name,kind) VALUES (1,'legacy','Legacy fixture','npc')").lastrowid
+    campaign_conn.execute("INSERT INTO character_tickets (campaign_id,character_id,ticket_ref,hidden,source) VALUES (1,?,?,1,'test')", (char, ref))
+    saved = create_save_point(campaign_conn, 1, "Legacy fixture save")
+    campaign_conn.commit()
+    before = campaign_conn.execute("SELECT snapshot_json FROM save_points WHERE id=?", (saved,)).fetchone()[0]
+    assert run_import(settings_mini).missing == {"ticket": [ref]}
+    (settings_mini.data_dir / "reference_quarantine.json").write_text(json.dumps({"hidden_test_ticket_refs": [ref]}), encoding="utf-8")
+    assert run_import(settings_mini).ok
+    assert campaign_conn.execute("SELECT snapshot_json FROM save_points WHERE id=?", (saved,)).fetchone()[0] == before
+    assert campaign_conn.execute("SELECT ticket_ref FROM character_tickets WHERE character_id=?", (char,)).fetchone()[0] == ref
+    db = refdb.connect(settings_mini.reference_db)
+    assert not db.execute("SELECT 1 FROM tropes WHERE id='ABSENT-LEGACY'").fetchone()
+    assert db.execute("SELECT category FROM import_report WHERE item_id=?", (ref,)).fetchone()[0] == "legacy_fixture_quarantine"
+    db.close()
+    campaign_conn.execute("UPDATE character_tickets SET hidden=0 WHERE character_id=?", (char,))
+    campaign_conn.commit()
+    assert run_import(settings_mini).missing == {"ticket": [ref]}
 
 
 def test_ids_kept_only_in_a_save_point_are_protected(settings_mini, campaign_conn):

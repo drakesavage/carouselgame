@@ -25,7 +25,7 @@ def clock(conn, cid):
 
 def test_move_zone_follows_links(conn, campaign_id):
     at_farm(conn, campaign_id)
-    with pytest.raises(ChangeError, match="no way from farm gate to cellar door"):
+    with pytest.raises(ChangeError, match="no way from farm gate to that destination"):
         apply(conn, campaign_id, {"op": "move_zone", "to": CELLAR})
     assert zone_of(conn, campaign_id) == GATE
     r = apply(conn, campaign_id, {"op": "move_zone", "to": "barn"})   # an exact label works too
@@ -43,10 +43,36 @@ def test_move_zone_refusals(conn, campaign_id):
     with pytest.raises(ChangeError, match="not in a venue"):
         apply(conn, campaign_id, {"op": "move_zone", "to": BARN})
     at_farm(conn, campaign_id)
-    with pytest.raises(ChangeError, match="unknown zone"):
+    with pytest.raises(ChangeError, match="no way from"):
         apply(conn, campaign_id, {"op": "move_zone", "to": "the attic"})
-    with pytest.raises(ChangeError, match="unknown zone"):
+    with pytest.raises(ChangeError, match="no way from"):
         apply(conn, campaign_id, {"op": "move_zone", "to": "SM-T02:n01_platform"})   # another venue's zone
+
+
+def test_new_source_hold_preserves_position_and_refuses_old_layout(conn, campaign_id):
+    at_farm(conn, campaign_id)
+    with transaction(conn):
+        conn.execute("UPDATE ref.venues SET enterable=0 WHERE id='SM-T01'")
+    before = zone_of(conn, campaign_id)
+    with pytest.raises(ChangeError, match="awaiting reconciliation"):
+        apply(conn, campaign_id, {"op": "move_zone", "to": BARN})
+    assert zone_of(conn, campaign_id) == before
+
+
+def test_unresolved_source_passage_is_blocked_in_both_directions(conn, campaign_id):
+    at_farm(conn, campaign_id)
+    with transaction(conn):
+        conn.execute("UPDATE ref.venue_links SET source_lock='must_select_story_stairs_lift_or_portal' WHERE a=? AND b=?", (GATE, BARN))
+    for here, target in [(GATE, BARN), (BARN, GATE)]:
+        with transaction(conn):
+            conn.execute("UPDATE campaigns SET zone_id=? WHERE id=?", (here, campaign_id))
+            conn.execute("UPDATE party_groups SET zone_id=? WHERE campaign_id=?", (here, campaign_id))
+        before = clock(conn, campaign_id)
+        with pytest.raises(ChangeError, match="no usable way through"):
+            apply(conn, campaign_id, {"op": "move_zone", "to": target})
+        assert zone_of(conn, campaign_id) == here
+        assert clock(conn, campaign_id) == before
+    assert not conn.execute("SELECT 1 FROM stories WHERE campaign_id=?", (campaign_id,)).fetchone()
 
 
 def test_move_zone_refused_in_the_car(conn, campaign_id):
@@ -154,6 +180,32 @@ def test_overlays_need_an_active_story(conn, campaign_id):
         with pytest.raises(ChangeError, match="a venue changes only inside a story"):
             apply(conn, campaign_id, change)
     assert conn.execute("SELECT COUNT(*) FROM venue_overlays").fetchone()[0] == 0
+
+
+def test_story_exit_block_is_visible_and_prevents_world_travel_without_teleport(conn, campaign_id):
+    from app.venue_api import player_venue
+    story_at_cellar(conn, campaign_id)
+    apply(conn, campaign_id, {"op": "move_zone", "to": BARN})
+    apply(conn, campaign_id, {"op": "block_venue_exit", "zone": BARN, "reason": "the storm door is barricaded"})
+    assert player_venue(conn, campaign_id)["departure_blocked"] == "the storm door is barricaded"
+    before = tuple(conn.execute("SELECT node_id,zone_id,game_time_minutes FROM campaigns WHERE id=?", (campaign_id,)).fetchone())
+    with pytest.raises(ChangeError, match="exit is blocked: the storm door is barricaded"):
+        apply(conn, campaign_id, {"op": "travel", "to": "CAR-002"})
+    assert tuple(conn.execute("SELECT node_id,zone_id,game_time_minutes FROM campaigns WHERE id=?", (campaign_id,)).fetchone()) == before
+    apply(conn, campaign_id, {"op": "open_venue_exit", "zone": BARN, "reason": "the barricade is removed"})
+    assert player_venue(conn, campaign_id)["departure_blocked"] is None
+    apply(conn, campaign_id, {"op": "travel", "to": "CAR-002"})
+    assert zone_of(conn, campaign_id) is None
+
+
+def test_exit_overlays_are_story_scoped_and_clear_at_conclusion(conn, campaign_id):
+    story_at_cellar(conn, campaign_id)
+    with pytest.raises(ChangeError, match="exterior entry or exit"):
+        apply(conn, campaign_id, {"op": "block_venue_exit", "zone": CELLAR, "reason": "not a portal"})
+    apply(conn, campaign_id, {"op": "block_venue_exit", "zone": BARN, "reason": "story barrier"})
+    conclude(conn, campaign_id)
+    from app.carousel.venues import departure_block
+    assert departure_block(conn, campaign_id, BARN) is None
 
 
 def test_lifting_overlays_returns_the_group(conn, campaign_id):

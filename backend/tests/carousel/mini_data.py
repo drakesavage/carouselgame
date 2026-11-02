@@ -149,6 +149,7 @@ MINI = {
           for p in ("CAR-016", "CAR-047", "CAR-002", "CAR-006", "CAR-086")],
         {"location_id": "PROV-LOC-001", "name": "Unrecorded place", "relative_image_path": "assets/identity_images/PROV-LOC-001_identity_v001.png"}]},
     "venues": VENUES,
+    "reconciliation": {},
     "npcs": {"residents": [{"id": "CAR-NPC-001", "name": "Adeline Winter", "provenance": "canon_expanded", "canon_appearance": True,
                             "at_start": {"status": "alive"}, "camp_role": "Camp leader", "usual_location": "Dyer's Lodge",
                             "relationships": [{"with": "CAR-NPC-003", "type": "camp_leadership", "visibility": "socially_discoverable", "basis": "canon"}],

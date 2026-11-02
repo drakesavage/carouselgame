@@ -71,6 +71,17 @@ def register(app: FastAPI, settings: Settings, gm_auth: Callable) -> None:
             raise HTTPException(404, f"unknown reference kind {kind!r}")
         return [_row(r) for r in c.execute(KINDS[kind][0])]
 
+    @app.get("/api/gm/assets/audit")
+    def asset_audit(_=Depends(gm_auth), c=Depends(ref)):
+        return {
+            "findings": [_row(r) for r in c.execute("SELECT category,item_id,message FROM import_report ORDER BY id")],
+            "unplaced": [_row(r) for r in c.execute("SELECT id,name,status FROM places WHERE north IS NULL OR west IS NULL")],
+            "venue_holds": [_row(r) for r in c.execute("SELECT id,title,raw_json FROM venues WHERE enterable=0 ORDER BY id")],
+            "relationships": [_row(r) for r in c.execute("SELECT * FROM asset_relationships ORDER BY venue_id,omen_id")],
+            "illustrated_submaps_installed": False,
+            "human_approval_inferred": False,
+        }
+
     @app.get("/api/gm/reference/{kind}/{rid}")
     def gm_reference_one(kind: str, rid: str, _=Depends(gm_auth), c=Depends(ref)):
         if kind not in KINDS:

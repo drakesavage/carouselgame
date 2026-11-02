@@ -28,6 +28,7 @@ REVISION_FAMILIES = ("insert_future_scene", "remove_or_delay_future_beat", "reca
 
 PLAYABLE = "Playable Omen"
 HUB = "Hub / generator"
+RELATED_CUE = "Related cue / route"
 
 
 class SightOmen(BaseModel):
@@ -61,7 +62,7 @@ def premise(ctx: Ctx, oid: str) -> str | None:
 
 def _apply_sight(ctx: Ctx, op: SightOmen) -> dict:
     o = _omen(ctx, op.omen)
-    if o["record_type"] not in (PLAYABLE, HUB):
+    if o["record_type"] not in (PLAYABLE, HUB, RELATED_CUE):
         raise ChangeError(f"{op.omen} is a {o['record_type']!r} record, not an Omen the group can see")
     if _omen_state(ctx, op.omen):
         raise ChangeError(f"{op.omen} is already seen")
@@ -150,6 +151,10 @@ def _apply_begin(ctx: Ctx, op: BeginStory) -> dict:
         _resident_here(ctx, c)
     b = one(ctx.conn, "SELECT sealed_json FROM ref.omen_beats WHERE omen_id = ?", (op.omen,))
     dossier = (b or {}).get("sealed") or {}
+    from ..carousel.continuity import predecessor_context
+    inherited = predecessor_context(ctx.conn, ctx.campaign_id, dossier)
+    if inherited:
+        dossier = {**dossier, "continuity_context": inherited}
     endings = endings_from(dossier)
     if endings and op.endings:
         raise ChangeError(f"{op.omen}'s endings are sealed in its dossier; leave `endings` out")
