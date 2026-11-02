@@ -8,6 +8,7 @@ Sections, in order:
                     overlays; then GM-ONLY the venue's Omen cues and where they sit
     OPENING         during the new-game flow: the stage, its job, what blocks the next stage, the lure, the friends, Silas's options
   3 PARTY           every group: location, activity, members (who is present vs elsewhere)
+    CAMP RETURN     the first turn back at camp: time away, stories, new posters, residents around (shown once)
     AROUND          Camp Dyer residents where the group is (carousel/residents.py): one line each, unmet ones by template id;
                     their adaptation hooks go to GM-ONLY
   4 PRESENT         full sheets for the player character and everyone present (scene participants, the PC's group,
@@ -53,7 +54,7 @@ PROFILES: dict[str, dict] = {
 },
 }
 CATEGORIES = {"CAMPAIGN": "state", "PARTY": "state", "PRESENT": "state", "OBJECTIVES": "state", "SHARED STASH": "state",
-              "ACTIVE COMBAT": "state", "STORY": "state", "OMENS HERE": "state", "VENUE": "state", "OPENING": "state", "FATE": "state", "DEATHWATCH": "state", "AROUND": "state", "LEDGER RECORDS": "ledger", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
+              "ACTIVE COMBAT": "state", "STORY": "state", "OMENS HERE": "state", "VENUE": "state", "OPENING": "state", "FATE": "state", "DEATHWATCH": "state", "AROUND": "state", "CAMP RETURN": "state", "LEDGER RECORDS": "ledger", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
               "RULEBOOK": "rulebook", "RECENT TRANSCRIPT": "narrative", "RECENT ROLLS": "state", "GM-ONLY SECRETS": "gm_private"}
 STOP = set("the a an and or of to in on for with by is are be as at it this that from what how does do can when which who i we my our me us "
            "you your he she they them his her their then than into onto about there here just also will would should could".split())
@@ -365,6 +366,17 @@ def _firewall_line(conn: sqlite3.Connection, pc: dict | None) -> str | None:
     return f"{pc['name']} died at {d['phase']} in {d['title']}; {pronoun or 'they'} {verb} know what happened after that unless told"
 
 
+CAMP_RETURN_COPY = ("The group is back at camp after {h}h{mm:02d}. Since they left: {stories}; new posters: {posters}. Residents around now: "
+                    "{around}. You may add colour (who noticed, rumours, who asks about the story), recorded with record_fact or remember. "
+                    "Nothing happened that the records don't show.")
+
+
+def _camp_return_section(back: dict) -> str:
+    stories = "; ".join(f"{s['title']} ({s['ending']}; cast: {', '.join(s['cast_names'])})" for s in back["stories"]) or "no stories"
+    return CAMP_RETURN_COPY.format(h=back["away_minutes"] // 60, mm=back["away_minutes"] % 60, stories=stories,
+                                   posters=", ".join(back["posters"]) or "none", around=", ".join(back["around"]) or "none")
+
+
 MAX_AROUND = 12
 
 
@@ -499,6 +511,9 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
     watching = deathwatch(conn, cid)
     if watching:
         sections["DEATHWATCH"] = DEATHWATCH_COPY.format(pace=watching["pace"])
+    back = residents.camp_return(conn, cid) if has_reference(conn) else None
+    if back:
+        sections["CAMP RETURN"] = _camp_return_section(back)
 
     # 3 PARTY ORGANIZATION
     pc_group = pc.get("assignment") if pc else None

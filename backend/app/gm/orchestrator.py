@@ -236,6 +236,9 @@ class TurnService:
                 response = self._commit_turn(conn, cid, turn, narration, runner, provider.name)
                 conn.execute("UPDATE turns SET status = 'completed', provider = ?, response_json = ?, stage_json = NULL, completed_at = ? WHERE id = ?",
                              (provider.name, json.dumps(response), now_iso(), turn_id))
+                if "CAMP RETURN" in steps[0].get("sizes", {}):   # the camp return is briefed once (carousel/residents.py)
+                    from ..carousel.residents import clear_camp_return
+                    clear_camp_return(conn, cid)
                 if at_camp(conn, cid):   # save points only at camp (design §8.1)
                     create_save_point(conn, cid, f"After turn {turn_id}", kind="auto", turn_id=turn_id, keep_auto=self.settings.autosave_keep)
                 if runner.effects.save_label:  # the player asked to save (save_game): a manual point, never pruned (playtest 1, M6)

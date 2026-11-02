@@ -109,6 +109,12 @@ def _apply_travel(ctx: Ctx, op: Travel) -> dict:
     if stop:
         route = truncate(route, stop.node)
     arrived = route.nodes[-1]
+    from ..carousel.residents import CAMP
+    left = one(ctx.conn, "SELECT left_camp_minutes, (SELECT MAX(id) FROM events WHERE campaign_id = ?) AS last FROM campaigns WHERE id = ?",
+               (ctx.campaign_id, ctx.campaign_id))
+    if start in CAMP and arrived not in CAMP:   # the away clock for the camp return (residents.camp_return)
+        ctx.conn.execute("UPDATE campaigns SET left_camp_minutes = ?, left_camp_event_id = ? WHERE id = ?", (ctx.game_time(), left["last"], ctx.campaign_id))
+    camp_return = start not in CAMP and arrived in CAMP and left["left_camp_minutes"] is not None
     where, place_id = _label(ctx, arrived)
     ctx.conn.execute("UPDATE campaigns SET node_id = ?, travel_seq = ? WHERE id = ?", (arrived, seq, ctx.campaign_id))
     _apply_set_location(ctx, SetLocation(op="set_location", location=where, safe_room=arrived in SAFE_PLACE_IDS))
@@ -133,7 +139,7 @@ def _apply_travel(ctx: Ctx, op: Travel) -> dict:
         interrupted = {"omen_id": stop.omen_id, "description": o["description"]}
     summary = f"The group walks to {where} ({route.minutes} min)" + (" and stops: something is wrong" if stop else "")
     ctx.event("travel", summary, {"route_nodes": route.nodes, "minutes": route.minutes, "arrived": arrived,
-                                  "interrupted": interrupted, "geometry_px": route.geometry_px, "venue": venue})
+                                  "interrupted": interrupted, "geometry_px": route.geometry_px, "venue": venue, "camp_return": camp_return})
     if stop:
         ctx.event("omen_sighted", f"Seen at {where}: {interrupted['description']}", {**interrupted, "node": arrived, "kind": stop.kind})
     return {"summary": summary, "arrived": arrived, "interrupted": interrupted, "minutes": route.minutes, "geometry_px": route.geometry_px,

@@ -291,3 +291,35 @@ def presence_refusal(conn: sqlite3.Connection, cid: int, character_id: int) -> s
     w = where(conn, cid, character_id)
     place = one(conn, "SELECT name FROM ref.places WHERE id = ?", (w["place_id"],)) if w and w["place_id"] else None
     return f"{r['name']} is at {place['name']}, not here" if place else f"{r['name']} is not here"
+
+
+# ---------------------------------------------------------------- returning to camp
+CAMP = ("CAR-046", "CAR-047")   # Camp Dyer and Dyer's Lodge
+
+
+def camp_return(conn: sqlite3.Connection, cid: int) -> dict | None:
+    """What changed while the group was away, for the first turn back at camp: {"away_minutes", "stories": [{title, ending,
+    cast_names}], "posters": [names], "with_group": [names], "around": [names]}. None unless the group stands at camp, the
+    away clock is running (travel_ops sets it on leaving) and its last travel since leaving was the arrival back."""
+    camp = one(conn, "SELECT node_id, left_camp_minutes, left_camp_event_id, game_time_minutes, active_character_id FROM campaigns WHERE id = ?", (cid,))
+    if not camp or camp["node_id"] not in CAMP or camp["left_camp_minutes"] is None:
+        return None
+    since, left = camp["left_camp_event_id"] or 0, camp["left_camp_minutes"]
+    last = one(conn, """SELECT payload_json FROM events WHERE campaign_id = ? AND type = 'travel' AND visibility = 'player' AND rolled_back = 0
+                        AND id > ? ORDER BY id DESC LIMIT 1""", (cid, since))
+    if not last or not (last["payload"] or {}).get("camp_return"):
+        return None
+    stories = [{"title": s["title"], "ending": s["ending"] or "still running",
+                "cast_names": [r["name"] for r in rows(conn, """SELECT c.name FROM story_cast x JOIN characters c ON c.id = x.character_id
+                                                               WHERE x.story_id = ? ORDER BY c.party_order, c.id""", (s["id"],))]}
+               for s in rows(conn, "SELECT id, title, ending FROM stories WHERE campaign_id = ? AND (started_minutes >= ? OR ended_minutes >= ?) ORDER BY id",
+                             (cid, left, left))]
+    posters = [p["name"] for p in rows(conn, "SELECT name FROM missing_posters WHERE campaign_id = ? AND posted_minutes >= ? ORDER BY id", (cid, left))]
+    with_group = [c["name"] for c in rows(conn, "SELECT name FROM characters WHERE campaign_id = ? AND in_party = 1 AND id != ? ORDER BY party_order, id",
+                                         (cid, camp["active_character_id"] or -1))]
+    return {"away_minutes": camp["game_time_minutes"] - left, "stories": stories, "posters": posters, "with_group": with_group,
+            "around": [a["name"] for a in around(conn, cid) if a["met"]]}
+
+
+def clear_camp_return(conn: sqlite3.Connection, cid: int) -> None:
+    conn.execute("UPDATE campaigns SET left_camp_minutes = NULL, left_camp_event_id = NULL WHERE id = ?", (cid,))
