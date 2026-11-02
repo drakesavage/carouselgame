@@ -49,6 +49,7 @@ SNAPSHOT_TABLES: dict[str, str] = {
     "death_events": "SELECT * FROM death_events WHERE campaign_id = ?",
     "missing_posters": "SELECT * FROM missing_posters WHERE campaign_id = ?",
     "danger_warnings": "SELECT * FROM danger_warnings WHERE campaign_id = ?",
+    "resident_whereabouts": "SELECT * FROM resident_whereabouts WHERE campaign_id = ?",
 }
 # Tables without a campaign_id column: which rows belong to the campaign (param: campaign_id).
 _BY_CHARACTER = "character_id IN (SELECT id FROM characters WHERE campaign_id = ?)"
@@ -56,7 +57,7 @@ _BY_STORY = "story_id IN (SELECT id FROM stories WHERE campaign_id = ?)"
 _SCOPED_DELETE = {"status_effects": _BY_CHARACTER, "npc_profiles": _BY_CHARACTER, "advanced_marks": _BY_CHARACTER, "mark_awards": _BY_CHARACTER,
                   "story_packets": _BY_STORY, "story_cast": _BY_STORY, "story_revisions": _BY_STORY}
 # Delete children before parents.
-_DELETE_ORDER = ["death_events", "missing_posters", "danger_warnings", "story_revisions", "story_cast", "story_packets", "mark_awards", "advanced_marks", "stories", "story_spoilers", "known_places", "campaign_flags", "omen_states", "zone_visits", "venue_overlays", "character_tickets", "stat_modifiers", "status_effects", "npc_profiles", "relationships", "items", "locations",
+_DELETE_ORDER = ["death_events", "missing_posters", "danger_warnings", "story_revisions", "story_cast", "story_packets", "mark_awards", "advanced_marks", "stories", "story_spoilers", "known_places", "campaign_flags", "omen_states", "zone_visits", "venue_overlays", "resident_whereabouts", "character_tickets", "stat_modifiers", "status_effects", "npc_profiles", "relationships", "items", "locations",
                  "quests", "clocks", "house_rules", "rulings", "lore_facts", "gm_secrets",
                  "memory_summaries", "party_groups", "scenes", "memories", "characters"]
 _LOGS = {"messages": "max_message_id", "events": "max_event_id", "turns": "max_turn_id"}

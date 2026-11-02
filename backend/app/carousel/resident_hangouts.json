@@ -1,0 +1,52 @@
+{
+  "provenance": "adaptation",
+  "note": "Claude's adaptation, not canon: where each Camp Dyer resident lives and spends afternoons, matched case-insensitively against usual_location (first match wins) and affiliation. Edit freely; carousel/residents.py drops and reports any place or zone the reference data lacks.",
+  "default_home": {"place": "CAR-047", "zone": "SM-028:n02_shared_living_common_ro"},
+  "homes": [
+    {"match": "library", "place": "CAR-047", "zone": "SM-028:n06_upper_private_rooms"},
+    {"match": "archive", "place": "CAR-047", "zone": "SM-028:n06_upper_private_rooms"},
+    {"match": "planning nook", "place": "CAR-047", "zone": "SM-028:n06_upper_private_rooms"},
+    {"match": "map room", "place": "CAR-047", "zone": "SM-028:n04_main_hall_and_bedrooms"},
+    {"match": "maps room", "place": "CAR-047", "zone": "SM-028:n04_main_hall_and_bedrooms"},
+    {"match": "clue board", "place": "CAR-047", "zone": "SM-028:n04_main_hall_and_bedrooms"},
+    {"match": "kitchen", "place": "CAR-047", "zone": "SM-028:n03_kitchen_and_pantry"},
+    {"match": "storeroom", "place": "CAR-047", "zone": "SM-028:n07_storage_basement_provis"},
+    {"match": "porch", "place": "CAR-047", "zone": "SM-028:n01_lodge_front_steps"},
+    {"match": "watch desk", "place": "CAR-047", "zone": "SM-028:n01_lodge_front_steps"},
+    {"match": "deck", "place": "CAR-047", "zone": "SM-028:n05_rear_door_to_service_de"},
+    {"match": "common room", "place": "CAR-047", "zone": "SM-028:n02_shared_living_common_ro"},
+    {"match": "bulletin board", "place": "CAR-047", "zone": "SM-028:n02_shared_living_common_ro"},
+    {"match": "cabin", "place": "CAR-046", "zone": "SM-027:n03_communal_campfire_squar"},
+    {"match": "quarters", "place": "CAR-046", "zone": "SM-027:n03_communal_campfire_squar"},
+    {"match": "bowler camp", "place": "CAR-046", "zone": "SM-027:n03_communal_campfire_squar"},
+    {"match": "gate", "place": "CAR-046", "zone": "SM-027:n01_camp_main_road_entrance"},
+    {"match": "arrival road", "place": "CAR-046", "zone": "SM-027:n01_camp_main_road_entrance"},
+    {"match": "trailhead", "place": "CAR-046", "zone": "SM-027:n01_camp_main_road_entrance"},
+    {"match": "challenge course", "place": "CAR-046", "zone": "SM-027:n06_trail_to_abandoned_cabi"},
+    {"match": "training", "place": "CAR-046", "zone": "SM-027:n06_trail_to_abandoned_cabi"},
+    {"match": "exercise", "place": "CAR-046", "zone": "SM-027:n06_trail_to_abandoned_cabi"},
+    {"match": "trails", "place": "CAR-046", "zone": "SM-027:n06_trail_to_abandoned_cabi"},
+    {"match": "perimeter", "place": "CAR-046", "zone": "SM-027:n07_woods_boundary_trail"},
+    {"match": "shed", "place": "CAR-046", "zone": "SM-027:n08_camp_maintenance_back_g"},
+    {"match": "workshop", "place": "CAR-046", "zone": "SM-027:n08_camp_maintenance_back_g"},
+    {"match": "woodshed", "place": "CAR-046", "zone": "SM-027:n08_camp_maintenance_back_g"}
+  ],
+  "usual_hangouts": [
+    {"match": "cordoned cove", "place": "CAR-179"},
+    {"match": "town errands", "place": "CAR-002", "zone": "SM-001:n01_square_central_approach"},
+    {"match": "offsite", "place": "CAR-002", "zone": "SM-001:n01_square_central_approach"},
+    {"match": "bowling alley", "place": "AUD-LOC-BOWLING-ALLEY"}
+  ],
+  "affiliations": {
+    "Atlas Table": [{"place": "CAR-002", "zone": "SM-001:n01_square_central_approach"}, {"place": "CAR-006", "zone": "SM-001:n02_diner_front_and_interio"}],
+    "Free Agents": [{"place": "CAR-006", "zone": "SM-001:n02_diner_front_and_interio"}, {"place": "CAR-002", "zone": "SM-001:n01_square_central_approach"}],
+    "Lantern Team": [{"place": "CAR-002", "zone": "SM-001:n01_square_central_approach"}],
+    "Kitchen Table": [{"place": "CAR-006", "zone": "SM-001:n02_diner_front_and_interio"}],
+    "Travis's Crew": [{"place": "CAR-002", "zone": "SM-001:n01_square_central_approach"}],
+    "social specialists": [{"place": "CAR-006", "zone": "SM-001:n02_diner_front_and_interio"}, {"place": "CAR-002", "zone": "SM-001:n01_square_central_approach"}],
+    "researchers": [{"place": "CAR-002", "zone": "SM-001:n01_square_central_approach"}],
+    "independent": [{"place": "CAR-006", "zone": "SM-001:n02_diner_front_and_interio"}],
+    "The Bowlers": [{"place": "AUD-LOC-BOWLING-ALLEY"}],
+    "Lodge Operations": [], "camp leadership": [], "Boundary Watch": [], "Clinic Circle": [], "veteran training": []
+  }
+}

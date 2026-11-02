@@ -13,7 +13,9 @@ REFERENCE_COLUMNS: dict[str, tuple[str, str]] = {"place": ("locations", "ref_id"
                                                   "lure_resident": ("campaigns", "lure_resident"),
                                                   "venue": ("campaigns", "venue_id"), "group_venue": ("party_groups", "venue_id"),
                                                   "zone": ("campaigns", "zone_id"), "group_zone": ("party_groups", "zone_id"),
-                                                  "visited_zone": ("zone_visits", "zone_id")}
+                                                  "visited_zone": ("zone_visits", "zone_id"),
+                                                  "whereabouts_place": ("resident_whereabouts", "place_id"),
+                                                  "whereabouts_zone": ("resident_whereabouts", "zone_id")}
 
 
 def referenced_ids(campaign_conn: sqlite3.Connection) -> dict[str, set[str]]:
@@ -49,8 +51,8 @@ def unresolved(ref: sqlite3.Connection, ids: dict[str, set[str]]) -> dict[str, l
         return ":story-" in i or ref.execute("SELECT 1 FROM venue_zones WHERE id = ?", (i,)).fetchone() is not None
 
     checks = {
-        "venue": venue, "group_venue": venue, "zone": zone, "group_zone": zone, "visited_zone": zone,
-        "place": place,
+        "venue": venue, "group_venue": venue, "zone": zone, "group_zone": zone, "visited_zone": zone, "whereabouts_zone": zone,
+        "place": place, "whereabouts_place": place,
         "npc": npc, "lure_resident": npc,
         "node": node, "group_node": node, "known_place": place,
         "omen": lambda i: ref.execute("SELECT 1 FROM omens WHERE id = ?", (i,)).fetchone() is not None,

@@ -10,7 +10,7 @@ from typing import Callable
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 
-from .carousel import refdb
+from .carousel import refdb, residents
 from .config import Settings
 
 TILES_DIR = "Illustrated_Map_Production/web_tiles"
@@ -60,7 +60,8 @@ def register(app: FastAPI, settings: Settings, gm_auth: Callable) -> None:
             m = c.execute("SELECT key, sha256, imported_at FROM manifest ORDER BY key").fetchall()
             return {"imported": True, "imported_at": m[0]["imported_at"] if m else None,
                     "counts": {t: refdb.count(c, t) for t in ("places", "graph_edges", "omens", "roles", "tickets", "tropes", "npc_templates")},
-                    "sources": {r["key"]: r["sha256"][:12] for r in m}}
+                    "sources": {r["key"]: r["sha256"][:12] for r in m},
+                    "hangouts": residents.hangout_table(c)["report"]}   # resident_hangouts.json entries the data can't place
         finally:
             c.close()
 

@@ -434,6 +434,16 @@ CREATE TABLE IF NOT EXISTS campaign_flags (
 );
 -- Venues (carousel/venues.py): zones the group has stood in, and story overlays on a venue's links. Overlays name their
 -- story and are lifted (never deleted) when it concludes; for add_zone, a is the new zone and b the zone it joins.
+-- GM override of where a resident is (op resident_whereabouts), one row per resident; the schedule resumes at until_minutes.
+CREATE TABLE IF NOT EXISTS resident_whereabouts (
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+  character_id INTEGER NOT NULL REFERENCES characters(id),
+  place_id TEXT NOT NULL,
+  zone_id TEXT,
+  until_minutes INTEGER NOT NULL,
+  reason TEXT NOT NULL,                      -- GM-only
+  PRIMARY KEY (campaign_id, character_id)
+);
 CREATE TABLE IF NOT EXISTS zone_visits (
   campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
   zone_id TEXT NOT NULL,
