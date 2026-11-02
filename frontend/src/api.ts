@@ -18,6 +18,7 @@ export type CharacterCard = {
   stats: CarouselStats; tickets?: Ticket[]; portrait_path?: string | null; statuses: Status[]; equipped: { id: number; name: string; slot?: string }[];
   personality?: string | null; known_motivation?: string | null; attitude?: number | null; voice?: string | null; assignment?: string | null;
   life?: Life;
+  stars?: number; pending_stat_points?: number;   // Plan 4 rewards: every five stars make a stat point
 };
 /** Whether someone is around at all. */
 export type Life = { state: "active" | "deceased" | "missing" | "retired" | "contact"; label: string; note: string | null };

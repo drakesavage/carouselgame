@@ -1,0 +1,83 @@
+/* The Red Wallpaper (views/Wallpaper.tsx): an oxblood damask behind a gilt frame, the player's poster, stat card and
+   what has been revealed. The pattern is an inline SVG at low contrast; opening spreads it, then the cards resolve. */
+
+.wallpaper {
+  --damask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='120' viewBox='0 0 80 120'%3E%3Cg fill='%23000' fill-opacity='.16'%3E%3Cpath d='M40 6c8 10 18 14 18 26S48 52 40 60c-8-8-18-16-18-28S32 16 40 6zm0 64c6 8 14 12 14 22s-8 16-14 22c-6-6-14-12-14-22s8-14 14-22z'/%3E%3Ccircle cx='0' cy='60' r='9'/%3E%3Ccircle cx='80' cy='60' r='9'/%3E%3Cpath d='M0 0c6 6 12 8 12 16S6 26 0 30zm80 0c-6 6-12 8-12 16s6 10 12 14z'/%3E%3C/g%3E%3C/svg%3E");
+  min-height: 100%; padding: 24px; position: relative;
+  background: var(--damask) 0 0 / 80px 120px, radial-gradient(120% 90% at 50% 20%, #7a2a37, var(--oxblood) 45%, #3a121b);
+  animation: wp-spread 500ms ease-out both;
+}
+.wallpaper::after { /* grain */
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0.08; mix-blend-mode: overlay;
+  background-image: repeating-radial-gradient(circle at 17% 32%, #fff 0 1px, transparent 1px 3px);
+}
+.wp-frame {
+  position: relative; z-index: 1; margin: 0 auto; max-width: 1400px; padding: 26px 28px 20px;
+  border: 1px solid rgba(var(--brass-rgb), 0.7); box-shadow: inset 0 0 0 6px rgba(20, 6, 10, 0.55), inset 0 0 0 7px rgba(var(--brass-rgb), 0.35), 0 30px 80px rgba(0, 0, 0, 0.5);
+  background: rgba(30, 8, 14, 0.35);
+}
+.wp-frame > * { animation: wp-resolve 500ms ease-out 300ms both; }
+@keyframes wp-spread { from { background-size: 40px 60px, 100% 100%; filter: brightness(0.4); } }
+@keyframes wp-resolve { from { opacity: 0; } }
+
+.wp-head { text-align: center; margin-bottom: 20px; }
+.wp-kicker, .wp-label { font: 600 10.5px/1.3 var(--body); letter-spacing: 0.2em; text-transform: uppercase; color: var(--brass); }
+.wp-label { margin: 0 0 10px; }
+.wp-label.small { margin: 0 0 4px; }
+.wp-title { font-family: var(--display); font-weight: 500; font-size: clamp(30px, 4vw, 46px); letter-spacing: 0.14em; text-transform: uppercase; color: var(--parchment); margin: 6px 0 4px; }
+.wp-sub { font: italic 16px/1.4 var(--story); color: #E3CFC2; margin: 0; }
+.wp-empty { text-align: center; font: italic 18px var(--story); color: var(--parchment); }
+
+.wp-cols { display: grid; grid-template-columns: 200px minmax(220px, 300px) minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.wp-card { background: rgba(20, 8, 12, 0.72); border: 1px solid rgba(var(--brass-rgb), 0.35); padding: 16px; }
+.wp-nav { display: grid; gap: 2px; }
+.wp-nav a { color: var(--text-2); text-decoration: none; padding: 6px 8px; border-left: 2px solid transparent; font-size: 13.5px; }
+.wp-nav a:hover, .wp-nav a:focus-visible { color: var(--parchment); border-left-color: var(--brass); background: rgba(var(--brass-rgb), 0.06); }
+.wp-note { font: italic 14px/1.4 var(--story); color: #CDB7AA; margin: 12px 0 0; }
+
+/* the poster */
+.wp-poster {
+  text-align: center; padding: 18px 16px 20px; display: grid; gap: 10px; justify-items: center;
+  background: linear-gradient(180deg, #4a1822, #2a0d14); border: 1px solid var(--brass);
+  box-shadow: inset 0 0 0 5px #2a0d14, inset 0 0 0 6px rgba(var(--brass-rgb), 0.5), 0 18px 40px rgba(0, 0, 0, 0.5);
+}
+.wp-poster-kicker { font: 600 9.5px/1 var(--body); letter-spacing: 0.24em; text-transform: uppercase; color: var(--brass); }
+.wp-portrait { width: 180px; height: 220px; display: grid; place-items: end center; overflow: hidden; }
+.wp-portrait .portrait { width: 180px !important; height: 220px !important; border-radius: 0; }
+.wp-silhouette { width: 150px; height: 180px; fill: #160609; filter: drop-shadow(0 0 18px rgba(var(--blood-rgb), 0.45)); }
+.wp-poster-title { font-family: var(--display); font-weight: 600; font-size: 30px; line-height: 1.05; letter-spacing: 0.06em; text-transform: uppercase; color: var(--parchment); }
+.wp-tagline { font: italic 15px/1.3 var(--story); color: #E3CFC2; }
+.wp-billing { font: 600 10px/1 var(--body); letter-spacing: 0.2em; text-transform: uppercase; color: var(--brass); margin-top: 6px; }
+
+/* your part: a stat card on paper */
+.wp-part { background: var(--atlas-paper); color: #2a1a12; border-color: var(--brass); }
+.wp-part .wp-label { color: #6a4a2a; }
+.wp-armor { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid rgba(60, 40, 20, 0.35); padding: 10px 12px; margin-bottom: 8px; background: rgba(255, 250, 235, 0.35); }
+.wp-armor-num { font-family: var(--display); font-weight: 600; font-size: 46px; line-height: 1; color: var(--oxblood); font-variant-numeric: tabular-nums; }
+.wp-small { font-size: 12.5px; color: inherit; opacity: 0.85; margin: 0 0 6px; }
+.wp-stats { display: grid; gap: 0; margin: 4px 0 10px; }
+.wp-stats > div { display: flex; justify-content: space-between; padding: 5px 2px; border-bottom: 1px solid rgba(60, 40, 20, 0.2); font: 15px var(--story); }
+.wp-stats dt { margin: 0; } .wp-stats dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 600; }
+.wp-cur { color: var(--oxblood); }
+.wp-fate { font-size: 13px; color: var(--oxblood); font-weight: 600; margin: 0 0 8px; }
+.wp-point { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; margin-bottom: 10px; }
+.wp-point .select, .wp-point .btn { color: var(--parchment); }
+.wp-err { color: var(--oxblood); }
+.wp-tickets ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.wp-ticket {
+  width: 100%; display: flex; gap: 6px; align-items: center; text-align: left; cursor: pointer; font: 14px var(--story); color: #2a1a12;
+  background: rgba(255, 250, 235, 0.5); border: 1px dashed rgba(60, 40, 20, 0.45); padding: 6px 8px;
+}
+.wp-ticket:hover, .wp-ticket:focus-visible { border-style: solid; }
+
+/* what the Wallpaper reveals */
+.wp-revealed ul { margin: 0; padding-left: 16px; display: grid; gap: 8px; font: 15px/1.45 var(--story); color: var(--parchment); }
+.wp-premise { font: italic 17px/1.45 var(--story); color: var(--parchment); margin: 0 0 12px; }
+.wp-revealed .wp-small { color: #E3CFC2; }
+
+#wp-cycle { margin-top: 18px; }
+#wp-cycle .storybar { background: rgba(20, 8, 12, 0.72); border-color: rgba(var(--brass-rgb), 0.35); }
+
+@media (max-width: 1300px) { .wp-cols { grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); } .wp-nav { display: none; } .wp-revealed { grid-column: 1 / -1; } }
+@media (max-width: 760px) { .wallpaper { padding: 10px; } .wp-frame { padding: 16px 12px; } .wp-cols { grid-template-columns: 1fr; } .wp-poster { justify-self: center; width: min(320px, 100%); } }
+@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .wallpaper, :root:not([data-motion="full"]) .wp-frame > * { animation: none; } }

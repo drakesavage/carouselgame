@@ -12,6 +12,7 @@ import { applyMotion, getPrefs, play } from "./prefs";
 import { PeopleView } from "./views/People";
 import { RecordsView, RulesView } from "./views/Reference";
 import { SettingsView } from "./views/Settings";
+import { Wallpaper } from "./views/Wallpaper";
 
 const TABS = [
   { id: "scene", label: "Scene", icon: Clapperboard },
@@ -81,6 +82,19 @@ export default function App() {
     }).catch((e) => setError(String(e)));
   }, []);
   useEffect(() => { try { localStorage.setItem("tab", tab); } catch { /* ignore */ } }, [tab]);
+  // the Red Wallpaper is a layer over the game: Esc goes back to the screen it was opened from
+  const prevTab = useRef<Tab>("scene");
+  const lastTab = useRef<Tab>(tab);
+  useEffect(() => { if (lastTab.current !== tab) { prevTab.current = lastTab.current; lastTab.current = tab; } }, [tab]);
+  useEffect(() => {
+    if (tab !== "wallpaper") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || document.querySelector("[role=dialog]")) return;
+      setTab(prevTab.current === "wallpaper" ? "scene" : prevTab.current);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tab]);
 
   const refresh = useCallback(async () => {
     if (cid == null) return;
@@ -212,9 +226,9 @@ export default function App() {
                 openSaves={() => setTab("settings")} openBehindTheScenes={openBehindTheScenes} openChronicle={() => setTab("chronicle")} />
             </div>
             {tab !== "scene" && (
-              <div className="view">
+              <div className={`view ${tab === "wallpaper" ? "wp-view" : ""}`}>
                 {tab === "map" && <MapView cid={cid} campaign={campaign} version={version} onChanged={refresh} openCharacter={setSheet} />}
-                {tab === "wallpaper" && <div className="view-inner muted">The Red Wallpaper is not open yet.</div>}
+                {tab === "wallpaper" && <Wallpaper campaign={campaign} story={story} version={version} onChanged={refresh} openTickets={() => setTab("tickets")} />}
                 {tab === "tickets" && <div className="view-inner muted">No tickets to show yet.</div>}
                 {tab === "chronicle" && <ChronicleView cid={cid} version={version} openCharacter={setSheet} />}
                 {tab === "lodge" && <PeopleView cid={cid} version={version} openCharacter={setSheet} openQuest={() => setTab("chronicle")}

@@ -211,3 +211,4 @@ a { color: var(--brass); }
 .app { display: flex; flex-direction: column; }
 .app > .main { flex: 1; min-height: 0; }
 .scene-host { height: 100%; }
+.view.wp-view { padding: 0; }
