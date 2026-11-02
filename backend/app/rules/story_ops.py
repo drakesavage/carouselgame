@@ -114,6 +114,14 @@ def _norm(action: str) -> str:
     return " ".join(action.strip().lower().split())
 
 
+def _resident_here(ctx: Ctx, c: dict) -> None:
+    """A Camp Dyer resident joins a cast only met, not gone, and with the group or around it (carousel/residents.py)."""
+    from ..carousel.residents import presence_refusal
+    refused = presence_refusal(ctx.conn, ctx.campaign_id, c["id"])
+    if refused:
+        raise ChangeError(refused)
+
+
 def _apply_begin(ctx: Ctx, op: BeginStory) -> dict:
     from ..carousel.opening import stage
     if stage(ctx.conn, ctx.campaign_id) in ("car", "silas"):
@@ -138,6 +146,8 @@ def _apply_begin(ctx: Ctx, op: BeginStory) -> dict:
         raise ChangeError("the cast must include the player character")
     if len({c["id"] for c, _ in cast}) != len(cast):
         raise ChangeError("a character appears twice in the cast")
+    for c, _ in cast:
+        _resident_here(ctx, c)
     b = one(ctx.conn, "SELECT sealed_json FROM ref.omen_beats WHERE omen_id = ?", (op.omen,))
     dossier = (b or {}).get("sealed") or {}
     endings = endings_from(dossier)
@@ -254,6 +264,7 @@ def _apply_cast(ctx: Ctx, op: CastCharacter) -> dict:
         ctx.conn.execute("UPDATE story_cast SET casting = ? WHERE story_id = ? AND character_id = ?", (op.casting, s["id"], c["id"]))
         summary = f"{c['name']} is now cast as {op.casting} (was {had['casting']})"
     else:
+        _resident_here(ctx, c)
         ctx.conn.execute("INSERT INTO story_cast (story_id, character_id, casting, joined_phase) VALUES (?,?,?,?)",
                          (s["id"], c["id"], op.casting, s["phase"]))
         summary = f"{c['name']} joins {s['title']} as {op.casting}"

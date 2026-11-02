@@ -78,6 +78,9 @@ def on_turn(conn, cid, turn_id, change):
         return apply_change(conn, cid, turn_id, change)
 
 
+ADELINE_HERE = {"op": "resident_whereabouts", "resident": "Adeline Winter", "place": "CAR-002", "until_minutes": 900, "reason": "in town"}
+
+
 def begin(conn, cid, **over):
     change = {"op": "begin_story", "omen": "OM-001", "action": "enter:farm", "reason": "Mara walks into the field",
               "cast": [{"character": "Mara Vance", "casting": "lead"}, {"character": "Jonah Reyes", "casting": "support"}], **over}
@@ -213,6 +216,7 @@ def test_camera_counts_screen_moments(conn, campaign_id, running, pc, companion)
 
 def test_cast_character_mid_story(conn, campaign_id, running, npc, companion):
     apply(conn, campaign_id, {"op": "advance_phase", "to": "First Blood", "trigger": "t"})
+    apply(conn, campaign_id, ADELINE_HERE)   # a resident joins a cast only where the group is (Plan 7)
     apply(conn, campaign_id, {"op": "cast_character", "character": "Adeline", "casting": "witness"})
     assert tuple(conn.execute("SELECT casting, joined_phase FROM story_cast WHERE character_id = ?", (npc,)).fetchone()) == ("witness", "First Blood")
     apply(conn, campaign_id, {"op": "cast_character", "character": "Jonah", "casting": "sacrifice"})

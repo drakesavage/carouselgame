@@ -274,3 +274,20 @@ def mark_seen(conn: sqlite3.Connection, cid: int) -> None:
     for a in around(conn, cid):
         if a["met"]:
             conn.execute("UPDATE npc_profiles SET last_seen = ? WHERE character_id = ?", (text, a["id"]))
+
+
+def presence_refusal(conn: sqlite3.Connection, cid: int, character_id: int) -> str | None:
+    """Why this resident can't join the group (or a story) here and now, or None. Non-residents are never refused."""
+    r = one(conn, """SELECT c.name, c.status, c.in_party, p.ref_id, p.met FROM characters c JOIN npc_profiles p ON p.character_id = c.id
+                     WHERE c.campaign_id = ? AND c.id = ?""", (cid, character_id))
+    if not r or not r["ref_id"]:
+        return None
+    if not r["met"]:
+        return f"{r['name']}: meet them first: introduce_resident"
+    if r["status"] in GONE:
+        return f"{r['name']} is gone ({r['status']})"
+    if r["in_party"] or character_id in {a["id"] for a in around(conn, cid)}:
+        return None
+    w = where(conn, cid, character_id)
+    place = one(conn, "SELECT name FROM ref.places WHERE id = ?", (w["place_id"],)) if w and w["place_id"] else None
+    return f"{r['name']} is at {place['name']}, not here" if place else f"{r['name']} is not here"

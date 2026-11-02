@@ -98,6 +98,8 @@ def test_missing_pc_award_is_refused(conn, campaign_id, running):
 
 
 def test_npc_cast_earn_nothing(conn, campaign_id, running, npc):
+    from tests.carousel.test_story_ops import ADELINE_HERE
+    apply(conn, campaign_id, ADELINE_HERE)
     apply(conn, campaign_id, {"op": "cast_character", "character": "Adeline", "casting": "witness"})
     with pytest.raises(ChangeError, match="earn no stars"):
         conclude(conn, campaign_id, awards=[*AWARDS, {"character": "Adeline", "performance": 1, "difficulty": 1}])
