@@ -10,7 +10,7 @@ export function PosterBoard({ cid, version }: { cid: number; version: unknown })
   if (!posters.length) return null;
   return (
     <section aria-label="Missing-poster board">
-      <div className="h2">The board outside the Diner <span className="muted">{posters.length}</span></div>
+      <h2 className="h2">The board outside the Diner <span className="muted">{posters.length}</span></h2>
       <div className="poster-grid">
         {posters.map((p) => (
           <article key={p.id} className={`poster ${p.found ? "found" : ""}`}>

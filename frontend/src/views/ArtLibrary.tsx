@@ -61,7 +61,7 @@ export function ArtLibrary({ cid, campaign, places, onChanged, openCharacter }: 
           </div>
         </section>
       )}
-      <div className="sub">Item pictures ({items}) live with their items in Inventory; scene pictures appear in the story's scene header. Nothing is painted without your click.</div>
+      <div className="sub">Item pictures ({items}) live with their items; scene pictures appear in the establishing shot. Nothing is painted without your click.</div>
     </div>
   );
 }

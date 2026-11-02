@@ -7,6 +7,7 @@ import { AlertTriangle, Bot, Copy, Database, Eye, EyeOff, History, KeyRound, Sav
 import { api, Prefs, SavePoint } from "../api";
 import { Chip, Empty, Panel } from "../ui";
 import { Diagnostics } from "./Diagnostics";
+import { RecordsView, RulesView } from "./Reference";
 
 export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: number; version: number; onChanged: () => void; onCampaign: (id: number | null) => void }) {
   const [prefs, setPrefs] = useState<Prefs | null>(null);
@@ -32,26 +33,70 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
   };
   return (
     <div className="view-inner">
-      <div className="h1">Saves &amp; settings</div>
-      {msg && <div className="card" style={{ margin: "10px 0", borderColor: "var(--cyan-dim)" }}>{msg}</div>}
-      <div id="campaigns" style={{ marginTop: 12, scrollMarginTop: 12 }}><CampaignsPanel cid={cid} onCampaign={onCampaign} /></div>
-      <div className="settings-grid" style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(min(340px, 100%), 1fr))", marginTop: 12 }}>
-        <DeviceSettings />
+      <div className="kicker">Save &amp; recover</div>
+      <h1 className="h1">Saves &amp; Settings</h1>
+      {msg && <div className="card settings-msg">{msg}</div>}
+
+      <section className="settings-section" aria-labelledby="set-saves">
+        <h2 className="h2" id="set-saves">Saves</h2>
+        <div className="settings-grid">
         <Panel title={<><Save size={13} /> Save points</>}>
           <div className="row"><input className="input" placeholder="Label (optional)" value={label} onChange={(e) => setLabel(e.target.value)} /><button className="btn primary" onClick={save}>Save</button></div>
           <div className="sub" style={{ margin: "8px 0" }}>Saving happens only at camp (Dyer's Lodge, between stories): turns there autosave (last 25 kept). Restoring hides later transcript/events but keeps them in the audit log.</div>
           {!saves ? null : saves.length === 0 ? <Empty>No saves.</Empty> : (
             <table className="data"><tbody>{saves.map((s) => (
               <tr key={s.id}><td><div>{s.label}</div><div className="sub">{new Date(s.created_at).toLocaleString()}</div></td>
-                <td><Chip tone={s.kind === "manual" ? "cyan" : s.kind === "import" ? "violet" : s.kind === "pre_restore" ? "amber" : ""}>{s.kind.replace("_", " ")}</Chip></td>
+                <td><Chip tone={s.kind === "manual" ? "cyan" : s.kind === "pre_restore" ? "amber" : ""}>{s.kind.replace("_", " ")}</Chip></td>
                 <td style={{ textAlign: "right" }}><button className="btn small" onClick={() => setConfirm(s)}><History size={12} /> Restore</button></td></tr>
             ))}</tbody></table>
           )}
         </Panel>
 
         <BackupsPanel />
+        </div>
+      </section>
 
-        <Panel title={<><Bot size={13} /> AI Game Master</>}>
+      <section className="settings-section" id="campaigns" aria-labelledby="set-campaigns">
+        <h2 className="h2" id="set-campaigns">Campaigns</h2>
+        <CampaignsPanel cid={cid} onCampaign={onCampaign} />
+      </section>
+
+      <section className="settings-section" aria-labelledby="set-device">
+        <h2 className="h2" id="set-device">Device</h2>
+        <div className="settings-grid">
+        <DeviceSettings />
+        {access && (
+          <Panel title={<><Smartphone size={13} /> Other devices</>}>
+            <div className="sub" style={{ marginBottom: 8 }}>Through Barcode Battles on port {access.port}. Devices other than this PC need the passcode once.</div>
+            {(access.lan_addresses.length ? access.lan_addresses : ["<this PC's address>"]).map((ip) => (
+              <div key={ip} className="mono" style={{ fontSize: 14 }}>http://{ip}:{access.port}{access.path}</div>
+            ))}
+            <div className="row" style={{ marginTop: 10 }}>
+              <span className="sub">Passcode</span>
+              <span className="mono" style={{ fontSize: 22, letterSpacing: "0.12em", color: "var(--cyan)" }} aria-live="polite">
+                {showCode ? access.passcode : "•".repeat(Math.max(6, access.passcode.length))}</span>
+              <button className="btn small ghost" onClick={() => setShowCode((v) => !v)} aria-pressed={showCode}>{showCode ? <><EyeOff size={12} /> Hide</> : <><Eye size={12} /> Show</>}</button>
+              <button className="btn small ghost" onClick={async () => { try { await navigator.clipboard.writeText(access.passcode); setMsg("Passcode copied."); } catch { setMsg("Copy failed; use Show instead."); } }}><Copy size={12} /> Copy</button>
+              <span className="spacer" />
+              {!access.fixed_by_env && (
+                <button className="btn small" onClick={async () => {
+                  if (!window.confirm("Make a new passcode? Every other device will need the new one to sign in again.")) return;
+                  const r = await api.regeneratePasscode(); setAccess({ ...access, passcode: r.passcode }); setShowCode(false); setMsg("New passcode set; every other device must sign in again.");
+                }}>
+                  <KeyRound size={12} /> New passcode
+                </button>
+              )}
+            </div>
+            {access.fixed_by_env && <div className="sub">Set by CAROUSEL_PASSCODE in .env.</div>}
+          </Panel>
+        )}
+        </div>
+      </section>
+
+      <section className="settings-section" aria-labelledby="set-gm">
+        <h2 className="h2" id="set-gm">GM provider</h2>
+        <div className="settings-grid">
+        <Panel title={<><Bot size={13} /> The GM</>}>
           {prefs && (
             <div style={{ display: "grid", gap: 10 }}>
               <label>Provider
@@ -90,47 +135,33 @@ export function SettingsView({ cid, version, onChanged, onCampaign }: { cid: num
             </div>
           )}
         </Panel>
+        </div>
+      </section>
 
-        {access && (
-          <Panel title={<><Smartphone size={13} /> Other devices</>}>
-            <div className="sub" style={{ marginBottom: 8 }}>Through Barcode Battles on port {access.port}. Devices other than this PC need the passcode once.</div>
-            {(access.lan_addresses.length ? access.lan_addresses : ["<this PC's address>"]).map((ip) => (
-              <div key={ip} className="mono" style={{ fontSize: 14 }}>http://{ip}:{access.port}{access.path}</div>
-            ))}
-            <div className="row" style={{ marginTop: 10 }}>
-              <span className="sub">Passcode</span>
-              <span className="mono" style={{ fontSize: 22, letterSpacing: "0.12em", color: "var(--cyan)" }} aria-live="polite">
-                {showCode ? access.passcode : "•".repeat(Math.max(6, access.passcode.length))}</span>
-              <button className="btn small ghost" onClick={() => setShowCode((v) => !v)} aria-pressed={showCode}>{showCode ? <><EyeOff size={12} /> Hide</> : <><Eye size={12} /> Show</>}</button>
-              <button className="btn small ghost" onClick={async () => { try { await navigator.clipboard.writeText(access.passcode); setMsg("Passcode copied."); } catch { setMsg("Copy failed; use Show instead."); } }}><Copy size={12} /> Copy</button>
-              <span className="spacer" />
-              {!access.fixed_by_env && (
-                <button className="btn small" onClick={async () => {
-                  if (!window.confirm("Make a new passcode? Every other device will need the new one to sign in again.")) return;
-                  const r = await api.regeneratePasscode(); setAccess({ ...access, passcode: r.passcode }); setShowCode(false); setMsg("New passcode set; every other device must sign in again.");
-                }}>
-                  <KeyRound size={12} /> New passcode
-                </button>
-              )}
-            </div>
-            {access.fixed_by_env && <div className="sub">Set by CAROUSEL_PASSCODE in .env.</div>}
-          </Panel>
-        )}
-
-        <Panel title={<><Database size={13} /> Records</>}>
+      <section className="settings-section" id="behind-the-scenes" aria-labelledby="set-bts">
+        <h2 className="h2" id="set-bts">Behind the Scenes</h2>
+        <p className="sub">The rules, the records and the machinery. None of it is the story.</p>
+        {cid ? <>
+          <h3 className="settings-sub">Rules</h3>
+          <RulesView cid={cid} />
+          <h3 className="settings-sub">Records</h3>
+          <RecordsView cid={cid} />
+        </> : null}
+        <h3 className="settings-sub">Consistency</h3>
+        <div className="settings-grid">
+        <Panel title={<><Database size={13} /> Record consistency</>}>
           <Consistency cid={cid} version={version} />
         </Panel>
-      </div>
-
+        </div>
       <details className="card" style={{ marginTop: 14 }}>
         <summary style={{ cursor: "pointer" }}><b>Import visual reference</b> <span className="sub">(physical descriptions for sheets and portraits)</span></summary>
         <div style={{ marginTop: 12 }}><VisualReferenceImport cid={cid} /></div>
       </details>
-
       <details className="card" style={{ marginTop: 14 }}>
         <summary style={{ cursor: "pointer" }}><b>GM diagnostics</b> <span className="sub">(development: context packets, tool rounds, dice, integrity checks; GM token required)</span></summary>
         <div style={{ marginTop: 12 }}>{cid ? <Diagnostics cid={cid} /> : <div className="muted">Open a campaign first.</div>}</div>
       </details>
+      </section>
 
       <Dialog.Root open={!!confirm} onOpenChange={(o) => !o && setConfirm(null)}>
         <Dialog.Portal>

@@ -1,19 +1,14 @@
-import { KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { KeyboardEvent, ReactNode, useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import {
-  Award, BookOpen, ChevronDown, ChevronRight, Crosshair, Footprints, Gauge, Gem, HardHat, Hand,
-  HeartPulse, History, LayoutGrid, Loader2, MapPin, Package, Search, Shield, ShieldCheck, Swords, Upload, UserRoundPen, Users,
-  Wrench, X, Zap,
-} from "lucide-react";
+import { BookOpen, ChevronDown, ChevronRight, History, LayoutGrid, Loader2, MapPin, ShieldCheck, Upload, UserRoundPen, Users, X } from "lucide-react";
 import { api, CarouselStats, Life, Ticket } from "../api";
 import { LifeChip } from "./People";
 import { Chip, cropStyle, humanize, Portrait, PortraitCrop, sized, Tree } from "../ui";
 import { ArtButton, CropButton } from "./Art";
+import { TicketCard } from "./Tickets";
 import "../dossier.css";
 
 // ------------------------------------------------------------------ data (GET /api/campaigns/{cid}/characters/{id}/dossier)
-type Item = { id: number; name: string; quantity: number | null; equipped: boolean; deployed: boolean; rarity: string | null; description: string | null;
-  slot: string; effects: string[]; notes: string[]; status: string | null; provenance: string | null; special: boolean; properties: Record<string, unknown>; shared?: boolean };
 type HistoryEntry = { kind: string; text: string; when: number | null; source: string; at?: string };
 type Dossier = {
   id: number; slug: string; name: string; kind: string; is_player: boolean; status: string; life: Life; in_party: boolean; roster_category: string | null;
@@ -21,20 +16,17 @@ type Dossier = {
   role: { id: string | null; reason: string | null; aspect_id: string | null; advanced_role_id: string | null };
   stats: CarouselStats; rewards?: { stars: number; pending_stat_points: number }; statuses: { id: number; name: string; polarity: string | null; description: string | null }[]; tickets?: Ticket[];
   group: { key: string; label: string; location: string | null; activity: string | null } | null; location: string | null;
-  equipment: { equipped: Item[]; carried: Item[]; linked_shared: Item[]; commitments: Record<string, any>[]; slot_labels: Record<string, string> };
   story: Record<string, any>; history: HistoryEntry[];
   private_sheet: "generated" | "authored" | null;
 };
 
 const TABS = [
   { id: "overview", label: "Overview", icon: LayoutGrid },
-  { id: "equipment", label: "Equipment", icon: Package },
   { id: "story", label: "Story", icon: BookOpen },
   { id: "history", label: "History", icon: History },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
-const SLOT_ICON: Record<string, typeof Package> = { weapon: Crosshair, armor: Shield, head: HardHat, hands: Hand, feet: Footprints, accessory: Gem, other: Package };
 const roleName = (id: string | null) => (id ? humanize(id.replace(/^(base|aspect|advanced)\./, "").replace(/\./g, " ")) : null);
 
 // ------------------------------------------------------------------ dialog
@@ -73,8 +65,7 @@ export function CharacterDossierDialog({ cid, charId, onClose, onChanged }: { ci
                 ))}
               </nav>
               <div className="dossier-body" role="tabpanel" ref={body}>
-                {tab === "overview" && <Overview cid={cid} d={d} openTab={setTab} onChanged={changed} />}
-                {tab === "equipment" && <EquipmentTab d={d} />}
+                {tab === "overview" && <Overview cid={cid} d={d} onChanged={changed} />}
                 {tab === "story" && <StoryTab d={d} />}
                 {tab === "history" && <HistoryTab d={d} raw={raw} />}
               </div>
@@ -196,7 +187,7 @@ function Rewards({ cid, d, onChanged }: { cid: number; d: Dossier; onChanged: ()
       <span className="sub">Stars {r.stars}/5</span>
       {r.pending_stat_points > 0 && (
         <span className="row">
-          <Chip tone="gold">{r.pending_stat_points} stat point{r.pending_stat_points > 1 ? "s" : ""}</Chip>
+          <Chip tone="amber">{r.pending_stat_points} stat point{r.pending_stat_points > 1 ? "s" : ""}</Chip>
           <select className="select" value={stat} onChange={(e) => setStat(e.target.value)} aria-label="Stat to raise">
             {STATS.map((k) => <option key={k} value={k.toLowerCase()}>{k}</option>)}
           </select>
@@ -208,14 +199,17 @@ function Rewards({ cid, d, onChanged }: { cid: number; d: Dossier; onChanged: ()
   );
 }
 
-function Overview({ cid, d, openTab, onChanged }: { cid: number; d: Dossier; openTab: (t: TabId) => void; onChanged: () => void }) {
+function Overview({ cid, d, onChanged }: { cid: number; d: Dossier; onChanged: () => void }) {
   const st = d.stats;
+  const archetype = [roleName(d.role.id), roleName(d.role.aspect_id), roleName(d.role.advanced_role_id)].filter(Boolean).join(" · ");
   return (
     <div className="ov-grid">
       <div className="ov-col">
         <section className="dpanel ov-attrs">
-          <h3>Stats</h3>
-          {st.stats.Mettle == null ? <Empty>Carousel hasn't assigned an Archetype yet.</Empty> : (
+          <h3>Archetype</h3>
+          <p className="ov-archetype">{archetype || "Carousel hasn't assigned an Archetype yet."}</p>
+          <h3>Plot Armor and stats</h3>
+          {st.stats.Mettle == null ? <Empty>No stats until Carousel assigns an Archetype.</Empty> : (
             <div className="attr-row">{STATS.map((k) => (
               <div key={k} className="attr" title={st.current[k] !== st.stats[k] ? `base ${st.stats[k]}` : k}>
                 <div className="attr-abbr">{k.slice(0, 3).toUpperCase()}</div>
@@ -231,122 +225,19 @@ function Overview({ cid, d, openTab, onChanged }: { cid: number; d: Dossier; ope
           )}
           <Rewards cid={cid} d={d} onChanged={onChanged} />
         </section>
-        <section className="dpanel ov-effects">
-          <h3>Tickets</h3>
-          {!d.tickets?.length ? <Empty>No trope tickets.</Empty> : (
-            <ul className="ticket-list">{d.tickets.map((t) => (
-              <li key={t.ref}><b>{t.name}</b> {t.equipped ? <Chip tone="gold">equipped</Chip> : <Chip>owned</Chip>}
-                {t.uses_max != null && <Chip tone="amber">{t.uses_left ?? 0}/{t.uses_max}{t.recharge ? ` per ${t.recharge}` : ""}</Chip>}
-                <div className="sub">{t.text}</div></li>))}
-            </ul>
-          )}
+        <section className="dpanel ov-combat">
+          <h3>Conditions</h3>
+          <div className="chips">{d.statuses.length ? d.statuses.map((s) => <StatusChip key={s.id} s={s} />) : <span className="sub">none</span>}</div>
         </section>
       </div>
       <div className="ov-col">
-        <section className="dpanel ov-gear">
-          <h3>Current equipment <button className="link-btn" onClick={() => openTab("equipment")}>Full gear <ChevronRight size={12} /></button></h3>
-          {d.equipment.equipped.length === 0 ? <Empty>Nothing equipped is recorded.</Empty> : (
-            <div className="gear-strip">{d.equipment.equipped.map((i) => <GearTile key={i.id} i={i} labels={d.equipment.slot_labels} />)}</div>
+        <section className="dpanel ov-effects">
+          <h3>Tickets</h3>
+          {!d.tickets?.length ? <Empty>No tickets.</Empty> : (
+            <div className="ov-tickets">{d.tickets.map((t) => <TicketCard key={t.ref} t={t} large />)}</div>
           )}
         </section>
-        <section className="dpanel ov-combat">
-          <h3>Conditions</h3>
-          <div className="chips">{d.statuses.length ? d.statuses.map((s) => <StatusChip key={s.id} s={s} />) : <span className="sub">no buffs, debuffs or injuries</span>}</div>
-        </section>
       </div>
-    </div>
-  );
-}
-
-function GearTile({ i, labels }: { i: Item; labels: Record<string, string> }) {
-  const Icon = SLOT_ICON[i.slot] ?? Package;
-  return (
-    <div className={`gear-tile ${i.rarity ? `rarity-${i.rarity.toLowerCase()}` : ""}`} title={[i.description, ...i.effects].filter(Boolean).join("\n")}>
-      <Icon size={22} aria-hidden />
-      <div className="gt-name">{i.name}</div>
-      <div className="gt-slot">{labels[i.slot] ?? i.slot}{i.effects[0] ? ` · ${i.effects[0]}` : ""}</div>
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------ equipment tab
-function EquipmentTab({ d }: { d: Dossier }) {
-  const [q, setQ] = useState("");
-  const eq = d.equipment;
-  const bySlot = useMemo(() => {
-    const m: Record<string, Item[]> = {};
-    eq.equipped.forEach((i) => (m[i.slot] ??= []).push(i));
-    return m;
-  }, [eq.equipped]);
-  const slots = ["weapon", "armor", "head", "hands", "feet", "accessory", "other"];
-  const carried = eq.carried.filter((i) => !q || `${i.name} ${i.description ?? ""} ${i.effects.join(" ")}`.toLowerCase().includes(q.toLowerCase()));
-  const special = [...eq.equipped, ...eq.carried].filter((i) => i.special);
-  return (
-    <div className="eq-grid">
-      <section className="dpanel eq-slots">
-        <h3>Equipped</h3>
-        <div className="slot-grid">{slots.map((slot) => {
-          const Icon = SLOT_ICON[slot] ?? Package;
-          const list = bySlot[slot] ?? [];
-          if (!list.length && (slot === "other" || slot === "accessory")) return null;
-          return (
-            <div key={slot} className={`slot ${list.length ? "" : "empty"}`}>
-              <div className="slot-label"><Icon size={13} /> {eq.slot_labels[slot]}</div>
-              {list.length ? list.map((i) => <ItemCard key={i.id} i={i} />) : <div className="slot-empty">nothing recorded</div>}
-            </div>
-          );
-        })}</div>
-      </section>
-      {(special.length > 0 || eq.linked_shared.length > 0) && (
-        <section className="dpanel eq-special">
-          <h3>Special equipment &amp; shared gear</h3>
-          <div className="sub" style={{ marginBottom: 8 }}>Devices with attachments or construction details, and shared-stash items whose records mention {d.name.split(" ")[0]}.</div>
-          <div className="item-list">{[...special, ...eq.linked_shared].map((i) => <ItemCard key={`${i.shared ? "s" : "o"}${i.id}`} i={i} />)}</div>
-        </section>
-      )}
-      <section className="dpanel eq-carried">
-        <h3>Carried inventory</h3>
-        <div className="search"><Search size={14} /><input className="input" placeholder="Search carried items…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search carried items" /></div>
-        {carried.length === 0 ? <Empty>{eq.carried.length ? "No items match." : "No carried (unequipped) items recorded."}</Empty> : <div className="item-list">{carried.map((i) => <ItemCard key={i.id} i={i} />)}</div>}
-      </section>
-      <section className="dpanel eq-commit">
-        <h3>Reserved, planned &amp; promised</h3>
-        {eq.commitments.length === 0 ? <Empty>No reservations, projects or promises involve this character.</Empty> : (
-          <ul className="commit-list">{eq.commitments.map((q2) => (
-            <li key={q2.id}><Chip tone={q2.kind === "reservation" ? "amber" : q2.kind === "project" || q2.kind === "crafting" ? "cyan" : "violet"}>{humanize(q2.kind)}</Chip> {q2.title}
-              {q2.kind === "reservation" && <span className="sub"> · not owned yet</span>}</li>))}
-          </ul>
-        )}
-      </section>
-    </div>
-  );
-}
-
-function ItemCard({ i }: { i: Item }) {
-  const [open, setOpen] = useState(false);
-  const Icon = SLOT_ICON[i.slot] ?? Package;
-  const props = Object.entries(i.properties).filter(([k]) => !["status", "current_status", "provenance"].includes(k));
-  return (
-    <div className={`item-card ${i.rarity ? `rarity-${i.rarity.toLowerCase()}` : ""} ${open ? "open" : ""}`}>
-      <button className="ic-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        <Icon size={18} aria-hidden />
-        <div className="ic-main">
-          <div className="ic-name">{i.name}{i.quantity != null && i.quantity !== 1 ? <span className="mono"> ×{i.quantity}</span> : i.quantity == null ? <span className="mono" title="Count not established"> ×?</span> : null}</div>
-          <div className="ic-tags">{i.rarity && <span className="tag rarity">{i.rarity}</span>}{i.equipped && <span className="tag">equipped</span>}{i.deployed && <span className="tag">deployed</span>}
-            {i.shared && <span className="tag shared">shared stash</span>}{i.effects[0] && <span>{i.effects[0]}</span>}</div>
-        </div>
-        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-      </button>
-      {open && (
-        <div className="ic-details">
-          {i.description && <p>{i.description}</p>}
-          {i.status && <p><b>Status:</b> {i.status}</p>}
-          {i.effects.length > 0 && <ul>{i.effects.map((e, k) => <li key={k}>{e}</li>)}</ul>}
-          {i.notes.length > 0 && <ul className="sub">{i.notes.map((e, k) => <li key={k}>{e}</li>)}</ul>}
-          {props.length > 0 && <Tree value={Object.fromEntries(props)} />}
-          {i.provenance && <p className="sub"><b>Provenance:</b> {i.provenance}</p>}
-        </div>
-      )}
     </div>
   );
 }
@@ -363,7 +254,7 @@ function StoryTab({ d }: { d: Dossier }) {
         {s.role && <p className="story-lead">{s.role}</p>}
         {s.personality && <p>{s.personality}</p>}
         {(s.traits as string[]).length > 0 && <div className="chips">{(s.traits as string[]).map((t) => <Chip key={t}>{t}</Chip>)}</div>}
-        {(s.tactics as string[]).length > 0 && <div className="build-tactics" style={{ marginTop: 10 }}><Swords size={13} /> {(s.tactics as string[]).join(" ")}</div>}
+        {(s.tactics as string[]).length > 0 && <div className="build-tactics" style={{ marginTop: 10 }}>{(s.tactics as string[]).join(" ")}</div>}
         {s.profile && (s.profile.personality || s.profile.known_motivation) && (
           <div className="known-profile"><h4>What the party knows</h4>{s.profile.personality && <p>{s.profile.personality}</p>}{s.profile.known_motivation && <p className="sub">{s.profile.known_motivation}</p>}</div>
         )}
@@ -415,7 +306,6 @@ function Expandable({ title, children }: { title: string; children: ReactNode })
 }
 
 // ------------------------------------------------------------------ history tab
-const HISTORY_ICON: Record<string, typeof Award> = { level: Gauge, skill: Zap, item: Package, achievement: Award, injury: HeartPulse, milestone: Wrench };
 
 function HistoryTab({ d, raw }: { d: Dossier; raw: Record<string, unknown> | null }) {
   const [kind, setKind] = useState<string>("all");
@@ -427,9 +317,9 @@ function HistoryTab({ d, raw }: { d: Dossier; raw: Record<string, unknown> | nul
         <button className={`chip ${kind === "all" ? "cyan" : ""}`} onClick={() => setKind("all")}>All {d.history.length}</button>
         {kinds.map((k) => <button key={k} className={`chip ${kind === k ? "cyan" : ""}`} onClick={() => setKind(k)}>{humanize(k)}</button>)}
       </div>
-      {shown.length === 0 ? <Empty>No progression is recorded for this character yet. Levels, skill advances, gear and achievements from play will appear here.</Empty> : (
+      {shown.length === 0 ? <Empty>Nothing is recorded for this character yet. Stars, stat points, tickets and story moments from play will appear here.</Empty> : (
         <ol className="timeline">{shown.map((h, i) => {
-          const Icon = HISTORY_ICON[h.kind] ?? Wrench;
+          const Icon = History;
           return (
             <li key={i} className={`tl-${h.kind}`}>
               <span className="tl-icon"><Icon size={14} /></span>

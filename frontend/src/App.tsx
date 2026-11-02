@@ -9,8 +9,8 @@ import { SearchDialog } from "./views/Search";
 import { MapView } from "./views/MapView";
 import { Announcement, AnnouncementStage, THEATRICAL } from "./views/Announce";
 import { applyMotion, getPrefs, play } from "./prefs";
+import { ago } from "./ui";
 import { PeopleView } from "./views/People";
-import { RecordsView, RulesView } from "./views/Reference";
 import { SettingsView } from "./views/Settings";
 import { Wallpaper } from "./views/Wallpaper";
 import { TicketsView } from "./views/Tickets";
@@ -30,16 +30,6 @@ const OLD_TABS: Record<string, Tab> = { story: "scene", timeline: "chronicle", p
 const storedTab = (t: string | null): Tab => (t && TABS.some((x) => x.id === t) ? (t as Tab) : (t && OLD_TABS[t]) || "scene");
 
 type Toast = { id: number; text: string; style: string };
-
-/** "14 min ago" from an ISO timestamp. */
-export function ago(iso: string, now = Date.now()) {
-  const m = Math.max(0, Math.round((now - Date.parse(iso)) / 60000));
-  if (Number.isNaN(m)) return "";
-  if (m < 1) return "just now";
-  if (m < 60) return `${m} min ago`;
-  const h = Math.round(m / 60);
-  return h < 24 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
-}
 
 export default function App() {
   const [campaigns, setCampaigns] = useState<CampaignListItem[] | null>(null);
@@ -131,10 +121,10 @@ export default function App() {
   };
   const pushRef = useRef(pushNotices);
   pushRef.current = pushNotices;
-  useEffect(() => { // any component can announce: window.dispatchEvent(new CustomEvent("crawler:announce", { detail: { text, style } }))
+  useEffect(() => { // any component can announce: window.dispatchEvent(new CustomEvent("carousel:announce", { detail: { text, style } }))
     const on = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.text) pushRef.current([{ text: String(d.text), style: String(d.style ?? "notice") }]); };
-    window.addEventListener("crawler:announce", on);
-    return () => window.removeEventListener("crawler:announce", on);
+    window.addEventListener("carousel:announce", on);
+    return () => window.removeEventListener("carousel:announce", on);
   }, []);
   const dismiss = (id: number) => setToasts((all) => all.filter((x) => x.id !== id));
 
@@ -231,18 +221,11 @@ export default function App() {
                 {tab === "map" && <MapView cid={cid} campaign={campaign} version={version} onChanged={refresh} openCharacter={setSheet} />}
                 {tab === "wallpaper" && <Wallpaper campaign={campaign} story={story} version={version} onChanged={refresh} openTickets={() => setTab("tickets")} />}
                 {tab === "tickets" && <TicketsView campaign={campaign} version={version} />}
-                {tab === "chronicle" && <ChronicleView cid={cid} version={version} openCharacter={setSheet} />}
+                {tab === "chronicle" && <ChronicleView campaign={campaign} story={story} version={version} openCharacter={setSheet} openSaves={() => setTab("settings")} />}
                 {tab === "lodge" && <PeopleView cid={cid} version={version} openCharacter={setSheet} openQuest={() => setTab("chronicle")}
                   pcAssignment={campaign.roster.find((c) => c.id === campaign.active_character_id)?.assignment}
                   pcName={campaign.roster.find((c) => c.id === campaign.active_character_id)?.name} />}
-                {tab === "settings" && <>
-                  <SettingsView cid={cid} version={version} onChanged={refresh} onCampaign={chooseCampaign} />
-                  <section className="view-inner" id="behind-the-scenes" aria-label="Behind the Scenes">
-                    <h2 className="h2">Behind the Scenes</h2>
-                    <RulesView cid={cid} />
-                    <RecordsView cid={cid} />
-                  </section>
-                </>}
+                {tab === "settings" && <SettingsView cid={cid} version={version} onChanged={refresh} onCampaign={chooseCampaign} />}
               </div>
             )}
           </>

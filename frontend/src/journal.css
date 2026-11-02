@@ -1,38 +1,29 @@
-/* M6: quest journal, chronicle (timeline, lore notebook, imported history), in-game search */
+/* The Chronicle (timeline, stories, clues, earlier records) and in-game search */
+.chron-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 18px; align-items: start; }
+.chron-rail { display: grid; gap: 12px; position: sticky; top: 0; }
+.chron-chapter { font-family: var(--display); font-size: 20px; color: var(--parchment); margin: 0 0 4px; }
+.chron-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0; }
+.chron-search { flex: 1 1 220px; border: 1px solid var(--line-2); border-radius: var(--radius); padding: 6px 10px; }
+.chron-section { margin-bottom: 8px; }
+.chron-day { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 1px solid var(--line-2); display: grid; gap: 2px; }
+.chron-entry { position: relative; display: grid; grid-template-columns: 56px 76px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 6px 8px; border-radius: var(--radius); }
+.chron-entry::before { content: ""; position: absolute; left: -18px; top: 13px; width: 7px; height: 7px; border-radius: 50%; background: var(--line-2); }
+.chron-entry:hover { background: rgba(255, 255, 255, 0.02); }
+.chron-entry.k-omen::before, .chron-entry.k-fate::before { background: var(--blood); }
+.chron-entry.k-story::before, .chron-entry.k-scene::before { background: var(--brass); }
+.chron-time { font-variant-numeric: tabular-nums; font-size: 12.5px; color: var(--fog); }
+.chron-kind { font: 600 10px/1.4 var(--body); letter-spacing: 0.14em; text-transform: uppercase; color: var(--brass); }
+.chron-text { font: 16px/1.5 var(--story); color: var(--parchment); }
+.chron-entry.bk .chron-text { font: 13px/1.5 var(--body); color: var(--fog); }
+.story-cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); margin-top: 12px; }
+.story-card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 12px 14px; display: grid; gap: 6px; justify-items: start; }
+.story-card-title { font-family: var(--display); font-weight: 500; font-size: 22px; margin: 0; color: var(--parchment); }
+@media (max-width: 1000px) { .chron-layout { grid-template-columns: 1fr; } .chron-rail { position: static; } }
+@media (max-width: 600px) { .chron-entry { grid-template-columns: 48px minmax(0, 1fr); } .chron-kind { grid-column: 2; } .chron-text { grid-column: 1 / -1; } }
 
-.h2.as-button { background: none; border: 0; padding: 0; cursor: pointer; display: flex; gap: 6px; align-items: center; color: var(--text-2); }
-.jq-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr)); align-items: start; }
-.jq { border: 1px solid var(--line); border-left: 3px solid var(--line-2); border-radius: 6px; background: var(--panel); display: grid; gap: 6px; padding-bottom: 10px; }
-.jq.quest { border-left-color: var(--cyan-dim); } .jq.commitment { border-left-color: var(--violet); } .jq.reservation { border-left-color: var(--amber); }
-.jq.project, .jq.crafting { border-left-color: var(--gold-dim); }
-.jq.completed, .jq.failed { opacity: 0.75; }
-.jq.focused { border-color: var(--cyan); box-shadow: 0 0 0 1px rgba(var(--cyan-rgb), 0.35), 0 0 22px rgba(var(--cyan-rgb), 0.12); }
-.jq-head { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; width: 100%; padding: 10px 12px 0; background: none; border: 0; color: inherit;
-  font: inherit; text-align: left; cursor: pointer; align-items: start; }
-.jq-head:hover .jq-title { color: var(--cyan); }
-.jq-head:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; border-radius: 6px; }
-.jq-icon { margin-top: 2px; color: var(--text-2); }
-.jq-title { font-weight: 600; font-size: 14px; line-height: 1.4; }
-.jq-chips { grid-column: 2; display: flex; flex-wrap: wrap; gap: 4px; }
-.jq-chips:empty { display: none; }
-.jq-meta, .jq-people, .jq-progress, .jq-body { padding: 0 12px 0 38px; }
-.jq-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); }
-.jq-meta span { display: inline-flex; gap: 4px; align-items: center; }
-.jq-meta:empty { display: none; }
-.jq-people { display: flex; flex-wrap: wrap; gap: 4px; }
-.jq-people .chip { cursor: pointer; background: transparent; }
-.jq-people .chip:hover { color: var(--cyan); border-color: var(--cyan-dim); }
-.jq-progress { font-size: 13px; color: var(--text); }
-.jq-body { display: grid; gap: 6px; font-size: 13px; line-height: 1.5; color: var(--text-2); }
-.jq-body p { margin: 0; }
-.jq-body dl { margin: 0; display: grid; gap: 3px; }
-.jq-body dl div { display: grid; grid-template-columns: minmax(90px, 0.35fr) 1fr; gap: 8px; }
-.jq-body dt { color: var(--muted); font-size: 12px; }
-.jq-body dd { margin: 0; overflow-wrap: anywhere; }
 
 .chronicle .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-top: 10px; }
 .chronicle .tabs button { display: inline-flex; gap: 6px; align-items: center; }
-.chronicle .tabs button.active { color: var(--cyan); box-shadow: inset 0 -2px 0 var(--cyan); }
 .tl { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .tl li { display: grid; grid-template-columns: 90px 16px 1fr; gap: 8px; align-items: baseline; padding: 4px 8px; border-radius: 4px; font-size: 13.5px; }
 .tl li:hover { background: rgba(255, 255, 255, 0.02); }

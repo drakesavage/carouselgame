@@ -31,18 +31,6 @@ export type Person = CharacterCard & {
 };
 export type Skill = { id: number; kind: string; name: string; rank: number | null; mana_cost: number | null; passive: number; marked: number; description?: string | null; properties: Record<string, unknown> };
 export type Item = { id: number; owner_character_id: number | null; owner_name?: string | null; name: string; quantity: number | null; equipped: number; deployed?: number; slot?: string | null; rarity?: string | null; description?: string | null; properties: Record<string, unknown> };
-/** Inventory view of an item (memory/inventory.py): category, honest quantity, invention stage. */
-export type InvItem = Item & { category: string; quantity_state: "exact" | "unknown"; quantity_note: string | null; status: string | null;
-  invention: boolean; stage: Stage | null; storage: string | null; attached_to: string | null };
-export type Stage = "planned" | "designed" | "in_progress" | "finished" | "installed";
-export type Inventory = {
-  shared: InvItem[]; by_character: InvItem[];
-  gold: { amount: number | null; item_id: number | null; committed: number; history: { id: number; summary: string; delta: number | null; game_time_minutes: number | null }[] };
-  reservations: { quest_id: number; item: string; payment: string | null; paid_gold: number | null; held_by: string | null; claim: string | null; owned: boolean; note: string | null }[];
-  projects: { quest_id: number; title: string; stage: Stage; status_text: string | null; build_time: string | null; difficulty: number | null; lead: string | null;
-    assistant: string | null; linked_items: { id: number; name: string; owner: string | null }[]; materials: { material: string; need: number; have: number | null; enough: boolean }[] }[];
-  materials: { id: number; name: string; quantity: number | null; owner: string | null }[];
-};
 export type CharacterSheet = CharacterCard & {
   bio?: string | null; sheet: Record<string, unknown>; skills: Skill[]; items: Item[];
   achievements: { title: string; description?: string; game_time_minutes?: number }[];
@@ -101,10 +89,6 @@ export type RollCard = { roll_id: number; expression: string; dice: { sides: num
 export type Message = { id: number; turn_id: number | null; role: "player" | "gm" | "system"; content: string; created_at: string;
   meta: { rolls?: RollCard[]; changes?: string[]; rules_cited?: string[]; provider?: string; floor_clock?: FloorClock; style?: string;
     cards?: { type: string; summary: string }[] } };
-/** The quest journal (memory/journal.py): canonical quests, promises, reservations and projects with their people and places. */
-export type JournalQuest = { id: number; kind: string; status: string; priority: number; title: string; description: string | null; progress: string | null;
-  giver: string | null; details: Record<string, unknown>; immediate: boolean; holder: string | null; people: { id: number; name: string }[];
-  places: string[]; due_in_minutes: number | null; depends_on: unknown; source: string | null; updated_at: string };
 export type LoreFact = { id: number; subject: string; fact: string; certainty: string; source: string | null; category: string; topic: string | null; character_id: number | null };
 export type Chronology = { day_length: number; days: { day: number | null; events: (EventRow & { bookkeeping: boolean })[] }[];
   imported_history: { id: number; fact: string; source: string | null }[] };
@@ -217,8 +201,6 @@ export const api = {
   dossier: (id: number, cid: number) => req<Record<string, unknown>>(`api/campaigns/${id}/characters/${cid}/dossier`),
   generateCharacter: (cid: number, charId: number) => post<{ state: string; error?: string }>(`api/campaigns/${cid}/characters/${charId}/generate`),
   generateStatus: (cid: number, charId: number) => req<{ state: string; error?: string }>(`api/campaigns/${cid}/characters/${charId}/generate`),
-  inventory: (id: number) => req<Inventory>(`api/campaigns/${id}/inventory`),
-  quests: (id: number) => req<Quest[]>(`api/campaigns/${id}/quests`),
   npcs: (id: number) => req<Person[]>(`api/campaigns/${id}/npcs`),
   timeline: (id: number) => req<EventRow[]>(`api/campaigns/${id}/timeline`),
   backups: () => req<{ backups: { name: string; label: string; created: string | null; size_mb: number; has_manifest: boolean; media: boolean; files: number | null }[]; newest_age_s: number | null }>("api/backups"),
@@ -244,7 +226,6 @@ export const api = {
   residents: (id: number) => req<LodgeResident[]>(`api/campaigns/${id}/residents`),
   talkResident: (id: number, charId: number, key: string) =>
     post<{ turn: TurnStatus }>(`api/campaigns/${id}/residents/${charId}/talk`, { idempotency_key: key }),
-  journal: (id: number) => req<{ kinds: { id: string; label: string }[]; quests: JournalQuest[] }>(`api/campaigns/${id}/journal`),
   loreNotebook: (id: number) => req<LoreFact[]>(`api/campaigns/${id}/lore-notebook`),
   chronology: (id: number) => req<Chronology>(`api/campaigns/${id}/chronology`),
   search: (id: number, q: string) => req<SearchHit[]>(`api/campaigns/${id}/search?q=${encodeURIComponent(q)}`),

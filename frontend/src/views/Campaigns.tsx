@@ -77,7 +77,7 @@ export function CampaignsPanel({ cid, onCampaign }: { cid: number; onCampaign: (
         const next = (list ?? []).find((c) => c.id !== doomed?.id && !c.archived) ?? (list ?? []).find((c) => c.id !== doomed?.id);
         setDoomed(null);
         // a toast: the settings view reloads when the open campaign changes, which would drop a message here
-        window.dispatchEvent(new CustomEvent("crawler:announce", { detail: { text: `Deleted “${out.deleted}”. Backup ${out.backup} holds it and its pictures if you ever need it back.`, style: "notice" } }));
+        window.dispatchEvent(new CustomEvent("carousel:announce", { detail: { text: `Deleted “${out.deleted}”. Backup ${out.backup} holds it and its pictures if you ever need it back.`, style: "notice" } }));
         load();
         onCampaign(doomed?.id === cid ? next?.id ?? null : cid);
       }} />

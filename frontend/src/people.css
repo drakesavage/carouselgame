@@ -52,16 +52,32 @@
   .person-body { padding-left: 14px; }
 }
 
-/* PosterBoard: missing posters outside the Diner */
-.poster-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr)); margin-bottom: 16px; }
-.poster { border: 1px solid var(--line-2); border-radius: 4px; background: var(--panel-2); padding: 10px; text-align: center; }
+/* PosterBoard: missing posters outside the Diner, on aged paper */
+.poster-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr)); margin-bottom: 18px; }
+.poster {
+  border: 0; border-radius: 1px; padding: 14px 12px 12px; text-align: center; color: #2a1a12; transform: rotate(-0.6deg);
+  background: radial-gradient(120% 90% at 30% 20%, #efe3c6, #d9c49a 60%, #b99c6b); box-shadow: 0 10px 22px rgba(0, 0, 0, 0.5), inset 0 0 30px rgba(90, 60, 20, 0.25);
+}
+.poster:nth-child(2n) { transform: rotate(0.8deg); }
 .poster.found { opacity: 0.6; }
-.poster-head { font-family: var(--display); font-weight: 700; letter-spacing: 0.3em; color: var(--red); font-size: 13px; }
-.poster-name { font-family: var(--display); font-size: 16px; color: var(--text); margin: 6px 0; overflow-wrap: anywhere; }
-.poster dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin: 0; font-size: 11px; text-align: left; }
-.poster dt { color: var(--muted); }
-.poster dd { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
-.poster-note { margin-top: 6px; font-size: 11px; color: var(--amber); }
+.poster-head { font-family: var(--display); font-weight: 600; letter-spacing: 0.22em; color: var(--oxblood); font-size: 26px; line-height: 1; }
+.poster-name { font-family: var(--display); font-size: 19px; color: #2a1a12; margin: 8px 0; overflow-wrap: anywhere; }
+.poster dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; margin: 0; font-size: 12px; text-align: left; }
+.poster dt { color: #6a4a2a; }
+.poster dd { margin: 0; color: #2a1a12; overflow-wrap: anywhere; }
+.poster-note { margin-top: 8px; font: 600 11px var(--body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--oxblood); }
+
+/* the group on the Lodge screen */
+.group-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); margin-bottom: 18px; }
+.group-card {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: center; text-align: left; cursor: pointer; font: inherit; color: inherit;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 10px;
+}
+.group-card:hover, .group-card:focus-visible { border-color: rgba(var(--brass-rgb), 0.5); }
+.group-main { display: grid; gap: 2px; min-width: 0; }
+.group-role { font-size: 13px; color: var(--text-2); }
+.group-pa { font: 600 11px/1.4 var(--body); letter-spacing: 0.08em; color: var(--brass); }
+.group-fate { font-size: 12px; color: #E58C93; }
 
 /* Plan 7: the Lodge roster (met residents, last seen, with the group, what their introduction said) */
 .lodge-roster { margin: 10px 0 4px; }

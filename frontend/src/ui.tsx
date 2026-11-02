@@ -113,3 +113,13 @@ export function Tree({ value, depth = 0 }: { value: unknown; depth?: number }) {
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
 }
+
+/** "14 min ago" from an ISO timestamp. */
+export function ago(iso: string, now = Date.now()) {
+  const m = Math.max(0, Math.round((now - Date.parse(iso)) / 60000));
+  if (Number.isNaN(m)) return "";
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  return h < 24 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
+}

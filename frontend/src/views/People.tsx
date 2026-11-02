@@ -1,8 +1,8 @@
 import { ReactNode, useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Flag, Handshake, MapPin, MessageCircle, Search, Skull } from "lucide-react";
-import { api, fmtMinutes, Life, Person } from "../api";
+import { api, CharacterCard, fmtClock, Life, Person } from "../api";
 import { Chip, Empty, Portrait } from "../ui";
-import { portraitSrc, role, useManifest } from "./Hud";
+import { fateLine, portraitSrc, role, roleLabel, useManifest } from "./Hud";
 import { PosterBoard } from "./PosterBoard";
 import { LodgeRoster } from "./AroundPanel";
 import "../people.css";
@@ -17,17 +17,43 @@ export function LifeChip({ life }: { life?: Life | null }) {
 const FILTERS = [
   { id: "all", label: "Everyone" },
   { id: "here", label: "With you" },
-  { id: "away", label: "Offscreen" },
-  { id: "contact", label: "Contacts" },
-  { id: "gone", label: "Fallen & missing" },
+  { id: "away", label: "Elsewhere" },
+  { id: "gone", label: "Dead & missing" },
 ] as const;
 type Filter = (typeof FILTERS)[number]["id"];
 
 const firstSentence = (s?: string | null) => (s ? (s.match(/^.*?[.!?](\s|$)/)?.[0] ?? s).trim() : "");
 
+/** The group: each party member's card, opening their dossier. */
+function GroupCards({ cid, version, openCharacter }: { cid: number; version: number; openCharacter: (id: number) => void }) {
+  const m = useManifest();
+  const [cards, setCards] = useState<CharacterCard[] | null>(null);
+  useEffect(() => { api.characters(cid).then(setCards).catch(() => setCards([])); }, [cid, version]);
+  const party = (cards ?? []).filter((c) => c.in_party);
+  if (!party.length) return null;
+  return (
+    <section aria-label="The group">
+      <h2 className="h2">The group <span className="muted">{party.length}</span></h2>
+      <div className="group-grid">
+        {party.map((c) => (
+          <button key={c.id} className="group-card" onClick={() => openCharacter(c.id)} aria-label={`${c.name}: open dossier`}>
+            <Portrait name={c.name} src={portraitSrc(c, m)} crop={c.portrait_crop} size={64} />
+            <span className="group-main">
+              <span className="person-name">{c.name}</span>
+              <span className="group-role">{roleLabel(c) ?? "No Archetype yet"}</span>
+              {c.stats.plot_armor.effective != null && <span className="group-pa">Plot Armor {c.stats.plot_armor.effective}</span>}
+              {fateLine(c) && <span className="group-fate">{fateLine(c)}</span>}
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 /**
- * People as the party knows them: who they are to the party, where they are, what was promised, and the last thing seen
- * of them. Compact cards that expand; the server sends only player-visible records.
+ * The Lodge: the group, the residents met at Camp Dyer, the missing-poster board outside the Diner, and everyone the group
+ * knows with what was promised and the last thing seen of them. The server sends only player-visible records.
  */
 export function PeopleView({ cid, version, pcAssignment, pcName, openCharacter, openQuest }: {
   cid: number; version: number; pcAssignment?: string | null; pcName?: string; openCharacter: (id: number) => void; openQuest: (id?: number) => void;
@@ -40,7 +66,6 @@ export function PeopleView({ cid, version, pcAssignment, pcName, openCharacter, 
     const gone = p.life.state === "deceased" || p.life.state === "missing" || p.life.state === "retired";
     if (filter === "here" && (gone || !pcAssignment || p.assignment !== pcAssignment)) return false;
     if (filter === "away" && (gone || !p.assignment || p.assignment === pcAssignment)) return false;
-    if (filter === "contact" && p.life.state !== "contact") return false;
     if (filter === "gone" && !gone) return false;
     if (!q.trim()) return true;
     const hay = [p.name, p.allegiance, p.where, p.personality, p.known_motivation, ...p.relationship_notes].join(" ").toLowerCase();
@@ -48,22 +73,23 @@ export function PeopleView({ cid, version, pcAssignment, pcName, openCharacter, 
   }), [data, q, filter, pcAssignment]);
   if (!data) return <div className="muted">Loading…</div>;
   const sections: [string, Person[]][] = [
-    ["Party & allies", shown.filter((p) => p.life.state === "active")],
-    ["Contacts", shown.filter((p) => p.life.state === "contact")],
-    ["Fallen, missing & retired", shown.filter((p) => p.life.state === "deceased" || p.life.state === "missing" || p.life.state === "retired")],
+    ["People you know", shown.filter((p) => p.life.state === "active" || p.life.state === "contact")],
+    ["Dead, missing & gone", shown.filter((p) => p.life.state === "deceased" || p.life.state === "missing" || p.life.state === "retired")],
   ];
   return (
     <div className="view-inner people">
-      <div className="h1">People</div>
-      <div className="sub">Allies, companions and contacts: what the party has seen and been told of them.</div>
+      <div className="kicker">Dyer's Lodge</div>
+      <h1 className="h1">The people who came back.</h1>
+      <GroupCards cid={cid} version={version} openCharacter={openCharacter} />
+      <LodgeRoster cid={cid} version={version} />
+      <PosterBoard cid={cid} version={version} />
+      <h2 className="h2">Everyone you know</h2>
       <div className="people-tools">
         <label className="people-search"><Search size={14} aria-hidden /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people, places, notes" aria-label="Search people" /></label>
         <div className="seg" role="group" aria-label="Show">
           {FILTERS.map((f) => <button key={f.id} className={filter === f.id ? "active" : ""} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>{f.label}</button>)}
         </div>
       </div>
-      <PosterBoard cid={cid} version={version} />
-      <LodgeRoster cid={cid} version={version} />
       {shown.length === 0 && <Empty>No one matches.</Empty>}
       {sections.filter(([, list]) => list.length).map(([title, list]) => (
         <section key={title}>
@@ -114,7 +140,7 @@ function PersonCard({ p, here, pcName, openCharacter, openQuest }: { p: Person; 
           {p.known_motivation && <Field label="Known motivation">{p.known_motivation}</Field>}
           {p.voice && <Field label="Voice">{p.voice}</Field>}
           {p.relationship_notes.length > 0 && (
-            <Field label="What the party knows"><ul>{p.relationship_notes.map((n, i) => <li key={i}>{n}</li>)}</ul></Field>
+            <Field label="What the group knows"><ul>{p.relationship_notes.map((n, i) => <li key={i}>{n}</li>)}</ul></Field>
           )}
           {p.group?.activity && !gone && <Field label="Current orders">{p.group.activity.replace(/\s*\(checkpoints\/latest\.md\)$/, "")}</Field>}
           <Field label="Promises & commitments">
@@ -124,8 +150,8 @@ function PersonCard({ p, here, pcName, openCharacter, openQuest }: { p: Person; 
           </Field>
           <Field label="Last interaction">
             {p.last_interaction ? <><MessageCircle size={11} /> {p.last_interaction.text}
-              {p.last_interaction.game_time_minutes != null && <span className="muted mono"> · T+{fmtMinutes(p.last_interaction.game_time_minutes)}</span>}</>
-              : <span className="muted">Nothing recorded in the console yet.</span>}
+              {p.last_interaction.game_time_minutes != null && <span className="muted"> · {fmtClock(p.last_interaction.game_time_minutes)}</span>}</>
+              : <span className="muted">Nothing recorded yet.</span>}
           </Field>
           {p.life.note && <div className="sub">{p.life.note}</div>}
           <button className="btn small" onClick={() => openCharacter(p.id)}>Open dossier</button>

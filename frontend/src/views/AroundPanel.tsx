@@ -52,7 +52,7 @@ export function LodgeRoster({ cid, version }: { cid: number; version: unknown })
   if (!list?.length) return null;
   return (
     <section className="lodge-roster" aria-label="Dyer's Lodge roster">
-      <div className="h2">Dyer’s Lodge <span className="muted">{list.length} met</span></div>
+      <h2 className="h2">The Lodge roster <span className="muted">{list.length} met</span></h2>
       <div className="people-grid">
         {list.map((r) => (
           <div key={r.id} className="person lodge-resident">

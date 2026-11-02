@@ -43,7 +43,6 @@ export function RulesView({ cid }: { cid: number }) {
 
   return (
     <div className="view-inner rules">
-      <div className="h1">Rules center</div>
       <div className="sub">Precedence: an approved ruling → campaign state → a campaign house rule → the official rulebooks → GM judgment. Source books stay local and are never published.</div>
       <div className="tabs" style={{ marginTop: 12 }} role="tablist">
         {(["house", "rulings", "books"] as const).map((t) => (
@@ -145,7 +144,6 @@ export function RecordsView({ cid }: { cid: number }) {
   const byDoc = (list ?? []).reduce<Record<string, typeof list>>((acc, r) => { (acc[r!.document_path] ??= [] as any)!.push(r); return acc; }, {});
   return (
     <div className="view-inner">
-      <div className="h1">Campaign records</div>
       <div className="sub">The imported ledger, verbatim and searchable (player-visible files only). History without a structured table yet lives here and is available to the GM.</div>
       <form className="row" style={{ margin: "12px 0" }} onSubmit={search}>
         <Search size={16} color="var(--muted)" /><input className="input" placeholder="Search records (e.g. Margit, Murder Drum, Floor 2 warden)…" value={q} onChange={(e) => setQ(e.target.value)} />

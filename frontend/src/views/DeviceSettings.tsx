@@ -28,7 +28,7 @@ export function DeviceSettings() {
         <label className="dp-row">
           <span className="dp-k">Announcements</span>
           <select className="select" value={p.announcements} onChange={(e) => set({ announcements: e.target.value as typeof p.announcements })}>
-            <option value="theatrical">Theatrical (achievements and warnings take the stage; skippable)</option>
+            <option value="theatrical">Theatrical (warnings and Plot Cycle changes take the stage; skippable)</option>
             <option value="simple">Simple toasts</option>
             <option value="off">Off (they stay in the story)</option>
           </select>

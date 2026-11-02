@@ -212,3 +212,11 @@ a { color: var(--brass); }
 .app > .main { flex: 1; min-height: 0; }
 .scene-host { height: 100%; }
 .view.wp-view { padding: 0; }
+
+/* Saves & Settings */
+.settings-section { margin-top: 22px; padding-top: 6px; border-top: 1px solid var(--line); scroll-margin-top: 12px; }
+.settings-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); margin-top: 10px; }
+.settings-sub { font-family: var(--display); font-weight: 500; font-size: 20px; color: var(--parchment); margin: 18px 0 8px; }
+.settings-msg { margin: 10px 0; border-color: rgba(var(--brass-rgb), 0.5); }
+.ov-archetype { font-family: var(--display); font-size: 20px; margin: 0 0 12px; color: var(--parchment); }
+.ov-tickets { display: grid; gap: 12px; }

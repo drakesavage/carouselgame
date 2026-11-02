@@ -5,8 +5,8 @@ import { api, SearchHit } from "../api";
 import "../journal.css";
 
 const TYPE: Record<SearchHit["type"], { label: string; icon: typeof Flag }> = {
-  quest: { label: "Journal", icon: Flag }, person: { label: "Person", icon: UserRound }, group: { label: "Party group", icon: Footprints },
-  lore: { label: "Lore", icon: BookOpen }, history: { label: "History", icon: Scroll }, item: { label: "Item", icon: Backpack },
+  quest: { label: "Lead", icon: Flag }, person: { label: "Person", icon: UserRound }, group: { label: "Group", icon: Footprints },
+  lore: { label: "Clue", icon: BookOpen }, history: { label: "History", icon: Scroll }, item: { label: "Item", icon: Backpack },
   event: { label: "Event", icon: Clock3 }, story: { label: "Story", icon: MessageSquareText }, record: { label: "Record", icon: FileText },
 };
 
@@ -32,7 +32,7 @@ export function SearchDialog({ cid, open, onClose, go }: { cid: number; open: bo
           <Dialog.Title className="sr-only">Search the campaign</Dialog.Title>
           <div className="search-bar">
             {busy ? <Loader2 size={16} className="spin" /> : <Search size={16} />}
-            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search what the party knows: people, promises, places, items, story…" aria-label="Search the campaign" />
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search what the group knows: people, places, clues, stories…" aria-label="Search the campaign" />
             <Dialog.Close className="btn ghost small" aria-label="Close search"><X size={14} /></Dialog.Close>
           </div>
           <div className="search-results" role="listbox" aria-label="Results">
