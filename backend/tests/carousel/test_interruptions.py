@@ -72,3 +72,18 @@ def test_a_zone_placed_omen_is_never_sighted_from_the_street(conn, campaign_id):
     seen(conn, campaign_id, "OM-001", "OM-002")   # OM-005 is fixed at the farm too, but it sits in the cellar-door zone
     r = plan_route(conn, "CAR-047", "CAR-086", set())
     assert all(decide(conn, campaign_id, r, s) is None for s in range(50))
+
+
+def test_a_fixed_area_omen_stops_the_route_at_its_anchor(conn, campaign_id):
+    seen(conn, campaign_id, "OM-003")   # the Diner's own Omen is on the way
+    r = plan_route(conn, "CAR-047", "CAR-090", set())
+    assert decide(conn, campaign_id, r, 0) == Interruption("OM-010", "CAR-090", "fixed")
+    seen(conn, campaign_id, "OM-010", "OM-002")
+    assert decide(conn, campaign_id, r, 0) is None
+
+
+def test_an_omen_at_a_place_without_coordinates_never_stops_a_route(conn, campaign_id):
+    seen(conn, campaign_id, "OM-003", "OM-002")
+    conn.execute("UPDATE ref.places SET north = NULL, west = NULL WHERE id = 'CAR-090'")
+    r = plan_route(conn, "CAR-047", "CAR-090", set())
+    assert all(decide(conn, campaign_id, r, s) is None for s in range(20))

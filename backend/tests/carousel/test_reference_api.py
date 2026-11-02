@@ -29,7 +29,7 @@ def gm(settings):
 
 def test_status_has_counts_and_hashes_but_no_content(client_ref):
     body = client_ref.get("/api/reference/status").json()
-    assert body["imported"] is True and body["counts"]["places"] == 8 and body["counts"]["npc_templates"] == 2
+    assert body["imported"] is True and body["counts"]["places"] == 9 and body["counts"]["npc_templates"] == 2
     assert set(body["sources"]) >= {"gazetteer", "omens", "npcs"} and all(len(v) == 12 for v in body["sources"].values())
     text = json.dumps(body)
     assert "MINI-SEALED-TRUTH" not in text and "MINI-NPC-SECRET" not in text and "gm_json" not in text
@@ -45,7 +45,7 @@ def test_gm_reference_requires_token(client_ref, ref_settings):
     assert client_ref.get("/api/gm/reference/omens").status_code == 403
     assert client_ref.get("/api/gm/reference/omens", headers={"X-GM-Token": "wrong"}).status_code == 403
     omens = client_ref.get("/api/gm/reference/omens", headers=gm(ref_settings)).json()
-    assert [o["id"] for o in omens] == ["OM-001", "OM-002", "OM-003", "OM-005", "OM-009"]   # every record type, hubs included
+    assert [o["id"] for o in omens] == ["OM-001", "OM-002", "OM-003", "OM-005", "OM-009", "OM-010", "OM-011", "OM-012"]   # every record type, hubs included
 
 
 def test_asset_audit_remains_director_only(client_ref, ref_settings):

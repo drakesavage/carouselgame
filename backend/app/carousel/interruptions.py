@@ -1,8 +1,10 @@
 """Omen interruptions, decided when a route is planned, never during the walk and never by a roll for an outcome.
 The decision depends only on campaign state and the travel sequence number, which restores with a save, so the same
 trip from the same save point is interrupted the same way. Seeing an Omen is always safe: a story starts only on its
-Choice action (Phase 4). District-wide (area) Omens don't interrupt yet, and an
-Omen placed in a venue zone is sighted only by entering that zone (rules/venue_ops.py), never from the street."""
+Choice action (Phase 4). A fixed Omen anchored on a district or square (placement 'area') stops the group at that
+place like any fixed one; an Omen whose place has no coordinates never stops a route; an Omen placed in a venue zone is
+sighted only by entering that zone (rules/venue_ops.py), never from the street. Item-bound and special Omens never
+interrupt: the GM gets them as leads (memory/context.py OMEN LEADS)."""
 from __future__ import annotations
 
 import hashlib
@@ -32,16 +34,12 @@ def _draw(cid: int, seq: int) -> float:
     return int(hashlib.sha256(f"{cid}:{seq}".encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
 
 
-def _unseen(conn: sqlite3.Connection, cid: int, spawn: str, placement: str | None = None) -> list[sqlite3.Row]:
+def _unseen(conn: sqlite3.Connection, cid: int, spawn: str) -> list[sqlite3.Row]:
     sql = """SELECT o.id, o.place_id, p.north, p.west FROM ref.omens o JOIN ref.places p ON p.id = o.place_id
              WHERE o.record_type = 'Playable Omen' AND o.spawn_mode = ?
                AND NOT EXISTS (SELECT 1 FROM omen_states s WHERE s.campaign_id = ? AND s.omen_id = o.id)
                AND NOT EXISTS (SELECT 1 FROM ref.venue_omens v WHERE v.omen_id = o.id AND v.placed = 1)"""
-    args: list = [spawn, cid]
-    if placement:
-        sql += " AND o.placement = ?"
-        args.append(placement)
-    return conn.execute(sql + " ORDER BY o.id", args).fetchall()
+    return conn.execute(sql + " ORDER BY o.id", (spawn, cid)).fetchall()
 
 
 def decide(conn: sqlite3.Connection, cid: int, route: Route, seq: int) -> Interruption | None:
@@ -49,8 +47,9 @@ def decide(conn: sqlite3.Connection, cid: int, route: Route, seq: int) -> Interr
     if not ahead:
         return None
     fixed: dict[str, str] = {}
-    for o in _unseen(conn, cid, "fixed", "place"):
-        fixed.setdefault(o["place_id"], o["id"])
+    for o in _unseen(conn, cid, "fixed"):     # place- and area-anchored alike, first by Omen id
+        if o["north"] is not None:            # a place without a parcel is never a stop
+            fixed.setdefault(o["place_id"], o["id"])
     for node in ahead:
         if node in fixed:
             return Interruption(fixed[node], node, "fixed")

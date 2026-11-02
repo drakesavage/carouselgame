@@ -4,6 +4,7 @@ Sections, in order:
   1 CAMPAIGN        identity, state version, floor, location, game time, dungeon day, collapse clock, cycles
   2 CURRENT SCENE   the active scene record + recent significant events
     STORY           the active story: phase, pressure, camera, cast, obligations, revisions, endings (or OMENS HERE when none)
+    OMEN LEADS      GM-only: item-bound and special Omens anchored where the group stands, with their spawn condition
     VENUE           inside a venue: the zone, the ways on (blocked ones marked), zones seen, entry and exit, this story's
                     overlays; then GM-ONLY the venue's Omen cues and where they sit
     OPENING         during the new-game flow: the stage, its job, what blocks the next stage, the lure, the friends, Silas's options
@@ -54,7 +55,7 @@ PROFILES: dict[str, dict] = {
 },
 }
 CATEGORIES = {"CAMPAIGN": "state", "PARTY": "state", "PRESENT": "state", "OBJECTIVES": "state", "SHARED STASH": "state",
-              "ACTIVE COMBAT": "state", "STORY": "state", "OMENS HERE": "state", "VENUE": "state", "OPENING": "state", "FATE": "state", "DEATHWATCH": "state", "AROUND": "state", "CAMP RETURN": "state", "LEDGER RECORDS": "ledger", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
+              "ACTIVE COMBAT": "state", "STORY": "state", "OMENS HERE": "state", "OMEN LEADS": "gm_private", "VENUE": "state", "OPENING": "state", "FATE": "state", "DEATHWATCH": "state", "AROUND": "state", "CAMP RETURN": "state", "LEDGER RECORDS": "ledger", "CURRENT SCENE": "scene_memory", "MEMORY": "scene_memory", "HOUSE RULES": "contract_rules",
               "RULEBOOK": "rulebook", "RECENT TRANSCRIPT": "narrative", "RECENT ROLLS": "state", "GM-ONLY SECRETS": "gm_private"}
 STOP = set("the a an and or of to in on for with by is are be as at it this that from what how does do can when which who i we my our me us "
            "you your he she they them his her their then than into onto about there here just also will would should could".split())
@@ -243,6 +244,31 @@ OPENING_JOBS = {
     "escort": "Veterans (introduce_resident, in_party) walk the group across town to Dyer's Lodge, dodging Omens. At the Lodge, pay off "
               "the lure (pay_off_lure).",
 }
+
+
+MAX_LEADS, LEAD_CONDITION_CHARS = 4, 200
+LEADS_HEADER = "GM only; never say these exist. Sight one with sight_omen only when play meets its condition"
+
+
+def _omen_leads(conn: sqlite3.Connection, cid: int, place: str) -> str | None:
+    """Item-bound and special Omens anchored at `place`, which the engine never surfaces itself: the GM sights one when
+    play meets its condition. An item that travels is listed at its anchor only; following it is the GM's job. Unseen,
+    not placed in a venue zone (entering the zone sights those) and not held by an active story's lock. Never the
+    sealed dossier, beats or story title."""
+    leads = rows(conn, """SELECT o.id, o.spawn_mode, o.description, json_extract(o.raw_json, '$."Spawn / Timing"') AS cond
+                          FROM ref.omens o JOIN ref.places p ON p.id = o.place_id
+                          WHERE o.record_type = 'Playable Omen' AND o.spawn_mode IN ('item','special') AND o.place_id = ?
+                            AND p.north IS NOT NULL
+                            AND NOT EXISTS (SELECT 1 FROM omen_states s WHERE s.campaign_id = ? AND s.omen_id = o.id)
+                            AND NOT EXISTS (SELECT 1 FROM ref.venue_omens v WHERE v.omen_id = o.id AND v.placed = 1)
+                            AND NOT EXISTS (SELECT 1 FROM stories st WHERE st.campaign_id = ? AND st.status = 'active'
+                                            AND st.story_lock = o.story_lock)
+                          ORDER BY o.id LIMIT ?""", (place, cid, cid, MAX_LEADS))
+    if not leads:
+        return None
+    return f"({LEADS_HEADER})\n" + "\n".join(
+        f"- {o['id']} [{o['spawn_mode']}] {o['description'] or ''}. Condition: {_cut(o['cond'] or 'not recorded', LEAD_CONDITION_CHARS)}"
+        for o in leads)
 
 
 def _venue_section(conn: sqlite3.Connection, cid: int) -> str | None:
@@ -495,6 +521,10 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
                                                   + ("a hub: it never starts a story itself" if o["record_type"] != "Playable Omen"
                                                      else f"Choice action: {o['choice_trigger'] or 'not recorded (record the action with begin_story reason)'}")
                                                   for o in here_omens))
+
+    leads = _omen_leads(conn, cid, camp["node_id"]) if has_reference(conn) and camp.get("node_id") else None
+    if leads:
+        sections["OMEN LEADS"] = leads
 
     venue_text = _venue_section(conn, cid) if has_reference(conn) else None
     if venue_text:

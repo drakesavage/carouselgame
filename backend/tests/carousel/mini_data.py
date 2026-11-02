@@ -1,5 +1,5 @@
 """Smallest synthetic source packages that keep the real files' shapes: a small town graph (lodge, junction, square, diner,
-farm, a flagged spoiler place, an old diner with an alias, one directed flagged shortcut), three playable Omens and a hub, a fully specified story dossier (OM-001), two starting roles, an aspect, an advanced role, a story-altering ticket with its ticket and profile, one trope, two residents, the arrival lot."""
+farm, a flagged spoiler place, an old diner with an alias, one directed flagged shortcut, a district on a spur), playable Omens of every spawn mode and a hub, a fully specified story dossier (OM-001), two starting roles, an aspect, an advanced role, a story-altering ticket with its ticket and profile, one trope, two residents, the arrival lot."""
 
 
 def _place(pid, name, north, west, status="active", category="Landmark", requires=(), spoiler=False, description=None):
@@ -19,7 +19,7 @@ def _edge(eid, a, b, cost, kind="road", directed=False, requires=()):
 
 
 COORDS = {"CAR-047": [620, 440], "J-1": [560, 440], "CAR-002": [500, 440], "CAR-006": [480, 460], "CAR-086": [560, 520],
-          "CAR-099": [580, 560], "CAR-016": [495, 445], "CAR-082": [470, 400]}
+          "CAR-099": [580, 560], "CAR-016": [495, 445], "CAR-082": [470, 400], "CAR-090": [470, 480]}
 PLACES = [_place("CAR-047", "Dyer's Lodge", *COORDS["CAR-047"], category="Lodge"),
           _place("CAR-002", "Town Square", *COORDS["CAR-002"], description="A square of shops round a bandstand."),
           _place("CAR-006", "Diner", *COORDS["CAR-006"], category="Restaurant"),
@@ -27,9 +27,12 @@ PLACES = [_place("CAR-047", "Dyer's Lodge", *COORDS["CAR-047"], category="Lodge"
           _place("CAR-099", "UNKNOWNPLACE-HOTEL-8", *COORDS["CAR-099"], requires=["akers_story"], spoiler=True,
                  description="SPOILERPLACE-OSCAR-14"),
           _place("CAR-016", "Old diner", *COORDS["CAR-016"], category="Restaurant"),
-          _place("CAR-082", "Eastern arrival parking lot", *COORDS["CAR-082"], category="Parking")]
+          _place("CAR-082", "Eastern arrival parking lot", *COORDS["CAR-082"], category="Parking"),
+          _place("CAR-090", "Olde Hill", *COORDS["CAR-090"], category="District")]
 FIXED = "Visible as an inspectable anomaly at its parent venue."
 ROAMING = "Spawn as a visible moving encounter near its anchor."
+ITEM = "Must acquire/retain the specified item first; object can travel. The Choice occurs at the bandstand."
+SPECIAL = "SPAWN-PAPA-15 at the bandstand when the band stops."
 
 
 def _omen(oid, desc, place, anchor, spawn):
@@ -92,7 +95,8 @@ MINI = {
                                _edge("EDGE-3", "CAR-002", "CAR-006", 4), _edge("EDGE-4", "J-1", "CAR-086", 12),
                                _edge("EDGE-5", "CAR-002", "CAR-016", 1),
                                _edge("EDGE-6", "CAR-002", "CAR-086", 2, kind="scenario_path", directed=True, requires=["shortcut_story"]),
-                               _edge("EDGE-7", "CAR-086", "CAR-099", 3), _edge("EDGE-8", "CAR-082", "CAR-002", 6)],
+                               _edge("EDGE-7", "CAR-086", "CAR-099", 3), _edge("EDGE-8", "CAR-082", "CAR-002", 6),
+                               _edge("EDGE-9", "CAR-006", "CAR-090", 3)],
                      "aliases": {"CAR-017": "CAR-016"}},
     "pixel_anchors": {"locations": []},
     "regions": {"type": "FeatureCollection", "features": []},
@@ -104,12 +108,18 @@ MINI = {
                            {**_omen("OM-005", "A cellar door breathing", "CAR-086", "Farm", FIXED),
                             "Trigger Operator": "open", "Trigger Target": "cellar_door"},
                            {**_omen("OM-009", "Flyers for every attraction in town", "CAR-002", "Town Square", FIXED),
-                            "Record Type": "Hub / generator"}],
+                            "Record Type": "Hub / generator"},
+                           _omen("OM-010", "Every porch light on the hill goes out", "CAR-090", "Olde Hill", FIXED),
+                           _omen("OM-011", "A music box nobody wound", "CAR-002", "Town Square", ITEM),
+                           _omen("OM-012", "The band plays one song too many", "CAR-002", "Town Square", SPECIAL)],
               "hub_seed_pools": []},
     "beats": {"dossiers": [FULL_DOSSIER,
                            _dossier("OM-002", "Someone is following.", "MINI-SEALED-TRUTH-2"),
                            _dossier("OM-003", "Something is wrong at the diner.", "MINI-SEALED-TRUTH-3"),
-                           _dossier("OM-005", "The cellar door is breathing.", "MINI-SEALED-TRUTH-5")]},
+                           _dossier("OM-005", "The cellar door is breathing.", "MINI-SEALED-TRUTH-5"),
+                           _dossier("OM-010", "The hill has gone dark.", "MINI-SEALED-TRUTH-10"),
+                           _dossier("OM-011", "The music box plays by itself.", "MINI-SEALED-TRUTH-11"),
+                           _dossier("OM-012", "The band won't stop.", "MINI-SEALED-TRUTH-12")]},
     "roles": {"v04_playable_overlay": {"base_roles": [{"id": "base.final-girl", "name": "Final Girl"}, {"id": "base.film-buff", "name": "Film Buff"}],
                                        "aspects": [{"id": "aspect.final-girl.screamer", "name": "Screamer", "base_archetype": "Final Girl"}],
                                        "advanced_roles": [{"id": "advanced.adventurer", "name": "Adventurer"}],
