@@ -81,6 +81,10 @@ VENUES = {"maps": [
     _venue("SM-T02", "A train that isn't there", "story_instance", ["CAR-016"],
            zones=[("n01_platform", "platform", "exterior"), ("n02_carriage", "carriage", "interior")],
            links=[("n01_platform", "n02_carriage", "walk")]),
+    _venue("SM-T04", "Under the cornfield", "story_instance", [],   # holds OM-001's story; reached only through it
+           zones=[("n01_hatch", "hatch", "interior"), ("n02_ladder", "ladder", "interior"), ("n03_STORYROOM-QUEBEC-16", "STORYROOM-QUEBEC-16", "interior")],
+           links=[("n01_hatch", "n03_STORYROOM-QUEBEC-16", "walk"), ("n03_STORYROOM-QUEBEC-16", "n02_ladder", "walk")],
+           omens=[("OM-001", "n03_STORYROOM-QUEBEC-16", "NEEDS_MANUAL_NODE_REVIEW", "enter:farm")]),
     _venue("SM-T03", "Unplaced alley", "persistent", [],
            zones=[("n01_mouth", "alley mouth", "exterior"), ("n02_end", "dead end", "exterior")],
            links=[("n01_mouth", "n02_end", "walk")]),

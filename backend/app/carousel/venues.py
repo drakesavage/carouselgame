@@ -1,10 +1,15 @@
 """Where a group stands inside a venue, and where it can go from there. Movement authority is the venue's link graph
 (ref.venue_links) as changed by the campaign's live story overlays (venue_overlays): a `block` keeps a link but marks it
 impassable, an `add_zone` adds a room joined to one zone. Lifted overlays count for nothing. The reference data is
-never changed. Story-added zone IDs are `<venue>:story-<story_id>-<n>`."""
+never changed. Story-added zone IDs are `<venue>:story-<story_id>-<n>`.
+
+Story-only venues (STORY_LAYERS) are never entered by arriving at a place: the GM takes the group in during its story
+(rules/story_venue_ops.py), and travel waits until the group leaves by the exit or the story ends."""
 from __future__ import annotations
 
 import sqlite3
+
+STORY_LAYERS = ("story_instance", "extradimensional")
 
 
 def venue_at(conn: sqlite3.Connection, node_id: str | None) -> dict | None:
@@ -102,10 +107,33 @@ def zone_omens(conn: sqlite3.Connection, zone_id: str) -> list[str]:
     return [r[0] for r in conn.execute("SELECT omen_id FROM ref.venue_omens WHERE zone_id = ? AND placed = 1 ORDER BY omen_id", (zone_id,))]
 
 
+def in_story_venue(conn: sqlite3.Connection, cid: int) -> dict | None:
+    """The story-only venue the group is inside, if any."""
+    venue_id, _ = position(conn, cid)
+    v = venue(conn, venue_id) if venue_id else None
+    return v if v and v["layer"] in STORY_LAYERS else None
+
+
+def members_at(conn: sqlite3.Connection, venue_id: str, node_id: str | None) -> bool:
+    """Whether this travel-graph node's place is one of the venue's member places (aliases resolved)."""
+    return bool(node_id) and conn.execute("""SELECT 1 FROM ref.graph_nodes g
+                          JOIN ref.venue_places vp ON COALESCE((SELECT target_id FROM ref.place_aliases WHERE alias_id = vp.place_id),
+                                                               vp.place_id) = g.location_id
+                          WHERE g.id = ? AND vp.venue_id = ?""", (node_id, venue_id)).fetchone() is not None
+
+
+def enter_story(conn: sqlite3.Connection, cid: int, venue_id: str, group_id: int | None = None) -> dict:
+    """Put the campaign (and the PC's group) at a story venue's entry zone. The caller checks the story allows it."""
+    return _put(conn, cid, venue(conn, venue_id), group_id)
+
+
 def enter(conn: sqlite3.Connection, cid: int, node_id: str | None, group_id: int | None = None) -> dict | None:
     """Put the campaign (and the PC's group) at the entry zone of the venue at this node, or clear the venue if there is
     none. Returns {venue_id, zone_id, label} or None."""
-    v = venue_at(conn, node_id)
+    return _put(conn, cid, venue_at(conn, node_id), group_id)
+
+
+def _put(conn: sqlite3.Connection, cid: int, v: dict | None, group_id: int | None) -> dict | None:
     vid, zid = (v["id"], v["entry_zone"]) if v else (None, None)
     conn.execute("UPDATE campaigns SET venue_id = ?, zone_id = ? WHERE id = ?", (vid, zid, cid))
     if group_id is not None:

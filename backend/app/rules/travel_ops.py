@@ -86,6 +86,10 @@ def _apply_travel(ctx: Ctx, op: Travel) -> dict:
     start = camp["node_id"]
     if not start:
         raise ChangeError("the group has no position on the town map yet")
+    inside = venues.in_story_venue(ctx.conn, ctx.campaign_id)
+    if inside:
+        raise ChangeError(f"the group is inside {inside['title']}: leave by its exit "
+                          f"({venues.label(ctx.conn, inside['exit_zone'])}) or end the story first")
     if camp["venue_id"]:
         v = venues.venue(ctx.conn, camp["venue_id"])
         if v and camp["zone_id"] not in (v["entry_zone"], v["exit_zone"]):

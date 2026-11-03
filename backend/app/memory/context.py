@@ -281,6 +281,9 @@ def _venue_section(conn: sqlite3.Connection, cid: int) -> str | None:
     if not v or not z:
         return None
     out = [f"{v['title']} — you are at {z['label']} ({z['area_type']})", "Ways on:"]
+    if v["layer"] in venues.STORY_LAYERS:
+        out.insert(0, f"Inside {v['title']} (story venue; travel is closed until the group leaves by "
+                      f"{venues.label(conn, v['exit_zone'])} or the story ends).")
     out += [f"- {n['label']}" + (f" [blocked: {n['blocked_reason']}]" if n["blocked_reason"] else "")
             for n in venues.neighbours(conn, cid, here)] or ["- none"]
     out.append("Zones seen: " + ", ".join(venues.label(conn, i) or i for i in venues.visited(conn, cid, venue_id)))

@@ -16,7 +16,8 @@ SECRETS = ["GMSECRET-ALPHA-1", "GMSECRET-BRAVO-2", "GMSECRET-CHARLIE-3", "GMSECR
            "CAUSE-SECRET-LIMA-7", "rescue_eligibility", "rescue_json", "poster_ids",   # a death cause, rescue eligibility, a Rescue's posters
            "WHEREABOUTS-MIKE-12", "HOOK-NOVEMBER-13", "camp_leadership",   # a whereabouts note's reason, a resident's hook, a GM-only relationship
            "SPOILERPLACE-OSCAR-14",   # the spoiler place's gazetteer description (mini CAR-099)
-           "SPAWN-PAPA-15"]   # a special Omen's spawn condition, a GM-only lead (mini OM-012)
+           "SPAWN-PAPA-15",   # a special Omen's spawn condition, a GM-only lead (mini OM-012)
+           "STORYROOM-QUEBEC-16"]   # a room of a story venue the group hasn't entered (mini SM-T04)
 
 
 def _plant(conn, cid):

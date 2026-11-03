@@ -86,7 +86,7 @@ def _apply_move_zone(ctx: Ctx, op: MoveZone) -> dict:
     if not venue_id or not here:
         raise ChangeError("the group is not in a venue")
     active_venue = venues.venue(ctx.conn, venue_id)
-    if not active_venue or not active_venue["enterable"]:
+    if not active_venue or not (active_venue["enterable"] or active_venue["layer"] in venues.STORY_LAYERS):
         raise ChangeError("this venue's layout is awaiting reconciliation; the group stays at its current location")
     current_zone = venues.zone(ctx.conn, here, ctx.campaign_id)
     if current_zone and current_zone.get("area_type") == "retired_reference":

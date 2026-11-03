@@ -447,6 +447,11 @@ def _apply_conclude(ctx: Ctx, op: ConcludeStory) -> dict:
     for cid_ in awards:   # re-read: resolve_fates changed the rows; a dead PC still earns its award
         _pay_stars(ctx, one(ctx.conn, "SELECT * FROM characters WHERE id = ?", (cid_,)), stars[str(cid_)])
     lift_overlays(ctx, s["id"])
+    from ..carousel.venues import in_story_venue
+    from .story_venue_ops import leave
+    inside = in_story_venue(ctx.conn, ctx.campaign_id)
+    if inside:   # whatever the ending, the story never strands the group
+        leave(ctx, inside)
     return {"summary": f"{s['title']} ends: {ending}", "ending": op.ending, "stars": stars, "novelty": nov, "fates": fates["outcome"]}
 
 
