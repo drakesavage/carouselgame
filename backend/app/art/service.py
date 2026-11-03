@@ -27,17 +27,17 @@ from .comfy import ComfyClient, ComfyError, default_root, sdxl_txt2img
 KINDS = ("character", "item", "mob", "scene", "location")
 NAMED = ("mob", "location")  # kinds keyed by name rather than a record id
 SIZES = {"character": (832, 1216), "mob": (896, 1152), "item": (1024, 1024), "scene": (1344, 768), "location": (1344, 768)}
-STYLE = ("(gritty painted fantasy illustration:1.3), (oil painting:1.2), painterly, tabletop RPG sourcebook art, visible brushstrokes, "
-         "dramatic chiaroscuro lighting, grimy dungeon atmosphere, darkly humorous, highly detailed")
+STYLE = ("(cinematic film still:1.3), warm small-town Americana shot like a prestige horror film, practical lighting, film grain, "
+         "unsettling but not gory, highly detailed")
 KIND_STYLE = {
     "character": "waist-up character portrait, facing the viewer, detailed expressive face, plain dark background",
-    "mob": "monster illustration, full body, menacing pose, dungeon background",
+    "mob": "something from a horror movie, full figure, in a town setting",   # key kept: stored jobs use it
     "item": "the whole object in full view with empty space around it, single isolated object, centered, alone on a bare worn dark "
             "wooden surface, simple uncluttered background, nothing else in the frame, no people",
     "scene": "environment illustration, wide establishing shot, no people, no characters",
     "location": "environment illustration of a place, wide establishing shot, no people, no characters",
 }
-NEGATIVE = ("(photo, photograph, photorealistic:1.3), realistic skin texture, studio portrait, 3d render, anime, manga, cartoon, chibi, blurry, lowres, jpeg artifacts, watermark, "
+NEGATIVE = ("(gore, blood spatter, viscera:1.3), studio portrait, 3d render, anime, manga, cartoon, chibi, blurry, lowres, jpeg artifacts, watermark, "
             "(text, letters, words, writing:1.2), name tag, signature, logo, frame, border, extra limbs, extra fingers, deformed hands, disfigured face, cropped head, "
             "nsfw, nude")
 KIND_NEGATIVE = {"scene": "people, person, man, woman, figures, crowd, portrait", "location": "people, person, man, woman, figures, crowd, portrait",
@@ -375,12 +375,12 @@ def subject_layout(conn: sqlite3.Connection, cid: int, kind: str, subject_id: in
     return KIND_STYLE[kind], SIZES[kind]
 
 
-ITEM_LOOK_SYSTEM = """You write short visual descriptions for item illustrations in a Dungeon Crawler Carl tabletop campaign. The
-crawlers are contemporary Earth survivors in a magical dungeon: much of their gear is ordinary modern equipment, scavenged junk,
-or something they built from it, and some items are System-made or enchanted. For each item, write one or two plain sentences
+ITEM_LOOK_SYSTEM = """You write short visual descriptions for item illustrations in a horror roleplaying game set in Carousel, a
+small American town where horror movies happen for real. Most items are everyday small-town objects (tools, toys, keepsakes,
+kitchen things, junk from a garage or a diner) that may be wrong in some way: stained, too old, out of place. For each item, write one or two plain sentences
 (under 40 words) saying what it physically looks like: shape, material, colours, size, condition, and container for a bundle or
 cache. Real-world objects look like their real-world counterparts (a fire blanket is a folded grey fibreglass sheet in a red
-pouch with pull tabs). Use any condition the record gives (scorched, repaired, makeshift). Do not invent glows, magical effects,
+pouch with pull tabs). Use any condition the record gives (scorched, repaired, makeshift). Do not invent glows, supernatural effects,
 text, labels or logos unless the record says so. No numbers of uses, rules, owners, backstory or people.
 Begin with the kind of object in everyday words, its overall silhouette, its size next to a person and how it stands or lies
 ("a waist-high freestanding folding barrier, standing open in a zigzag, seen from a three-quarter angle"); a painter given
@@ -397,7 +397,7 @@ the Porcupine Pod: "dozens of short sharp steel spikes sticking out of the lid, 
 the Accordion Barricade: "freestanding zigzag folding steel barrier, yellow and black hazard stripes"). The first feature is
 the object's overall shape. Plain words, no commas inside a phrase.
 Also give "misleading": the words of the item's NAME that are not literally what it is ("Porcupine" in Porcupine Pod,
-"Accordion" in Accordion Barricade, "Crawler" in Crawler Biscuit, "Murder" in Murder Drum), or empty when every word is
+"Accordion" in Accordion Barricade, "Widow" in Widow's Lantern, "Murder" in Murder Drum), or empty when every word is
 literal ("Plastic alligator dashboard bobblehead" really is a plastic alligator; a "golden-retriever ornament" really is a
 dog figurine; "Recovered Shotgun Shell Cache" really is shotgun shells).
 Then "avoid": only what those misleading words could make a painter draw instead, and empty when "misleading" is empty (for the Porcupine Pod:
@@ -408,16 +408,16 @@ prompt suppresses look-alikes too, so a spiked pod's list leaves out "quills" an
 "current_look" is given, keep what it gets right and rewrite misleading, figurative or vague wording (like "quills" or
 "concertina"); don't add glows or magic the record doesn't give. Return every item id you were given."""
 
-PLACE_LOOK_SYSTEM = """You write short visual descriptions for location illustrations (wide establishing shots, no people) in a
-Dungeon Crawler Carl tabletop campaign. The Third Floor is the Over City: a sprawling, decaying fantasy city built by the
-System, full of mismatched districts, markets, guildhalls, inns and ruins, under a strange sky. For each place, write two or
+PLACE_LOOK_SYSTEM = """You write short visual descriptions for location illustrations (wide establishing shots, no people) for a
+horror roleplaying game set in Carousel, a small American town where horror movies happen for real: main streets, diners,
+motels, farms, woods, a lake, old houses and a hunting lodge, ordinary at first look and wrong on a second. For each place, write two or
 three plain sentences (under 60 words) of what the painter should see: architecture, materials, scale, street or room layout,
-light, weather and mood. Use only what the record says plus ordinary details that fit it (a saferoom is an inn or shelter
-with a warm, protected look; a market district has stalls, awnings and signage without readable text). For a place the party
+light, weather and mood. Use only what the record says plus ordinary details that fit it (a diner has a counter, booths
+and a neon sign without readable text; a motel has a row of doors off a parking lot). For a place the party
 has only seen from outside ("visited": false), describe its exterior as seen from a distance. Never include people, crowds,
 named characters, monsters or plans; no text or logos. Write for a painter who takes every word literally: no metaphors.
-Also give "features": two to four short comma-separated phrases a painter must show (for a saferoom inn: "warm hearth
-fire, heavy barred door").
+Also give "features": two to four short comma-separated phrases a painter must show (for a diner: "chrome counter
+with red stools, neon sign glowing in the window").
 Also give "avoid": a short comma list of things the NAME could make a painter wrongly draw instead ("The Molting Pigeon":
 "pigeon, bird, feathers"; "Fallen Watch": "wristwatch, clock"), or empty; never a word your look uses. Return every place
 key you were given."""
@@ -782,7 +782,7 @@ class ArtWorker:
         ckpt = j.get("checkpoint") or self.settings.comfy_checkpoint
         s = sampler_settings(ckpt)
         wf = sdxl_txt2img(ckpt, j["prompt"], j["negative"], j["width"], j["height"], j["seed"], s["steps"], s["cfg"], s["sampler"], s["scheduler"],
-                          f"crawler-console/c{j['campaign_id']}-{j['kind']}-{j['id']}")
+                          f"carousel/c{j['campaign_id']}-{j['kind']}-{j['id']}")
         return self.client.run(wf, timeout_s=self.settings.comfy_timeout_s)
 
     def _install(self, conn: sqlite3.Connection, job_id: int) -> None:

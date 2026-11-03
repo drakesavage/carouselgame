@@ -120,10 +120,10 @@ def journal(conn: sqlite3.Connection, cid: int) -> dict:
 
 # ------------------------------------------------------------------ lore notebook
 LORE_CATEGORIES = (  # (category, pattern), first match wins; subjects with a known prefix are categorized by it
-    ("Threats", r"\b(brain boiler|mob|boss|hostile|danger|threat|murder hornet|attack|ambush|killed|victims?)\b"),
-    ("Places", r"\b(saferoom|district|neighborhood|prison|fallen watch|heavensworth|market|stair|route|floor \d|over city|halls?)\b"),
-    ("Factions & people", r"\b(grulke|llama|clan|network|faction|guild|manager|guide|contact|friendship|ally|allies)\b"),
-    ("The party", r"\b(crawler|party|silver earth box|potion|level|clan|denton)\b"),
+    ("Threats", r"\b(killer|monster|omen|hostile|danger|threat|attack|ambush|killed|victims?|curse[ds]?)\b"),
+    ("Places", r"\b(safe place|camp|lodge|district|neighborhood|square|diner|motel|farm|woods|lake|street|road|house|halls?)\b"),
+    ("Factions & people", r"\b(resident|townsfolk|local|family|network|contact|friendship|ally|allies)\b"),
+    ("The party", r"\b(player|group|party|ticket|trope|plot armor)\b"),
 )
 
 

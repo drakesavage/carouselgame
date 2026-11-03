@@ -132,7 +132,7 @@ def portrait_prompt(name: str, ref: dict, brief: dict, appearance: str, animal: 
         lines.append("Campaign art rules: " + " ".join(guide["global_rules"][:6]))
     if guide.get("negative_guard"):
         lines.append("Never: " + guide["negative_guard"])
-    lines.append("Style: gritty painted fantasy illustration for a tabletop RPG sourcebook; visible oil-paint brushwork, dramatic "
-                 "chiaroscuro lighting, grimy dungeon background, a darkly humorous tone. Keep every listed detail of clothing and gear "
+    lines.append("Style: a still from a prestige horror film set in warm small-town Americana; practical lighting, film grain, "
+                 "unsettling but not gory. Keep every listed detail of clothing and gear "
                  "(colors included) and nothing that contradicts them. No text, letters, logos, borders or watermarks.")
     return "\n".join(lines)

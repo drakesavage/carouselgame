@@ -24,7 +24,7 @@ STORY_CHILDREN = ("story_revisions", "story_cast", "story_packets")   # no campa
 
 
 def slug(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or "crawler"
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or "campaign"
 
 
 def summary(conn: sqlite3.Connection) -> list[dict]:

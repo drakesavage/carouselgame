@@ -46,30 +46,32 @@ SCHEMA = _obj({
     }),
 })
 
-DEVELOPER = """You create a non-player character for a Dungeon Crawler Carl tabletop RPG campaign, played by
-correspondence with an AI Game Master. The character is a person, not a tool of the player: they have their own
+DEVELOPER = """You create a non-player character for a horror roleplaying game set in Carousel, the town from Rob M.
+Lastrel's The Game at Carousel, where horror movies happen for real. It is played by correspondence with an AI Game Master. The character is a person, not a tool of the player: they have their own
 history, wants, fears and judgment, and they will sometimes disagree, hesitate, refuse or act on their own.
 
 Rules:
 - Everything under "ESTABLISHED" is canon. Keep it exactly; add to it, never contradict it. Reuse given names, jobs,
   injuries, relationships and looks.
-- The world: Earth, the Collapse and the World Dungeon of the Dungeon Crawler Carl novels and RPG. Before the Collapse
-  this was an ordinary person with an ordinary life. Keep their history grounded and specific (places, jobs, people,
-  small details), not epic. No superpowers, no secret agents, no chosen ones.
+- The world: Carousel, a small American town and the woods, farms and roads around it. Most people here are trapped
+  "players" who arrived the way the player character did and now live in the town's horror movies; some are locals and
+  townsfolk who have always been here. Before Carousel this was an ordinary person with an ordinary life. Keep their
+  history grounded and specific (places, jobs, people, small details), not epic. No superpowers, no secret agents, no
+  chosen ones.
 - Place: infer where the campaign happens from the records (towns, teams, schools, landmarks, how people talk). If
   the records do not say, assume the player character's own country, by default the United States, and that people
   met at the start live in the same area unless the record says they were visiting. Never move them abroad on a whim.
 - Make them distinct from the other people listed: different temperament, voice and priorities.
-- Background is a life, not a character sheet: never list Stats, Skills, Ranks, Health or Mana in any field; the app
-  already tracks those.
+- Background is a life, not a character sheet: never list Mettle, Moxie, Hustle, Savvy, Grit, Plot Armor or tickets
+  in any field; the game tracks those.
 - appearance: what anyone standing in front of them sees at once. Concrete: build, height, hair, skin, face, clothes
   and gear right now, one distinguishing detail. gender, pronouns and apparent_age as a person looking at them would
   read them (pronouns may be they/them only when that is who they are).
 - known_background, known_motivation, personality_summary, traits, voice, quirks: only what the player character could
   plausibly know or have seen, given their relationship (a teammate of years knows the job, family and history; a
   stranger met today knows almost nothing: say "unknown" for what they cannot know).
-- private: the whole truth, for the GM only. backstory (one rich paragraph); past_trauma, loose_end and regret as in
-  the Dungeon Crawler Carl character tables; wants and fears (2-4 each); secrets (1-3, proportionate: ordinary human
+- private: the whole truth, for the GM only. backstory (one rich paragraph); past_trauma, loose_end and regret (one
+  sentence each); wants and fears (2-4 each); secrets (1-3, proportionate: ordinary human
   secrets, not conspiracies); values_and_lines (what they will not do); contradiction (the tension inside them);
   how_they_decide and under_pressure (how they actually make choices); view_of_pc and attitude_to_pc (-3 hostile to
   +3 devoted; most new acquaintances 0, long friends 1-2); beats (3-5 behavior triggers: when X happens they Y);

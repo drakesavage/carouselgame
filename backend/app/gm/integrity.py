@@ -113,8 +113,7 @@ def continuity(conn: sqlite3.Connection, cid: int, ctx: dict, flags: list[dict],
         f"{len(want)} present NPCs with private sheets" if not lacking else "sheet left out for: " + ", ".join(lacking))
     add("current scene", "## CURRENT SCENE" in text and "No scene recorded" not in text, "scene loaded" if "No scene recorded" not in text else "no scene recorded")
     elapsed = (time_after or 0) - (time_before or 0)
-    add("dungeon time", elapsed >= 0 and not any("floor clock did not advance" in f["message"] for f in flags),
-        f"{elapsed} game minutes elapsed")
+    add("game time", elapsed >= 0, f"{elapsed} game minutes elapsed")
     add("advancement cycles", not any("cycle" in f["message"].lower() for f in flags),
         "cycle counted" if any("cycle" in c.lower() for c in changes) else "no cycle counted")
     add("GM secrets stayed hidden", not any("GM-only" in f["message"] or "secret" in f["message"].lower() for f in flags), "no verbatim leak detected")

@@ -26,7 +26,7 @@ TOOL_SPECS: list[dict] = [
                     "people: only move who actually goes), scene to keep the current scene current, remember for NPC memories and private "
                     "beats, quest kind commitment/reservation for promises and held items (a reservation is never an owned item: when it is "
                     "claimed, complete the reservation quest earlier in the same batch, then add_item), "
-                    "use_ability for limited uses, rest in saferooms (a rest advances the clock itself: never also advance_time for it), advance_time mending for calm hours. Scene fields, quest details, groups "
+                    "travel to go somewhere in town and move_zone to move inside a place. Scene fields, quest details, groups "
                     "and remember(visibility player) are SHOWN TO THE PLAYER: put hidden material only in gm_note or remember(visibility gm). Ops:\n" + ops_reference(),
      "parameters": {"changes": "[change objects]"}},
     {"name": "search_rules",

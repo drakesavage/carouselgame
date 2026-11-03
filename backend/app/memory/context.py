@@ -1,7 +1,7 @@
 """GM Context Builder: a bounded, structured briefing for every GM call (never the whole transcript or rulebook).
 
 Sections, in order:
-  1 CAMPAIGN        identity, state version, floor, location, game time, dungeon day, collapse clock, cycles
+  1 CAMPAIGN        identity, state version, location, game time, clocks, the immediate objective
   2 CURRENT SCENE   the active scene record + recent significant events
     STORY           the active story: phase, pressure, camera, cast, obligations, revisions, endings (or OMENS HERE when none)
     OMEN LEADS      GM-only: item-bound and special Omens anchored where the group stands, with their spawn condition
@@ -156,7 +156,7 @@ def _full_char(conn: sqlite3.Connection, c: dict, where: str | None = None, budg
              "statuses: " + _statuses(conn, c["id"]),
              "carrying: " + _items(conn, c["id"], detail=True)]
     ident = sheet.get("identity") if isinstance(sheet.get("identity"), dict) else {}
-    if c["kind"] == "npc":  # a person in front of the crawler has a visible gender; never leave it to "they" by default
+    if c["kind"] == "npc":  # a person in front of the group has a visible gender; never leave it to "they" by default
         lines.append("identity: " + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in ident.items()) if ident.get("pronouns")
                      else "identity: gender and pronouns NOT RECORDED — decide them now as anyone looking at this person would, "
                           "record with op npc (gender, pronouns, apparent_age) and narrate with them")
@@ -474,8 +474,8 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
              f"Game time: {now // 60}h{now % 60:02d}m elapsed"]
     if scene and scene.get("location") and camp["current_location"] and             scene["location"].split(",")[0].split(" — ")[0].strip().lower() != camp["current_location"].split(",")[0].split(" — ")[0].strip().lower():
         ident.append(f"NOTE: the campaign record places the party at {camp['current_location']}"
-                     f"{' (saferoom)' if camp['safe_room'] else ''}, but the current scene is at {scene['location']}. Records disagree: do not assume "
-                     "saferoom protection in the scene; settle it in play and record it with op set_location.")
+                     f"{' (safe place)' if camp['safe_room'] else ''}, but the current scene is at {scene['location']}. Records disagree: do not assume "
+                     "safe-place protection in the scene; settle it in play and record it with op set_location.")
     linked = immediate_objective(conn, cid)
     if linked:
         ident.append("Immediate objective (quest records; set with op quest immediate=true/false): "
