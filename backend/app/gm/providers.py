@@ -582,7 +582,7 @@ class MockProvider:
             return ProviderResponse([], f"*[MOCK GM]* You search carefully and turn up {found} thing(s) worth remembering.")
         if last and last["name"] == "search_rules":
             refs = [p["ref"] for p in last["result"].get("official", [])][:3]
-            return ProviderResponse([], "*[MOCK GM]* The relevant references are: " + ("; ".join(refs) if refs else "no indexed rulebook passages matched."))
+            return ProviderResponse([], "*[MOCK GM]* The relevant references are: " + ("; ".join(refs) if refs else "no Carousel bible passages matched."))
         if any(r["ok"] is False for r in results):
             errs = "; ".join(r["result"].get("error", "") for r in results if not r["ok"])
             return ProviderResponse([], f"*[MOCK GM]* That didn't work out mechanically: {errs}")

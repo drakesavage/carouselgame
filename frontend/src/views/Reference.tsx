@@ -10,7 +10,7 @@ const MECH_TONE: Record<string, string> = { implemented: "green", partial: "ambe
 
 const RULING_TONE: Record<string, string> = { precedent: "green", provisional: "amber", rejected: "red" };
 
-/** Opens one rulebook page (from a story citation or a lookup) in the page viewer. */
+/** Opens one section of a Carousel bible (from a story citation or a lookup) in the section viewer. */
 export function RulePageDialog({ page, onClose }: { page: { doc: number; page: number } | null; onClose: () => void }) {
   const [at, setAt] = useState(page);
   useEffect(() => setAt(page), [page]);
@@ -43,12 +43,12 @@ export function RulesView({ cid }: { cid: number }) {
 
   return (
     <div className="view-inner rules">
-      <div className="sub">Precedence: an approved ruling → campaign state → a campaign house rule → the official rulebooks → GM judgment. Source books stay local and are never published.</div>
+      <div className="sub">Precedence: an approved ruling → campaign state → a campaign house rule → the Carousel bibles → GM judgment. The bibles are read from the Carousel source folder and never published.</div>
       <div className="tabs" style={{ marginTop: 12 }} role="tablist">
         {(["house", "rulings", "books"] as const).map((t) => (
           <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
             {{ lookup: "Look up", browse: "Browse", house: `House rules ${house ? `(${house.length})` : ""}`,
-               rulings: `Rulings ${rulings ? `(${rulings.length}${pending ? `, ${pending} to review` : ""})` : ""}`, books: `Rulebooks ${docs ? `(${docs.documents.length})` : ""}` }[t]}
+               rulings: `Rulings ${rulings ? `(${rulings.length}${pending ? `, ${pending} to review` : ""})` : ""}`, books: `Bibles ${docs ? `(${docs.documents.length})` : ""}` }[t]}
           </button>
         ))}
       </div>
@@ -64,7 +64,7 @@ export function RulesView({ cid }: { cid: number }) {
         </details>
       )) : <Empty>No house rules recorded for this campaign.</Empty>)}
       {tab === "rulings" && <RulingsPanel cid={cid} rulings={rulings} onChanged={(r) => setRulings((all) => all?.map((x) => (x.id === r.id ? r : x)) ?? null)} />}
-      {tab === "books" && docs && <BooksPanel docs={docs} onIndex={async (d) => { await api.indexRules(d); setDocs(await api.ruleDocs()); }} />}
+      {tab === "books" && docs && <BooksPanel docs={docs} onIndex={async () => { await api.indexRules(); setDocs(await api.ruleDocs()); }} />}
       <RulePageDialog page={page} onClose={() => setPage(null)} />
     </div>
   );
@@ -105,32 +105,30 @@ function PageViewer({ doc, page, onPage }: { doc: number; page: number; onPage: 
   return (
     <div className="panel-body">
       <div className="row">
-        <Dialog.Title className="h1 grow" style={{ fontSize: 17 }}>{data?.document ?? "…"} — p. {page}</Dialog.Title>
+        <Dialog.Title className="h1 grow" style={{ fontSize: 17 }}>{data?.document ?? "…"} — §{page}</Dialog.Title>
         <button className="btn small" disabled={page <= 1} onClick={() => onPage(page - 1)}>‹ Prev</button>
         <button className="btn small" disabled={!!data && page >= data.page_count} onClick={() => onPage(page + 1)}>Next ›</button>
         <Dialog.Close className="btn ghost small"><X size={16} /></Dialog.Close>
       </div>
-      <div className="pre" style={{ marginTop: 12, maxHeight: "none", fontFamily: "var(--body)", fontSize: 14, lineHeight: 1.6 }}>{data ? data.text || "(no extractable text on this page)" : "Loading…"}</div>
+      <div className="pre" style={{ marginTop: 12, maxHeight: "none", fontFamily: "var(--body)", fontSize: 14, lineHeight: 1.6 }}>{data ? data.text || "(this section is empty)" : "Loading…"}</div>
     </div>
   );
 }
 
-function BooksPanel({ docs, onIndex }: { docs: Awaited<ReturnType<typeof api.ruleDocs>>; onIndex: (d?: string) => Promise<void> }) {
-  const [dir, setDir] = useState("");
+function BooksPanel({ docs, onIndex }: { docs: Awaited<ReturnType<typeof api.ruleDocs>>; onIndex: () => Promise<void> }) {
   const st = docs.index_status ?? {};
   return (
     <>
       {docs.documents.length ? (
-        <table className="data"><thead><tr><th>Document</th><th>Pages</th><th>Chunks</th><th>File</th></tr></thead>
+        <table className="data"><thead><tr><th>Document</th><th>Sections</th><th>Chunks</th><th>File</th></tr></thead>
           <tbody>{docs.documents.map((d) => <tr key={d.id}><td>{d.title}</td><td className="mono">{d.page_count}</td><td className="mono">{d.chunks}</td><td className="sub">{d.filename}</td></tr>)}</tbody>
         </table>
-      ) : <Empty>No rulebooks indexed.</Empty>}
-      <div className="h2">Index rulebook PDFs</div>
-      <div className="row">
-        <input className="input" placeholder="Folder with PDFs (blank = the folder in Settings)" value={dir} onChange={(e) => setDir(e.target.value)} />
-        <button className="btn" disabled={st.state === "running"} onClick={() => onIndex(dir || undefined)}><FileSearch size={14} /> {st.state === "running" ? "Indexing…" : "Index"}</button>
+      ) : <Empty>The Carousel bibles are not indexed yet.</Empty>}
+      <div className="row" style={{ marginTop: 12 }}>
+        <div className="sub grow">The importer re-indexes the bibles after every data import. Index re-reads them now.</div>
+        <button className="btn" disabled={st.state === "running"} onClick={() => onIndex()}><FileSearch size={14} /> {st.state === "running" ? "Indexing…" : "Index"}</button>
       </div>
-      {st.state && st.state !== "idle" && <div className="sub" style={{ marginTop: 8 }}>Status: {st.state}{st.error ? ` — ${st.error}` : ""}{st.skipped_duplicates?.length ? ` · skipped duplicate copies: ${st.skipped_duplicates.join(", ")}` : ""}</div>}
+      {st.state && st.state !== "idle" && <div className="sub" style={{ marginTop: 8 }}>Status: {st.state}{st.error ? ` — ${st.error}` : ""}{st.missing?.length ? ` · missing: ${st.missing.map((m: { title: string }) => m.title).join(", ")}` : ""}</div>}
     </>
   );
 }

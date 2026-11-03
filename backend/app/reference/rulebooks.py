@@ -1,27 +1,30 @@
-"""Local rulebook reference: PDF ingestion and retrieval with page references.
+"""Rule search over the Carousel bibles: Markdown sections indexed with page-like references.
 
-* Text is extracted page by page with PyMuPDF and stored in data/rulebooks.db (never in Git, never served
-  as static files). Lines repeated on many pages (watermarks, running headers/footers) are stripped.
-* Chunks are indexed with SQLite FTS5 (porter stemming, BM25 ranking).
-* "Semantic" retrieval without a paid embedding API: the GM model supplies several phrasings of what it
-  needs (synonyms, rule names, the situation in plain words) and results are merged with reciprocal-rank
-  fusion. Extension point: add an `embeddings` table + local model and fuse its ranking the same way.
-* Hi-res/low-res copies of the same book are de-duplicated (smaller file wins; the text is identical).
+* BIBLES lists the documents in source precedence (design §3). Each is read from the Carousel source dir, never
+  written. A missing file is reported in the index status; the others are still indexed.
+* Every `#`/`##` heading starts a new "page" (1-based); the heading text is kept at the top of its page, and a
+  passage's ref reads `System Bible v0.4.1 §12 Plot Armor`.
+* Chunks are indexed with SQLite FTS5 (porter stemming, BM25 ranking) in data/rulebooks.db (never in Git). The file
+  is only ever rebuilt whole and then read, so it uses a rollback journal, not WAL: no -wal file can outlive a swap.
+* "Semantic" retrieval without a paid embedding API: the GM model supplies several phrasings of what it needs and
+  results are merged with reciprocal-rank fusion. Equal scores follow source precedence.
+* The importer rebuilds the index after each reference import (carousel/importer.py): into rulebooks.db.new, then
+  swapped in, the same way as reference.db.
 
-Precedence (CORE_MECHANICS 2): campaign rulings and house rules outrank these official passages; the GM
-tool layer returns them first and labels every result with its source type.
+Precedence (CORE_MECHANICS 2): campaign rulings and house rules outrank these passages; the GM tool layer returns
+them first and labels every result with its source type.
 """
 from __future__ import annotations
 
 import collections
 import hashlib
+import json
 import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
-from ..db import connect, now_iso, rows
+from ..db import now_iso, rows
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -29,79 +32,64 @@ CREATE TABLE IF NOT EXISTS documents (
   path TEXT NOT NULL,
   filename TEXT NOT NULL,
   title TEXT NOT NULL,
-  sha256 TEXT NOT NULL UNIQUE,
-  page_count INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  page_count INTEGER NOT NULL,      -- sections
+  precedence INTEGER NOT NULL,      -- position in BIBLES
   source_type TEXT NOT NULL DEFAULT 'official',
   indexed_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS chunks (
   id INTEGER PRIMARY KEY,
   document_id INTEGER NOT NULL REFERENCES documents(id),
-  page INTEGER NOT NULL,          -- 1-based PDF page
+  page INTEGER NOT NULL,            -- 1-based section number
+  heading TEXT NOT NULL,
   seq INTEGER NOT NULL,
   text TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS index_status (id INTEGER PRIMARY KEY CHECK (id = 1), status_json TEXT NOT NULL);
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(text, content='chunks', content_rowid='id', tokenize='porter unicode61');
 CREATE INDEX IF NOT EXISTS ix_chunks_doc_page ON chunks(document_id, page);
 """
 
-KNOWN_TITLES = {
-    "carl_rpg_core_rulebook": "Dungeon Crawler Carl RPG — Core Rulebook",
-    "rules_for_survival": "Tutorial Floors — Rules for Survival",
-    "crawlers": "Tutorial Floors — Crawlers & Customization",
-    "gamemasters_toolkit": "Tutorial Floors — Game Master's Campaign Toolkit",
-    "atlas-tutorial_floors": "Tutorial Floors — Atlas",
-    "par_for_the_course": "Par for the Course (adventure)",
-    "par_for_the_course_pre-gens": "Par for the Course — Pre-generated Crawlers",
-}
+BIBLES = [
+    ("system/Carousel_System_Bible_v0.4.1.md", "System Bible v0.4.1"),
+    ("roles/Carousel_Role_Bible_v0_4_2_Implementation.md", "Role Bible v0.4.2"),
+    ("tropes/Carousel_Trope_Bible_v0.1.1.md", "Trope Bible v0.1.1"),
+    ("trope engine/Game_at_Carousel_Trope_Engine_v0.2.1.md", "Trope Engine v0.2.1"),
+    ("storyline/Storyline_Screenplay_Bible_v0_1_1.md", "Storyline Screenplay Bible v0.1.1"),
+    ("storyline/Carousel_Storyline_Production_Standard_v0_2.md", "Storyline Production Standard v0.2"),
+]
 CHUNK_CHARS = 1400
 CHUNK_OVERLAP = 200
+HEADING = re.compile(r"^#{1,2}\s+(.+?)\s*#*\s*$")
 
 
 def open_db(path: Path) -> sqlite3.Connection:
-    conn = connect(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path), timeout=30, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
     return conn
 
 
-def base_name(filename: str) -> str:
-    stem = Path(filename).stem.lower()
-    return re.sub(r"_digital|_(hi|low)-res|_watermarked", "", stem)
+def _remove(path: Path) -> None:
+    for p in (path, Path(f"{path}-wal"), Path(f"{path}-shm"), Path(f"{path}-journal")):
+        p.unlink(missing_ok=True)
 
 
-def title_for(filename: str) -> str:
-    base = base_name(filename)
-    return KNOWN_TITLES.get(base) or base.replace("_", " ").replace("-", " ").title()
-
-
-def pick_variants(pdfs: Iterable[Path]) -> tuple[list[Path], list[Path]]:
-    """Group hi-res/low-res copies; keep the smallest file of each group."""
-    groups: dict[str, list[Path]] = collections.defaultdict(list)
-    for p in pdfs:
-        groups[base_name(p.name)].append(p)
-    keep, skipped = [], []
-    for files in groups.values():
-        files.sort(key=lambda p: p.stat().st_size)
-        keep.append(files[0])
-        skipped.extend(files[1:])
-    return sorted(keep), sorted(skipped)
-
-
-def _clean_pages(pages: list[str]) -> list[str]:
-    """Drop lines that repeat on >30% of pages (watermarks, running headers/footers)."""
-    counts: collections.Counter[str] = collections.Counter()
-    for t in pages:
-        counts.update({ln.strip() for ln in t.splitlines() if ln.strip()})
-    limit = max(3, int(len(pages) * 0.3))
-    noisy = {ln for ln, n in counts.items() if n > limit and len(ln) > 3}
-    out = []
-    for t in pages:
-        lines = [ln for ln in t.splitlines() if ln.strip() and ln.strip() not in noisy]
-        text = "\n".join(lines)
-        text = re.sub(r"-\n(?=[a-z])", "", text)          # re-join hyphenated line breaks
-        text = re.sub(r"[ \t]+", " ", text)
-        out.append(text.strip())
-    return out
+def sections(text: str, title: str) -> list[tuple[str, str]]:
+    """(heading, text) per `#`/`##` heading; text before the first heading is a section headed by the title."""
+    out: list[tuple[str, list[str]]] = [(title, [])]
+    for line in text.splitlines():
+        m = HEADING.match(line)
+        if m:
+            out.append((m.group(1).strip(), [m.group(1).strip()]))
+        else:
+            out[-1][1].append(line)
+    result = [(h, "\n".join(body).strip()) for h, body in out]
+    if not result[0][1]:
+        result = result[1:]   # nothing before the first heading
+    return result
 
 
 def _chunk(text: str) -> list[str]:
@@ -120,54 +108,68 @@ def _chunk(text: str) -> list[str]:
     return [c for c in chunks if c]
 
 
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for block in iter(lambda: f.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
+def _ingest(conn: sqlite3.Connection, path: Path, rel: str, title: str, precedence: int) -> dict:
+    raw = path.read_bytes()
+    parts = sections(raw.decode("utf-8-sig"), title)
+    doc_id = conn.execute("""INSERT INTO documents (path, filename, title, sha256, page_count, precedence, indexed_at)
+                             VALUES (?,?,?,?,?,?,?)""",
+                          (str(path), rel, title, hashlib.sha256(raw).hexdigest(), len(parts), precedence, now_iso())).lastrowid
+    n = 0
+    for page, (heading, text) in enumerate(parts, start=1):
+        for seq, chunk in enumerate(_chunk(text)):
+            cid = conn.execute("INSERT INTO chunks (document_id, page, heading, seq, text) VALUES (?,?,?,?,?)",
+                               (doc_id, page, heading, seq, chunk)).lastrowid
+            conn.execute("INSERT INTO chunks_fts (rowid, text) VALUES (?, ?)", (cid, chunk))
+            n += 1
+    return {"title": title, "file": rel, "sections": len(parts), "chunks": n}
 
 
-def ingest_pdf(conn: sqlite3.Connection, path: Path, source_type: str = "official") -> dict:
-    import pymupdf  # local import: only needed for ingestion
-
-    digest = sha256_file(path)
-    existing = conn.execute("SELECT id, page_count FROM documents WHERE sha256 = ?", (digest,)).fetchone()
-    if existing:
-        return {"file": path.name, "status": "already indexed", "document_id": existing["id"], "pages": existing["page_count"]}
-    doc = pymupdf.open(path)
-    pages = _clean_pages([doc[i].get_text() for i in range(doc.page_count)])
-    conn.execute("BEGIN IMMEDIATE")
+def rebuild(db_path: Path, source_dir: Path) -> dict:
+    """Build a fresh index of every bible at db_path (replacing whatever was there). Returns the index status."""
+    _remove(db_path)
+    conn = open_db(db_path)
     try:
-        doc_id = conn.execute(
-            "INSERT INTO documents (path, filename, title, sha256, page_count, source_type, indexed_at) VALUES (?,?,?,?,?,?,?)",
-            (str(path), path.name, title_for(path.name), digest, doc.page_count, source_type, now_iso()),
-        ).lastrowid
-        n = 0
-        for page_no, text in enumerate(pages, start=1):
-            for seq, chunk in enumerate(_chunk(text)):
-                cid = conn.execute("INSERT INTO chunks (document_id, page, seq, text) VALUES (?,?,?,?)", (doc_id, page_no, seq, chunk)).lastrowid
-                conn.execute("INSERT INTO chunks_fts (rowid, text) VALUES (?, ?)", (cid, chunk))
-                n += 1
-        conn.execute("COMMIT")
-    except BaseException:
-        conn.execute("ROLLBACK")
-        raise
-    empty = sum(1 for t in pages if len(t) < 40)
-    return {"file": path.name, "status": "indexed", "document_id": doc_id, "pages": doc.page_count, "chunks": n,
-            "near_empty_pages": empty}
+        status: dict = {"state": "done", "source_dir": str(source_dir), "indexed": [], "missing": []}
+        with conn:
+            for precedence, (rel, title) in enumerate(BIBLES):
+                p = Path(source_dir) / rel
+                if p.is_file():
+                    status["indexed"].append(_ingest(conn, p, rel, title, precedence))
+                else:
+                    status["missing"].append({"title": title, "file": rel})
+            status["finished_at"] = now_iso()
+            conn.execute("INSERT INTO index_status (id, status_json) VALUES (1, ?)", (json.dumps(status),))
+        return status
+    finally:
+        conn.close()
 
 
-def ingest_directory(conn: sqlite3.Connection, directory: Path) -> dict:
-    pdfs = sorted(directory.glob("*.pdf"))
-    keep, skipped = pick_variants(pdfs)
-    results = [ingest_pdf(conn, p) for p in keep]
-    return {"directory": str(directory), "indexed": results, "skipped_duplicates": [p.name for p in skipped]}
+def rebuild_index(settings) -> dict:
+    """Rebuild data/rulebooks.db from the bibles beside the live one, then swap it in."""
+    from ..carousel.importer import _swap
+    new = settings.rulebook_db.with_suffix(".db.new")
+    try:
+        status = rebuild(new, settings.source_dir)
+        for stale in ("-wal", "-shm"):   # left by an index written in WAL mode before this one
+            Path(f"{settings.rulebook_db}{stale}").unlink(missing_ok=True)
+        _swap(new, settings.rulebook_db)
+        return status
+    finally:
+        new.unlink(missing_ok=True)
+
+
+def index_status(conn: sqlite3.Connection) -> dict:
+    """The last rebuild's status; "stale" for an index built before the bibles (or never finished)."""
+    try:
+        r = conn.execute("SELECT status_json FROM index_status WHERE id = 1").fetchone()
+    except sqlite3.OperationalError:
+        return {"state": "stale"}
+    return json.loads(r[0]) if r else {"state": "stale"}
 
 
 def list_documents(conn: sqlite3.Connection) -> list[dict]:
     return rows(conn, """SELECT d.id, d.filename, d.title, d.page_count, d.source_type, d.indexed_at,
-                                (SELECT COUNT(*) FROM chunks c WHERE c.document_id = d.id) AS chunks FROM documents d ORDER BY d.title""")
+                                (SELECT COUNT(*) FROM chunks c WHERE c.document_id = d.id) AS chunks FROM documents d ORDER BY d.precedence""")
 
 
 STOPWORDS = set("the a an and or of to in on for with by is are be as at it this that from what how does do can when which who".split())
@@ -209,9 +211,10 @@ class Passage:
     text: str
     score: float
     source_type: str
+    heading: str = ""
 
     def ref(self) -> str:
-        return f"{self.document}, p. {self.page}"
+        return f"{self.document} §{self.page} {self.heading}".rstrip()
 
 
 def search(conn: sqlite3.Connection, queries: list[str] | str, limit: int = 6, document_id: int | None = None) -> list[Passage]:
@@ -221,14 +224,16 @@ def search(conn: sqlite3.Connection, queries: list[str] | str, limit: int = 6, d
     for q in queries:
         for rank, chunk_id in enumerate(_run_query(conn, q, limit * 3, document_id)):
             fused[chunk_id] += 1.0 / (60 + rank)
-    best = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)[:limit]
-    out = []
-    for chunk_id, score in best:
-        r = conn.execute("""SELECT c.id, c.page, c.text, d.title, d.filename, d.source_type FROM chunks c
-                            JOIN documents d ON d.id = c.document_id WHERE c.id = ?""", (chunk_id,)).fetchone()
-        out.append(Passage(r["id"], r["title"], r["filename"], r["page"], r["text"], round(score, 5), r["source_type"]))
-    return out
+    if not fused:
+        return []
+    found = {r["id"]: r for r in conn.execute(
+        f"""SELECT c.id, c.page, c.heading, c.text, d.title, d.filename, d.source_type, d.precedence FROM chunks c
+            JOIN documents d ON d.id = c.document_id WHERE c.id IN ({','.join('?' * len(fused))})""", list(fused))}
+    best = sorted(fused.items(), key=lambda kv: (-kv[1], found[kv[0]]["precedence"], kv[0]))[:limit]
+    return [Passage(r["id"], r["title"], r["filename"], r["page"], r["text"], round(score, 5), r["source_type"], r["heading"])
+            for r, score in ((found[c], s) for c, s in best)]
 
 
 def page_text(conn: sqlite3.Connection, document_id: int, page: int) -> str:
+    """A section's text (its chunks joined; the overlap between chunks is not removed)."""
     return "\n".join(r["text"] for r in conn.execute("SELECT text FROM chunks WHERE document_id = ? AND page = ? ORDER BY seq", (document_id, page)))

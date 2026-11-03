@@ -30,11 +30,12 @@ TOOL_SPECS: list[dict] = [
                     "and remember(visibility player) are SHOWN TO THE PLAYER: put hidden material only in gm_note or remember(visibility gm). Ops:\n" + ops_reference(),
      "parameters": {"changes": "[change objects]"}},
     {"name": "search_rules",
-     "description": "Search campaign house rules, established rulings, and the indexed official rulebooks (with page refs). Give 2-4 "
+     "description": "Search campaign house rules, established rulings, and the Carousel bibles (System, Role, Trope, Trope Engine, "
+                    "Screenplay, Production Standard; refs give the section). Give 2-4 "
                     "phrasings: the rule's name, synonyms, and the situation in plain words. Campaign results outrank official ones.",
      "parameters": {"queries": "[str]", "limit": "int? (default 5)"}},
     {"name": "read_rule_page",
-     "description": "Read the full text of an official rulebook page found by search_rules (use the document_id and page).",
+     "description": "Read the full text of a Carousel bible section found by search_rules (use the document_id, and the section number as page).",
      "parameters": {"document_id": "int", "page": "int"}},
     {"name": "lookup_records",
      "description": "Search imported campaign records (ledger YAML/Markdown, including GM-only companion sheets), lore facts, and the "
@@ -164,11 +165,11 @@ class ToolRunner:
         if self.rule_conn is not None:
             for p in rulebooks.search(self.rule_conn, req.queries, limit=req.limit):
                 doc_id = self.rule_conn.execute("SELECT document_id FROM chunks WHERE id = ?", (p.chunk_id,)).fetchone()[0]
-                official.append({"source": "OFFICIAL RULEBOOK", "ref": p.ref(), "document_id": doc_id, "page": p.page, "text": p.text[:1100]})
+                official.append({"source": "CAROUSEL BIBLE", "ref": p.ref(), "document_id": doc_id, "page": p.page, "text": p.text[:1100]})
                 self.effects.rules_cited.append(p.ref())
         return {"campaign": campaign_hits, "rulings": rulings, "official": official,
                 "note": "Campaign rulings/house rules outrank official text where they apply." if campaign_hits or rulings else None,
-                "index_status": "no rulebooks indexed" if self.rule_conn is None else None}
+                "index_status": "the Carousel bibles are not indexed" if self.rule_conn is None else None}
 
     def t_read_rule_page(self, a: dict) -> dict:
         if self.rule_conn is None:
@@ -177,8 +178,8 @@ class ToolRunner:
         if not doc:
             raise ValueError("unknown document_id")
         text = rulebooks.page_text(self.rule_conn, int(a["document_id"]), int(a["page"]))
-        self.effects.rules_cited.append(f"{doc['title']}, p. {a['page']}")
-        return {"ref": f"{doc['title']}, p. {a['page']}", "text": text[:4000]}
+        self.effects.rules_cited.append(f"{doc['title']} §{a['page']}")
+        return {"ref": f"{doc['title']} §{a['page']}", "text": text[:4000]}
 
     def t_lookup_records(self, a: dict) -> dict:
         query = str(a.get("query", ""))

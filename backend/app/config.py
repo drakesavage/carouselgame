@@ -55,9 +55,6 @@ class Settings:
     # Carousel source packages (read-only to the game; see carousel/sources.py).
     source_dir: Path = field(default_factory=lambda: Path(os.environ.get("CAROUSEL_SOURCE_DIR", r"E:\Carousel")))
     port: int = field(default_factory=lambda: int(os.environ.get("CAROUSEL_PORT", "8797")))
-    rulebook_dir: Path | None = field(
-        default_factory=lambda: Path(os.environ["RULEBOOK_DIR"]) if os.environ.get("RULEBOOK_DIR") else None
-    )
     campaign_ledger_dir: Path | None = field(
         default_factory=lambda: Path(os.environ["CAMPAIGN_LEDGER_DIR"]) if os.environ.get("CAMPAIGN_LEDGER_DIR") else None
     )

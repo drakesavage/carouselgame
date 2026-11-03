@@ -45,7 +45,6 @@ class PrefsIn(BaseModel):
     gemini_effort: str | None = None
     gemini_context_profile: str | None = None
     codex_reasoning_effort: str | None = None
-    rulebook_dir: str | None = None
     ledger_dir: str | None = None
     active_campaign_id: int | None = None
 
@@ -116,10 +115,6 @@ class SaveIn(BaseModel):
     label: str = Field(min_length=1, max_length=120)
 
 
-class IndexIn(BaseModel):
-    directory: str | None = None
-
-
 class CampaignIn(BaseModel):
     name: str = Field(max_length=80)
     character: str = Field(max_length=60)
@@ -149,7 +144,6 @@ class AppState:
     def prefs(self) -> dict:
         base = {"gm_provider": self.settings.gm_provider, "codex_model": self.settings.codex_model, "gemini_model": self.settings.gemini_model, "context_profile": "standard",
                 "codex_reasoning_effort": self.settings.codex_reasoning_effort,
-                "rulebook_dir": str(self.settings.rulebook_dir) if self.settings.rulebook_dir else "",
                 "active_campaign_id": None}
         try:
             base.update(json.loads(self.prefs_path.read_text(encoding="utf-8")))
@@ -823,7 +817,8 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
         if rc is None:
             return {"documents": [], "index_status": state.index_status}
         try:
-            return {"documents": rulebooks.list_documents(rc), "index_status": state.index_status}
+            status = state.index_status if state.index_status.get("state") in ("running", "failed") else rulebooks.index_status(rc)
+            return {"documents": rulebooks.list_documents(rc), "index_status": status}
         finally:
             rc.close()
 
@@ -876,16 +871,11 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
 
 
     @app.post("/api/rules/index")
-    def rule_index(body: IndexIn):
-        directory = body.directory or state.prefs().get("rulebook_dir")
-        if not directory or not Path(directory).is_dir():
-            raise HTTPException(422, "rulebook directory not found; set it in Settings")
+    def rule_index():
+        """Re-index the Carousel bibles from the source dir (the importer also does this after every import)."""
         if state.index_status.get("state") == "running":
             raise HTTPException(409, "indexing already running")
-        p = state.prefs()
-        p["rulebook_dir"] = directory
-        state.save_prefs(p)
-        _start_index(state, Path(directory))
+        _start_index(state)
         return state.index_status
 
     # ------------------------------------------------------------------ import
@@ -991,20 +981,27 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
     return app
 
 
-def _start_index(state: AppState, directory: Path) -> None:
-    state.index_status = {"state": "running", "directory": str(directory), "started_at": now_iso()}
+def _start_index(state: AppState) -> None:
+    state.index_status = {"state": "running", "source_dir": str(state.settings.source_dir), "started_at": now_iso()}
 
     def work():
         try:
-            rc = rulebooks.open_db(state.settings.rulebook_db)
-            result = rulebooks.ingest_directory(rc, directory)
-            rc.close()
-            state.index_status = {"state": "done", "finished_at": now_iso(), **result}
+            state.index_status = rulebooks.rebuild_index(state.settings)
         except Exception as exc:  # surfaced in the UI
             traceback.print_exc()
             state.index_status = {"state": "failed", "error": str(exc)}
 
     threading.Thread(target=work, daemon=True, name="rulebook-index").start()
+
+
+def _index_stale(settings: Settings) -> bool:
+    if not settings.rulebook_db.exists():
+        return True
+    rc = rulebooks.open_db(settings.rulebook_db)
+    try:
+        return rulebooks.index_status(rc).get("state") != "done"
+    finally:
+        rc.close()
 
 
 def _ensure_residents(c) -> None:
@@ -1025,10 +1022,9 @@ def _quietly(fn, *args) -> None:
 
 
 def _bootstrap(state: AppState, c) -> None:
-    """First run chores: index rulebooks if configured, back up, warm thumbnails."""
-    rb_dir = state.prefs().get("rulebook_dir")
-    if rb_dir and Path(rb_dir).is_dir() and not state.settings.rulebook_db.exists():
-        _start_index(state, Path(rb_dir))
+    """First run chores: index the Carousel bibles if there is no current index, back up, warm thumbnails."""
+    if state.settings.source_dir.is_dir() and _index_stale(state.settings):
+        _start_index(state)
     # a database-only backup when the newest is over a day old (support.py), off the request path
     from .support import auto_backup
     threading.Thread(target=lambda: _quietly(auto_backup, state.settings), daemon=True, name="auto-backup").start()

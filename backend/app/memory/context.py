@@ -17,7 +17,7 @@ Sections, in order:
   5 OBJECTIVES      quests, projects, crafting, commitments, reservations (details, due times, owners)
   6 MEMORY          closed-scene summaries, transcript summaries, relevant canonical facts, the last N messages
   7 HOUSE RULES     always-apply constitution sections, house rules matching this action, recent rulings
-  8 RULEBOOK        auto-retrieved rulebook passages with page refs (to verify before citing)
+  8 RULEBOOK        auto-retrieved Carousel bible passages with section refs (to verify before citing)
   9 GM-ONLY         the active story's sealed truth (never cut), relevant unrevealed secrets
 The player's exact input is sent separately as its own step.
 
@@ -689,7 +689,7 @@ def build_context(conn: sqlite3.Connection, cid: int, player_input: str, recent_
         from ..reference import rulebooks
         ps = rulebooks.search(rule_conn, player_input, limit=B["official_passages"])
         if ps:
-            sections["RULEBOOK"] = ("Auto-retrieved rulebook passages (keyword match; read_rule_page before citing):\n"
+            sections["RULEBOOK"] = ("Auto-retrieved Carousel bible passages (keyword match; read_rule_page before citing):\n"
                                     + cut("RULEBOOK", "\n".join(f"- {p.ref()}: {p.text[:600]}" for p in ps), B["official"]))
 
     # 8 GM-ONLY

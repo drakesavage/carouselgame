@@ -5,6 +5,7 @@
 3. Re-hash the sources: if anything changed while reading (e.g. the map studio wrote a file), abort.
 4. Every Carousel ID saved campaigns depend on must resolve in the new DB (aliases count), else refuse.
 5. Atomically replace reference.db. Any failure leaves the old reference.db untouched and removes the .new file.
+6. Rebuild data/rulebooks.db from the Carousel bibles (reference/rulebooks.py), the same build-then-swap way.
 Each run writes data/import_reports/<timestamp>.json. Run it with `python -m app.carousel.importer` (import-data.cmd).
 """
 from __future__ import annotations
@@ -44,6 +45,7 @@ class ImportResult:
     missing: dict[str, list[str]] = field(default_factory=dict)
     error: str | None = None
     report_path: Path | None = None
+    rules: dict = field(default_factory=dict)
 
 
 def run_import(settings: Settings) -> ImportResult:
@@ -91,12 +93,24 @@ def run_import(settings: Settings) -> ImportResult:
         else:
             _swap(new, settings.reference_db)
             result.ok = True
+            result.rules = _rebuild_rules(settings)
     except Exception as exc:  # noqa: BLE001 - any failure is reported and leaves the old reference.db in place
         result.error = f"{type(exc).__name__}: {exc}"
     finally:
         new.unlink(missing_ok=True)
     result.report_path = _write_report(settings, started, result, sources)
     return result
+
+
+def _rebuild_rules(settings: Settings) -> dict:
+    """The rule index follows the bibles: rebuilt after every successful import. A failure here is reported but never
+    undoes the reference import."""
+    from ..reference.rulebooks import rebuild_index
+    try:
+        s = rebuild_index(settings)
+        return {"indexed": [d["title"] for d in s["indexed"]], "missing": [d["title"] for d in s["missing"]]}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"{type(exc).__name__}: {exc}"}
 
 
 SWAP_TRIES, SWAP_WAIT_S = 10, 0.3
@@ -120,7 +134,8 @@ def _write_report(settings: Settings, started: dt.datetime, result: ImportResult
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{started.strftime('%Y%m%dT%H%M%S%fZ')}.json"
     path.write_text(json.dumps({"ok": result.ok, "started": started.isoformat(timespec="seconds"), "source_dir": str(settings.source_dir),
-                                "counts": result.counts, "missing": result.missing, "error": result.error, "sources": sources},
+                                "counts": result.counts, "missing": result.missing, "error": result.error, "rules": result.rules,
+                                "sources": sources},
                                indent=2, ensure_ascii=False), encoding="utf-8")
     return path
 
@@ -133,6 +148,9 @@ def main() -> int:
         print(f"[Carousel] reference data imported from {settings.source_dir}")
         for k, v in r.counts.items():
             print(f"  {k:15} {v}")
+        rules = r.rules
+        print(f"  rule index: {rules['error']}" if "error" in rules else
+              f"  rule index: {len(rules['indexed'])} bible(s)" + (f"; missing: {', '.join(rules['missing'])}" if rules["missing"] else ""))
     else:
         print(f"[Carousel] import refused; the previous reference data is unchanged.\n  {r.error}")
     print(f"  report: {r.report_path}")

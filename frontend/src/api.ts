@@ -150,7 +150,7 @@ export type EventRow = { id: number; type: string; summary: string; game_time_mi
 export type HouseRule = { id: number; section: string | null; title: string; text: string; label: string | null; status: string; mechanical_status: string; source: string | null };
 export type Passage = { chunk_id: number; document_id: number; document: string; page: number; ref: string; text: string; score: number };
 export type SavePoint = { id: number; label: string; kind: string; turn_id: number | null; created_at: string };
-export type Prefs = { gm_provider: string; codex_model: string; gemini_model: string; gemini_key_present?: boolean; context_profile: string; gemini_effort?: string; gemini_context_profile?: string; codex_reasoning_effort: string; rulebook_dir: string; ledger_dir: string;
+export type Prefs = { gm_provider: string; codex_model: string; gemini_model: string; gemini_key_present?: boolean; context_profile: string; gemini_effort?: string; gemini_context_profile?: string; codex_reasoning_effort: string; ledger_dir: string;
   active_campaign_id: number | null; codex_cli_path: string | null; providers: string[]; efforts: string[]; data_dir: string };
 
 export type LedgerChange = { id: string; file: string; summary: string; group: string; status: "clean" | "conflict"; visibility: string; kind: string;
@@ -249,7 +249,7 @@ export const api = {
   ruleSearch: (q: string, cid?: number) => req<{ campaign: (HouseRule & { score: number })[]; official: Passage[] }>(`api/rules/search?q=${encodeURIComponent(q)}${cid ? `&cid=${cid}` : ""}`),
   rulePage: (doc: number, page: number) => req<{ document: string; page: number; page_count: number; text: string }>(`api/rules/page?document_id=${doc}&page=${page}`),
   ruleDocs: () => req<{ documents: { id: number; title: string; filename: string; page_count: number; chunks: number }[]; index_status: Record<string, any> }>("api/rules/documents"),
-  indexRules: (directory?: string) => post<Record<string, any>>("api/rules/index", { directory }),
+  indexRules: () => post<Record<string, any>>("api/rules/index", {}),
   settings: () => req<Prefs>("api/settings"),
   saveSettings: (p: Partial<Prefs>) => req<Prefs>("api/settings", { method: "PUT", body: JSON.stringify(p) }),
   access: () => req<{ passcode: string; lan_addresses: string[]; path: string; port: number; fixed_by_env: boolean }>("api/access"),

@@ -136,7 +136,7 @@ def test_swap_retries_a_briefly_locked_reference_db(settings_mini, monkeypatch):
 
     monkeypatch.setattr(importer.os, "replace", flaky)
     monkeypatch.setattr(importer, "SWAP_WAIT_S", 0)
-    assert run_import(settings_mini).ok and len(calls) == 3
+    assert run_import(settings_mini).ok and calls[:3] == [settings_mini.reference_db] * 3   # then the rule index's own swap
 
 
 def test_swap_that_stays_locked_is_refused_with_a_report(settings_mini, monkeypatch):
