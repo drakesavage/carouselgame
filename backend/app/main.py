@@ -684,9 +684,9 @@ def create_app(settings: Settings | None = None, *, bootstrap: bool = True, loca
             raise HTTPException(404)
         return picture(path, w, "public, max-age=86400")  # uploaded and generated portraits get new file names
 
-    for route, fn in {"inventory": views.inventory, "quests": views.quests, "npcs": views.npcs, "timeline": views.timeline,
+    for route, fn in {"npcs": views.npcs, "timeline": views.timeline,
                       "house-rules": views.house_rules, "rulings": ruling_review.rulings, "lore": views.lore,
-                      "journal": journal.journal, "lore-notebook": journal.lore_notebook, "chronology": journal.chronology}.items():
+                      "lore-notebook": journal.lore_notebook, "chronology": journal.chronology}.items():
         def make(fn=fn):
             def handler(cid: int, c=Depends(db)):
                 campaign_or_404(c, cid)

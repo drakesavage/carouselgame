@@ -29,31 +29,23 @@ export type Person = CharacterCard & {
   commitments: { id: number; kind: string; title: string }[];
   last_interaction: { text: string; game_time_minutes: number | null; source: "memory" | "event" | "profile" } | null;
 };
-export type Skill = { id: number; kind: string; name: string; rank: number | null; mana_cost: number | null; passive: number; marked: number; description?: string | null; properties: Record<string, unknown> };
 export type Item = { id: number; owner_character_id: number | null; owner_name?: string | null; name: string; quantity: number | null; equipped: number; deployed?: number; slot?: string | null; rarity?: string | null; description?: string | null; properties: Record<string, unknown> };
 export type CharacterSheet = CharacterCard & {
-  bio?: string | null; sheet: Record<string, unknown>; skills: Skill[]; items: Item[];
-  achievements: { title: string; description?: string; game_time_minutes?: number }[];
+  bio?: string | null; sheet: Record<string, unknown>; items: Item[];
   npc_profile: { personality?: string; voice?: string; known_motivation?: string; attitude?: number | null } | null;
   relationships: { kind: string; description?: string; a_name: string; b_name: string }[];
   limited_uses: { ability: string; per: string; uses: number; uses_allowed: number; cooldown_minutes: number | null }[];
 };
-export type Quest = { id: number; kind: string; title: string; description?: string | null; status: string; priority: number; progress?: string | null; giver?: string | null;
-  details?: Record<string, unknown>; due_at_minutes?: number | null; immediate?: boolean };  // immediate: part of the linked immediate objective
 export type Scene = { id: number; title: string; location: string | null; group_key: string | null; situation: string | null; conditions: string | null;
   threats: string | null; participants: string[]; started_game_minutes: number | null };
 export type Group = { key: string; label: string; location: string | null; activity: string | null; members: CharacterCard[] };
-export type DayInfo = { day: number; minutes_into_day: number; minutes_to_reset: number; day_length: number };
-export type FloorClock = { elapsed_minutes: number; deadline_minutes: number | null; remaining_minutes: number | null; remaining_display: string | null;
-  pending_minutes?: number | null; pending_display?: string | null };
 export type Clock = { key: string; label: string; kind: string; current: number; maximum: number | null; unit?: string | null };
 export type Campaign = {
   id: number; name: string; is_demo: number; data_source: string; current_location: string | null; safe_room: number;
-  game_time_minutes: number; floor_deadline_minutes: number | null; active_character_id: number | null; active_objective: string | null;
-  floor_clock?: FloorClock; party: CharacterCard[]; quests: Quest[]; clocks: Clock[];
-  encounter: Encounter | null;
+  game_time_minutes: number; active_character_id: number | null; active_objective: string | null;
+  party: CharacterCard[]; clocks: Clock[];
   last_save: { id: number; label: string; kind: string; created_at: string } | null;
-  scene: Scene | null; groups: Group[]; roster: CharacterCard[]; day?: DayInfo;
+  scene: Scene | null; groups: Group[]; roster: CharacterCard[];
   recent_events: { id: number; type: string; summary: string; game_time_minutes: number | null }[];
   art?: ArtMap;
   /** The new-game flow (null: this campaign has no opening). `belief` is why the group thinks it came. */
@@ -75,19 +67,12 @@ export type ArtJob = { id: number; campaign_id: number; kind: ArtKind; subject_i
   width: number; height: number; seed: number; status: "suggested" | "queued" | "running" | "done" | "failed" | "dismissed";
   source: "player" | "gm"; reason: string | null; note: string | null; error: string | null; is_current: number; url: string | null;
   created_at: string; finished_at: string | null; checkpoint: string | null; engine?: string };
-export type Combatant = { id: string; name: string; side: "party" | "foe"; defeated?: boolean; hb_percent?: number; actions_left?: number;
-  evading?: boolean; hp_current?: number | null; hp_max?: number | null; dead?: boolean; dying?: string | null };
-export type Encounter = { id: number; name: string; round: number; phase?: string; summary?: string | null; combatants: Combatant[] };
 export type CampaignListItem = { id: number; name: string; is_demo: number; data_source: string; current_location: string | null; archived: number };
-export type Achievements = { total: number; unopened_boxes: number; characters: {
-  id: number; name: string; is_player: boolean; in_party: boolean; status: string; portrait_path: string | null; portrait_crop: CharacterCard["portrait_crop"];
-  achievements: { id: number; title: string; description: string | null; reward: string | null; game_time_minutes: number | null; box: string | null; box_opened: boolean | null }[];
-  boxes: { id: number; name: string; tier: string | null; from: string | null }[] }[] };
 export type ManagedCampaign = CampaignListItem & { created_at: string; updated_at: string; turns: number; last_played: string | null; characters: number; character: string | null };
 export type RollCard = { roll_id: number; expression: string; dice: { sides: number; value: number; kept: boolean }[]; total: number; target: number | null;
   outcome: string | null; degree: string | null; reason: string | null; detail: Record<string, any> };
 export type Message = { id: number; turn_id: number | null; role: "player" | "gm" | "system"; content: string; created_at: string;
-  meta: { rolls?: RollCard[]; changes?: string[]; rules_cited?: string[]; provider?: string; floor_clock?: FloorClock; style?: string;
+  meta: { rolls?: RollCard[]; changes?: string[]; rules_cited?: string[]; provider?: string; style?: string;
     cards?: { type: string; summary: string }[] } };
 export type LoreFact = { id: number; subject: string; fact: string; certainty: string; source: string | null; category: string; topic: string | null; character_id: number | null };
 export type Chronology = { day_length: number; days: { day: number | null; events: (EventRow & { bookkeeping: boolean })[] }[];

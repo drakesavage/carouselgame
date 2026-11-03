@@ -30,12 +30,6 @@ def run(conn: sqlite3.Connection, cid: int) -> list[dict]:
     ctx = build_context(conn, cid, "status check")["text"]
     out: list[dict] = []
 
-    # Gold: the shared stash row, and the GM briefing's stash listing when it shows Gold
-    gold = one(conn, "SELECT quantity FROM items WHERE campaign_id = ? AND owner_character_id IS NULL AND lower(name) = 'gold'", (cid,))
-    m = re.search(r"#\d+ Gold ×(\d+)", ctx)
-    vals = {"inventory": gold and gold["quantity"], **({"gm_context": int(m.group(1))} if m else {})}
-    out.append(_check("Gold", vals, len(set(vals.values())) == 1))
-
     # Player clocks
     for c in hud["clocks"]:
         m = re.search(rf"Clock {re.escape(c['key'])} \([^)]*\): (\d+)/", ctx)

@@ -254,12 +254,6 @@ def _apply_remember(ctx: Ctx, op: Remember) -> dict:
     return {"summary": f"Remembered about {who}", "visibility": op.visibility}
 
 
-# ------------------------------------------------------------------ limited uses
-
-
-# ------------------------------------------------------------------ rest (BOOK 11.4) and mending
-
-
 def register(ops: dict) -> None:
     ops.update({
         "group": (GroupUpsert, _apply_group),

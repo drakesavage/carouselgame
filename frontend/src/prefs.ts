@@ -38,10 +38,9 @@ export function applyMotion(p: Prefs = getPrefs()): void {
 }
 
 // ------------------------------------------------------------------ sound
-type Cue = "dice" | "achievement" | "warning" | "notice";
+type Cue = "dice" | "warning" | "notice";
 const CUES: Record<Cue, { notes: number[]; step: number; type: OscillatorType; len: number }> = {
   dice: { notes: [520, 390, 610], step: 0.045, type: "triangle", len: 0.07 },
-  achievement: { notes: [523, 659, 784, 1047], step: 0.09, type: "square", len: 0.16 },
   warning: { notes: [220, 196], step: 0.16, type: "sawtooth", len: 0.22 },
   notice: { notes: [880, 1175], step: 0.07, type: "sine", len: 0.12 },
 };

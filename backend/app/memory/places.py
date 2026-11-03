@@ -31,11 +31,10 @@ def key(name: str) -> str:
 
 def known_world(conn: sqlite3.Connection, cid: int) -> dict:
     camp = one(conn, "SELECT current_location, safe_room FROM campaigns WHERE id = ?", (cid,))
-    floor = None  # shortcut: no floors in Carousel; the maps (Phase 3) replace this view
     nodes: dict[str, dict] = {}
     roots: list[str] = []
 
-    def add(location: str | None, *, visited: bool, floor_: int | None = None, description: str | None = None, source: str = "") -> str | None:
+    def add(location: str | None, *, visited: bool, description: str | None = None, source: str = "") -> str | None:
         c = chain(location)
         parent = None
         for depth, name in enumerate(c):
@@ -44,7 +43,7 @@ def known_world(conn: sqlite3.Connection, cid: int) -> dict:
             n = nodes.get(k)
             if n is None:
                 n = nodes[k] = {"key": k, "name": name, "parent": None, "children": [], "visited": False, "saferoom": False, "current": False,
-                                "floor": floor_ if floor_ is not None else floor, "description": None, "groups": [], "sources": []}
+                                "description": None, "groups": [], "sources": []}
                 if parent is None:
                     roots.append(k)
             if parent is not None and n["parent"] is None and k != parent and k not in _ancestors(nodes, parent):
@@ -59,8 +58,6 @@ def known_world(conn: sqlite3.Connection, cid: int) -> dict:
                     n["description"] = description
                 if source and source not in n["sources"]:
                     n["sources"].append(source)
-                if floor_ is not None:
-                    n["floor"] = floor_
             elif visited:
                 n["visited"] = True  # being inside a place means having been in its district
             parent = k
@@ -77,7 +74,7 @@ def known_world(conn: sqlite3.Connection, cid: int) -> dict:
         to = p.get("to") or p.get("location")
         frm = p.get("from")
         a = add(frm, visited=True, source="move") if frm else None
-        b = add(to, visited=True, floor_=p.get("floor"), source="move") if to else None
+        b = add(to, visited=True, source="move") if to else None
         if a and b and a != b:
             moves.append((a, b, e["game_time_minutes"]))
     for g in rows(conn, "SELECT key, label, location, activity FROM party_groups WHERE campaign_id = ? AND status = 'active'", (cid,)):
@@ -105,7 +102,7 @@ def known_world(conn: sqlite3.Connection, cid: int) -> dict:
         routes.setdefault(pair, {"a": nodes[pair[0]]["name"], "b": nodes[pair[1]]["name"], "times": 0, "last": None})
         routes[pair]["times"] += 1
         routes[pair]["last"] = t
-    return {"floor": floor, "roots": roots, "nodes": nodes, "routes": list(routes.values()),
+    return {"roots": roots, "nodes": nodes, "routes": list(routes.values()),
             "unplaced_groups": [{"key": g["key"], "label": g["label"]} for g in away]}
 
 

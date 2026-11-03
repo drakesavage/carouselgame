@@ -58,7 +58,7 @@ def test_generate_fills_the_sheet_and_keeps_the_private_layer_for_the_gm(client,
     assert d["private_sheet"] == "generated" and d["story"]["identity"]["pronouns"] == "she/her"
     for url in (f"/api/campaigns/{campaign_id}/characters/{jid}/dossier", f"/api/campaigns/{campaign_id}/npcs", f"/api/campaigns/{campaign_id}/characters",
                 f"/api/campaigns/{campaign_id}", f"/api/campaigns/{campaign_id}/messages", f"/api/campaigns/{campaign_id}/search?q=Jamie",
-                f"/api/campaigns/{campaign_id}/journal", f"/api/campaigns/{campaign_id}/chronology"):
+                f"/api/campaigns/{campaign_id}/lore-notebook", f"/api/campaigns/{campaign_id}/chronology"):
         assert SECRET not in client.get(url).text, url                                           # never reaches the player
     generate(conn, campaign_id, jid, None, provider=fake)                                             # regenerating rewrites the same sheet
     assert one(conn, "SELECT COUNT(*) n FROM gm_secrets WHERE kind = 'companion_sheet' AND subject = ?", (c["slug"],))["n"] == 1

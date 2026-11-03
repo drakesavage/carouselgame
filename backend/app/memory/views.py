@@ -89,9 +89,9 @@ def campaign_summary(conn: sqlite3.Connection, cid: int) -> dict | None:
     camp["groups"] = groups
     camp["roster"] = list(cards.values())
     camp["recent_events"] = rows(conn, """SELECT id, type, summary, game_time_minutes FROM events WHERE campaign_id = ? AND visibility = 'player' AND rolled_back = 0
-                                          AND type IN ('achievement','level_awarded','skill_changed','quest_completed','quest_added','item_added','character_down',
-                                                       'character_death','mob_defeated','advancement_checkpoint','encounter_start','encounter_end','group_moved',
-                                                       'scene_started','location_changed','floor_collapse','dungeon_day')
+                                          AND type IN ('omen_sighted','story_choice','story_concluded','travel','location_changed','group_moved',
+                                                       'scene_started','npc_met','character_died','ticket_granted','poster_created',
+                                                       'quest_added','quest_completed','item_added')
                                           ORDER BY id DESC LIMIT 6""", (cid,))
     quests = rows(conn, """SELECT id, kind, title, description, status, priority, progress, details_json, due_at_minutes FROM quests
                            WHERE campaign_id = ? AND visibility = 'player' AND status IN ('active','paused') ORDER BY priority, id""", (cid,))
@@ -126,16 +126,6 @@ def character_sheet(conn: sqlite3.Connection, cid: int, char_id: int) -> dict | 
                                        JOIN characters a ON a.id = r.a_character_id JOIN characters b ON b.id = r.b_character_id
                                        WHERE r.visibility = 'player' AND (r.a_character_id = ? OR r.b_character_id = ?)""", (char_id, char_id))
     return c
-
-
-def inventory(conn: sqlite3.Connection, cid: int) -> dict:
-    """Items with category, honest quantity and stage, plus Gold, reservations, projects and materials (memory/inventory.py)."""
-    from .inventory import build
-    return build(conn, cid)
-
-
-def quests(conn: sqlite3.Connection, cid: int) -> list[dict]:
-    return rows(conn, "SELECT id, kind, title, description, status, priority, progress, giver, updated_at FROM quests WHERE campaign_id = ? AND visibility = 'player' ORDER BY status = 'active' DESC, priority, id", (cid,))
 
 
 # record-keeping, not something that happened between the party and a person

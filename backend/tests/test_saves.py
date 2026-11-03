@@ -8,6 +8,15 @@ def at_camp(conn, cid):
     with transaction(conn):
         conn.execute("UPDATE campaigns SET node_id = 'CAR-047' WHERE id = ?", (cid,))
 
+def carried(settings, cid) -> dict[str, int]:
+    """Item name -> quantity for every character-held item (the player inventory route is gone)."""
+    c = connect(settings.campaign_db)
+    try:
+        return {r["name"]: r["quantity"] for r in c.execute(
+            "SELECT name, quantity FROM items WHERE campaign_id = ? AND owner_character_id IS NOT NULL", (cid,))}
+    finally:
+        c.close()
+
 
 def test_save_change_restore_and_undo_restore(client, settings, conn, campaign_id):
     at_camp(conn, campaign_id)
@@ -16,13 +25,11 @@ def test_save_change_restore_and_undo_restore(client, settings, conn, campaign_i
     client.post(f"/api/campaigns/{campaign_id}/turns", json={"text": "I rest", "idempotency_key": uuid.uuid4().hex})
     client.post(f"/api/campaigns/{campaign_id}/turns", json={"text": "I loot the rock", "idempotency_key": uuid.uuid4().hex})
     assert client.get(f"/api/campaigns/{campaign_id}").json()["game_time_minutes"] == t0 + 60
-    inv = client.get(f"/api/campaigns/{campaign_id}/inventory").json()
-    assert any(i["name"] == "Suspicious Gray Rock" for i in inv["by_character"])
+    assert "Suspicious Gray Rock" in carried(settings, campaign_id)
 
     out = client.post(f"/api/campaigns/{campaign_id}/saves/{sp}/restore").json()
     assert client.get(f"/api/campaigns/{campaign_id}").json()["game_time_minutes"] == t0
-    inv = client.get(f"/api/campaigns/{campaign_id}/inventory").json()
-    assert not any(i["name"] == "Suspicious Gray Rock" for i in inv["by_character"])
+    assert "Suspicious Gray Rock" not in carried(settings, campaign_id)
     # transcript and timeline hide rolled-back rows, but the audit rows still exist
     assert not [m for m in client.get(f"/api/campaigns/{campaign_id}/messages").json() if m["role"] == "player"]
     assert not client.get(f"/api/campaigns/{campaign_id}/timeline").json()
@@ -33,8 +40,7 @@ def test_save_change_restore_and_undo_restore(client, settings, conn, campaign_i
     # the automatic pre-restore save lets the restore itself be undone
     client.post(f"/api/campaigns/{campaign_id}/saves/{out['backup_save_point_id']}/restore")
     assert client.get(f"/api/campaigns/{campaign_id}").json()["game_time_minutes"] == t0 + 60
-    inv = client.get(f"/api/campaigns/{campaign_id}/inventory").json()
-    assert any(i["name"] == "Suspicious Gray Rock" for i in inv["by_character"])
+    assert "Suspicious Gray Rock" in carried(settings, campaign_id)
 
 
 def test_autosaves_are_pruned(client, settings, conn, campaign_id):

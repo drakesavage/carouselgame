@@ -94,13 +94,13 @@ def _plant_fate(conn):
 
 def _player_urls(client, cid):
     urls = ["/api/health", "/api/settings", "/api/campaigns", f"/api/campaigns/{cid}", f"/api/campaigns/{cid}/characters",
-            f"/api/campaigns/{cid}/inventory", f"/api/campaigns/{cid}/quests", f"/api/campaigns/{cid}/npcs", f"/api/campaigns/{cid}/timeline",
+            f"/api/campaigns/{cid}/npcs", f"/api/campaigns/{cid}/timeline",
             f"/api/campaigns/{cid}/messages", f"/api/campaigns/{cid}/house-rules", f"/api/campaigns/{cid}/rulings",
             f"/api/campaigns/{cid}/lore", f"/api/campaigns/{cid}/records", f"/api/campaigns/{cid}/saves",
             f"/api/campaigns/{cid}/records?q=secret debt syndicate hidden plans", f"/api/rules/search?q=secret&cid={cid}",
-            f"/api/campaigns/{cid}/journal", f"/api/campaigns/{cid}/lore-notebook", f"/api/campaigns/{cid}/chronology",
+            f"/api/campaigns/{cid}/lore-notebook", f"/api/campaigns/{cid}/chronology",
             f"/api/campaigns/{cid}/search?q=gmsecret alpha bravo charlie delta echo foxtrot secret plot",
-            f"/api/campaigns/{cid}/inventory", f"/api/campaigns/{cid}/map", "/api/reference/status",
+            f"/api/campaigns/{cid}/map", "/api/reference/status",
             f"/api/campaigns/{cid}/story", f"/api/campaigns/{cid}/stories", f"/api/campaigns/{cid}/venue",
             f"/api/campaigns/{cid}/fate", f"/api/campaigns/{cid}/posters", f"/api/campaigns/{cid}/around", f"/api/campaigns/{cid}/residents"]
     for ch in client.get(f"/api/campaigns/{cid}/characters").json():

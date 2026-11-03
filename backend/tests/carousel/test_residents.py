@@ -58,7 +58,7 @@ def test_ensure_is_idempotent_and_adds_new_templates(conn, cid):
 def test_unmet_residents_stay_out_of_player_views(client, conn):
     cid = create(conn, name="Unseen", character="Mara")
     for url in (f"/api/campaigns/{cid}", f"/api/campaigns/{cid}/characters", f"/api/campaigns/{cid}/npcs", "/api/campaigns",
-                f"/api/campaigns/{cid}/journal", f"/api/campaigns/{cid}/search?q=Valerie Adeline"):
+                f"/api/campaigns/{cid}/chronology", f"/api/campaigns/{cid}/search?q=Valerie Adeline"):
         text = client.get(url).text
         for s in ("Valerie", "Adeline", "MINI-INTRO-LINE", "Wiry, in a patched"):
             assert s not in text, f"{s} leaked via {url}"

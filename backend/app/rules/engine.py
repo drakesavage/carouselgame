@@ -91,8 +91,6 @@ class AdvanceTime(BaseModel):
     op: Literal["advance_time"]
     minutes: int = Field(ge=1, le=60 * 24 * 10)
     reason: str
-    # CAMPAIGN mending: each full hour outside combat/stress restores 1 Health Bar slot + 5 Mana for these characters
-    mending: list[str] | Literal["all"] | None = None
 
 
 class SetLocation(BaseModel):
@@ -141,7 +139,7 @@ class NpcUpsert(BaseModel):
     op: Literal["npc"]
     name: str = Field(min_length=1, max_length=80)
     role: str | None = Field(default=None, max_length=120)          # what they are to the party, e.g. "Game Guide"
-    category: Literal["allied_npcs", "neutral_npcs", "hostile_npcs", "contacts", "dungeon_staff"] | None = None
+    category: Literal["allied_npcs", "neutral_npcs", "hostile_npcs", "contacts"] | None = None
     gender: str | None = Field(default=None, max_length=40)          # decided when they are introduced, as anyone looking at them would see
     pronouns: str | None = Field(default=None, max_length=30)        # used in narration, e.g. "she/her"
     apparent_age: str | None = Field(default=None, max_length=40)    # e.g. "mid-40s"

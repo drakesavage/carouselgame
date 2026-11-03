@@ -16,8 +16,8 @@ def test_turn_persists_transcript_and_state(client, settings, conn, campaign_id)
     body = r.json()
     assert r.status_code == 200 and body["status"] == "completed", body
     assert "rolls" not in body["result"]
-    inv = client.get(f"/api/campaigns/{campaign_id}/inventory").json()
-    assert next(i for i in inv["by_character"] if i["name"] == "Healing Potion")["quantity"] == 1
+    from tests.test_saves import carried
+    assert carried(settings, campaign_id)["Healing Potion"] == 1
     msgs = client.get(f"/api/campaigns/{campaign_id}/messages").json()
     assert [m["role"] for m in msgs[-2:]] == ["player", "gm"]
     c = connect(settings.campaign_db)
@@ -66,8 +66,8 @@ def test_invalid_state_change_is_reported_not_applied(client, settings, campaign
     mara = next(p for p in client.get(f"/api/campaigns/{campaign_id}").json()["party"] if p["slug"] == "mara")
     assert not mara["statuses"]  # the valid change in the same batch was not applied either
     assert body["status"] == "completed" and body["result"]["narration"] == "You realise you only have two potions."
-    inv = client.get(f"/api/campaigns/{campaign_id}/inventory").json()
-    assert next(i for i in inv["by_character"] if i["name"] == "Healing Potion")["quantity"] == 2
+    from tests.test_saves import carried
+    assert carried(settings, campaign_id)["Healing Potion"] == 2
 
 
 def test_busy_while_another_turn_runs(client, campaign_id):
